@@ -460,10 +460,7 @@ function submit() {
   box-sizing: border-box;
   overflow-y: auto;
   max-height: calc(100vh - 90px);
-  background:
-    radial-gradient(circle at 12% 10%, rgba(244, 81, 30, 0.1), transparent 44%),
-    radial-gradient(circle at 88% 20%, rgba(249, 115, 22, 0.09), transparent 42%),
-    linear-gradient(180deg, #f6f7fb 0%, #f8fafc 100%);
+  background: #f8fafc;
 }
 
 .template-toolbar {
@@ -484,16 +481,12 @@ function submit() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-radius: 18px;
-  padding: 24px;
-  background: linear-gradient(
-    130deg,
-    color-mix(in srgb, var(--primary-color) 65%, #6b2a13 35%) 0%,
-    color-mix(in srgb, var(--primary-color) 58%, #374151 42%) 52%,
-    color-mix(in srgb, var(--primary-color-hover) 52%, #ffffff 48%) 100%
-  );
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.16);
+  border-radius: 14px;
+  padding: 18px 20px;
+  background: #fff;
+  color: #111827;
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -503,7 +496,8 @@ function submit() {
   margin-bottom: 10px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: #f3f4f6;
+  color: #6b7280;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;

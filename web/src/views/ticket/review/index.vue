@@ -315,16 +315,16 @@ const columns = [
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 24px 26px;
-  border-radius: 20px;
-  color: #fff;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+  padding: 18px 20px;
+  border-radius: 14px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
 }
 
 .review-hero {
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.18), transparent 30%),
-    linear-gradient(135deg, #7c2d12 0%, #c2410c 48%, #fb923c 100%);
+  background: #fff;
 }
 
 .hero-kicker {
@@ -351,7 +351,8 @@ const columns = [
 .hero-badge {
   padding: 10px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
+  background: #f3f4f6;
+  color: #6b7280;
   font-size: 13px;
   font-weight: 600;
 }

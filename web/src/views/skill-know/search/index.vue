@@ -98,7 +98,7 @@ async function runSql() {
 </template>
 
 <style scoped>
-.hero-card { border-radius: 20px; background: linear-gradient(135deg, rgba(24,160,88,.12), rgba(32,128,240,.10)); }
+.hero-card { border-radius: 20px; background: #fff; border: 1px solid #e5e7eb; }
 .hero-card h2 { margin-top: 0; }
 .result-card { border-radius: 14px; }
 .muted { color: #64748b; }

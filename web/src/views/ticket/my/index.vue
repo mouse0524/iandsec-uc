@@ -457,13 +457,12 @@ const columns = [
   justify-content: space-between;
   align-items: center;
   overflow: hidden;
-  padding: 24px 26px;
-  border-radius: 20px;
-  color: #fff;
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.16), transparent 32%),
-    linear-gradient(135deg, #1f2937 0%, #374151 42%, #b45309 100%);
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+  padding: 18px 20px;
+  border-radius: 14px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
 }
 
 .hero-kicker {
@@ -496,7 +495,7 @@ const columns = [
 .ring {
   position: absolute;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid #e5e7eb;
 }
 
 .ring-a {
