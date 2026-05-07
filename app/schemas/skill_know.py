@@ -52,7 +52,7 @@ class SkillKnowQuickSetupIn(BaseModel):
     llm_embedding_model: str = "text-embedding-3-small"
     retrieval_top_k: int = Field(default=8, ge=1, le=30)
     retrieval_score_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
-    retrieval_max_context_chars: int = Field(default=12000, ge=2000, le=50000)
+    retrieval_max_context_chars: int = Field(default=128000, ge=2000, le=500000)
     chunk_size: int = Field(default=1400, ge=300, le=5000)
     chunk_overlap: int = Field(default=150, ge=0, le=1000)
 

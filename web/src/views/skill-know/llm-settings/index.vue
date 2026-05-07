@@ -17,7 +17,7 @@ const form = reactive({
   llm_embedding_model: 'text-embedding-3-small',
   retrieval_top_k: 8,
   retrieval_score_threshold: 0.25,
-  retrieval_max_context_chars: 12000,
+  retrieval_max_context_chars: 128000,
   chunk_size: 1400,
   chunk_overlap: 150,
 })
@@ -97,7 +97,7 @@ async function save() {
             <NForm label-placement="top">
               <NFormItem label="检索 Top K"><NInputNumber v-model:value="form.retrieval_top_k" :min="1" :max="30" /></NFormItem>
               <NFormItem label="分数阈值"><NInputNumber v-model:value="form.retrieval_score_threshold" :min="0" :max="1" :step="0.05" /></NFormItem>
-              <NFormItem label="最大上下文字符数"><NInputNumber v-model:value="form.retrieval_max_context_chars" :min="2000" :max="50000" :step="1000" /></NFormItem>
+              <NFormItem label="最大上下文字符数"><NInputNumber v-model:value="form.retrieval_max_context_chars" :min="2000" :max="500000" :step="1000" /></NFormItem>
               <NFormItem label="分块大小"><NInputNumber v-model:value="form.chunk_size" :min="300" :max="5000" :step="100" /></NFormItem>
               <NFormItem label="分块重叠"><NInputNumber v-model:value="form.chunk_overlap" :min="0" :max="1000" :step="50" /></NFormItem>
             </NForm>

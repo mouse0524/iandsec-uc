@@ -11,7 +11,7 @@ class SkillKnowConfigService:
         "llm_timeout": 60,
         "retrieval_top_k": 8,
         "retrieval_score_threshold": 0.25,
-        "retrieval_max_context_chars": 12000,
+        "retrieval_max_context_chars": 128000,
         "chunk_size": 1400,
         "chunk_overlap": 150,
     }

@@ -91,6 +91,16 @@ class SkillKnowChatService:
             for item in items
         ]
 
+    async def _history_messages(self, conversation_id: int, *, limit: int = 12) -> list[dict]:
+        rows = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("-id").limit(limit)
+        rows = list(reversed(rows))
+        history = []
+        for row in rows:
+            if row.role not in {SkillKnowMessageRole.USER, SkillKnowMessageRole.ASSISTANT}:
+                continue
+            history.append({"role": str(row.role), "content": row.content})
+        return history
+
     async def chat(self, message: str, conversation_id: int | None = None) -> dict:
         content = ""
         async for item in self.stream(message, conversation_id=conversation_id):
@@ -120,18 +130,19 @@ class SkillKnowChatService:
         timeline.append(search_event)
         yield search_event
 
-        max_context_chars = int(await skill_know_config_service.get("retrieval_max_context_chars", 12000) or 12000)
+        max_context_chars = int(await skill_know_config_service.get("retrieval_max_context_chars", 128000) or 128000)
         context = self._render_context(context_items, max_chars=max_context_chars)
         system_prompt = await self._prompt("system.chat", "你是 Skill-Know 知识库助手。")
         answer_prompt = await self._prompt("rag.answer", "请基于知识库片段回答用户问题。") if context else await self._prompt("rag.no_context", "当前知识库没有足够依据。")
         security_prompt = await self._prompt("security.expert", "遇到数据安全问题时必须说明风险、权限、审计和回滚建议。")
 
+        history_messages = await self._history_messages(conv.id)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "system", "content": security_prompt},
             {"role": "system", "content": answer_prompt},
             {"role": "system", "content": f"已检索到的 Markdown 知识库片段：\n{context}" if context else "当前没有检索到相关 Markdown 片段。"},
-            {"role": "user", "content": message},
+            *history_messages,
         ]
 
         llm_start = event("llm.call.started", {"model": await skill_know_config_service.get("llm_chat_model"), "stream": True})
