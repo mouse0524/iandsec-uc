@@ -9,7 +9,7 @@ migrations/
 storage/
 panda*/
 Skill-Know-main
-
+.env
 
 db.sqlite3
 db.sqlite3-journal

@@ -844,11 +844,12 @@ watch(showForgotPasswordModal, (v) => {
 }
 
 .captcha-img {
-  width: 156px;
-  height: 52px;
+  width: 120px;
+  height: 34px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   cursor: pointer;
+  object-fit: cover;
 }
 
 .login-btn {

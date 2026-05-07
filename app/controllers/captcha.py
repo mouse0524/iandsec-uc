@@ -86,13 +86,18 @@ class CaptchaController:
 
     @staticmethod
     def _generate_image_base64(code: str) -> str:
-        width, height = 156, 52
+        width, height = 120, 34
         image = Image.new("RGB", (width, height), color=(255, 255, 255))
         draw = ImageDraw.Draw(image)
-        font = CaptchaController._load_font(32)
+        font = CaptchaController._load_font(24)
 
         for i, ch in enumerate(code):
-            draw.text((12 + i * 34, 7), ch, fill=(16, 16, 16), font=font)
+            bbox = draw.textbbox((0, 0), ch, font=font)
+            char_width = bbox[2] - bbox[0]
+            char_height = bbox[3] - bbox[1]
+            x = 12 + i * 26 + (18 - char_width) / 2 - bbox[0]
+            y = (height - char_height) / 2 - bbox[1]
+            draw.text((x, y), ch, fill=(16, 16, 16), font=font)
 
         for _ in range(4):
             x1 = random.randint(0, width)

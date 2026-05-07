@@ -9,14 +9,12 @@ import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import api from '@/api'
 import { isImageName } from '@/utils'
-import { useUserStore } from '@/store'
 import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
 defineOptions({ name: '我的工单' })
 
 const $table = ref(null)
 const route = useRoute()
-const userStore = useUserStore()
 const queryItems = ref({
   status: route.query.status || undefined,
   created_start: route.query.created_start || undefined,
@@ -65,14 +63,6 @@ const summaryCards = computed(() => {
     { label: '技术处理中', value: countByStatus.tech_processing || 0, tone: 'info' },
     { label: '已完成', value: countByStatus.done || 0, tone: 'success' },
   ]
-})
-
-const pageDescText = computed(() => {
-  const roleNames = (userStore.role || []).map((item) => item?.name).filter(Boolean)
-  if (roleNames.includes('用户') || roleNames.includes('渠道商') || roleNames.includes('代理商')) {
-    return '仅展示你本人提交的工单详情与数量。'
-  }
-  return '集中查看当前处理状态、历史流转记录与问题进展，跟踪每一张工单的处理节奏。'
 })
 
 onMounted(() => {
@@ -300,18 +290,6 @@ const columns = [
 <template>
   <CommonPage title="我的工单" show-footer>
     <div class="ticket-my-page">
-      <div class="hero-panel">
-        <div>
-          <div class="hero-kicker">Ticket Center</div>
-          <h2>我的工单</h2>
-          <p>{{ pageDescText }}</p>
-        </div>
-        <div class="hero-rings">
-          <div class="ring ring-a"></div>
-          <div class="ring ring-b"></div>
-        </div>
-      </div>
-
       <div class="summary-grid">
         <div v-for="item in summaryCards" :key="item.label" class="summary-card" :data-tone="item.tone">
           <span>{{ item.label }}</span>
@@ -451,68 +429,6 @@ const columns = [
   gap: 18px;
 }
 
-.hero-panel {
-  position: relative;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  overflow: hidden;
-  padding: 12px 14px;
-  border-radius: 14px;
-  color: #111827;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  box-shadow: none;
-}
-
-.hero-kicker {
-  margin-bottom: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.82;
-}
-
-.hero-panel h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.hero-panel p {
-  max-width: 620px;
-  margin: 6px 0 0;
-  line-height: 1.55;
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.hero-rings {
-  position: relative;
-  width: 120px;
-  height: 70px;
-}
-
-.ring {
-  position: absolute;
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
-}
-
-.ring-a {
-  width: 74px;
-  height: 74px;
-  right: -20px;
-  top: -8px;
-}
-
-.ring-b {
-  width: 42px;
-  height: 42px;
-  right: 42px;
-  top: 20px;
-}
-
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -631,12 +547,13 @@ const columns = [
 }
 
 .captcha-img {
-  width: 156px;
-  height: 52px;
+  width: 120px;
+  height: 34px;
   border-radius: 6px;
   border: 1px solid #e5e7eb;
   cursor: pointer;
   background: #fff;
+  object-fit: cover;
 }
 
 @media (max-width: 960px) {
@@ -644,20 +561,9 @@ const columns = [
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .hero-rings {
-    display: none;
-  }
 }
 
 @media (max-width: 640px) {
-  .hero-panel {
-    padding: 18px;
-  }
-
-  .hero-panel h2 {
-    font-size: 24px;
-  }
-
   .summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }

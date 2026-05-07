@@ -9,12 +9,6 @@ import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 defineOptions({ name: '提交工单' })
 
 const isAuthed = computed(() => !isNullOrWhitespace(getToken()))
-const pageTitle = computed(() => (isAuthed.value ? '提交工单' : '游客工单提交'))
-const pageDesc = computed(() =>
-  isAuthed.value
-    ? '请尽量详细描述问题，客服审核后会转技术处理。'
-    : '无需登录即可提交工单，我们会通过你填写的联系方式反馈处理进度。'
-)
 const router = useRouter()
 
 const formRef = ref(null)
@@ -265,28 +259,6 @@ function submit() {
 
 <template>
   <div class="ticket-submit-page">
-    <div class="hero">
-      <div class="hero-left">
-        <div class="eyebrow">Support Desk</div>
-        <h2>{{ pageTitle }}</h2>
-        <p>{{ pageDesc }}</p>
-        <NSpace class="hero-tags">
-          <NTag class="hero-tag" :bordered="false">客服审核</NTag>
-          <NTag class="hero-tag" :bordered="false">技术处理</NTag>
-          <NTag class="hero-tag" :bordered="false">状态可追踪</NTag>
-        </NSpace>
-      </div>
-      <div class="hero-right">
-        <div class="hero-stat-card">
-          <span class="stat-label">建议内容</span>
-          <strong>现象 + 复现 + 影响</strong>
-          <span class="stat-tip">越完整，处理越快</span>
-        </div>
-        <div class="orb orb-a"></div>
-        <div class="orb orb-b"></div>
-      </div>
-    </div>
-
     <div class="content-grid">
       <div class="form-shell">
         <NAlert type="info" class="mb-16">
@@ -477,54 +449,6 @@ function submit() {
   font-weight: 600;
 }
 
-.hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: #fff;
-  color: #111827;
-  border: 1px solid #e5e7eb;
-  box-shadow: none;
-  overflow: hidden;
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: 6px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.hero-left h2 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.2;
-}
-
-.hero-left p {
-  max-width: 560px;
-  margin: 6px 0 10px;
-  opacity: 0.92;
-  font-size: 13px;
-}
-
-.hero-tag {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.hero-tags {
-  flex-wrap: wrap;
-}
-
 .submit-btn {
   min-width: 112px;
   height: 34px;
@@ -549,62 +473,7 @@ function submit() {
   filter: brightness(1.02);
 }
 
-.hero-right {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  width: 220px;
-  height: 84px;
-}
-
-.hero-stat-card {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 16px;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.hero-stat-card strong {
-  font-size: 14px;
-}
-
-.stat-label,
-.stat-tip {
-  font-size: 11px;
-  opacity: 0.88;
-}
-
-.orb {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(1px);
-}
-
-.orb-a {
-  width: 82px;
-  height: 82px;
-  right: -18px;
-  top: -18px;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.orb-b {
-  width: 50px;
-  height: 50px;
-  right: 58px;
-  top: 24px;
-  background: rgba(255, 255, 255, 0.26);
-}
-
 .content-grid {
-  margin-top: 20px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 20px;
@@ -671,11 +540,12 @@ function submit() {
 }
 
 .captcha-img {
-  width: 156px;
-  height: 52px;
+  width: 120px;
+  height: 34px;
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid #e5e7eb;
+  object-fit: cover;
 }
 
 .editor-host {
@@ -790,14 +660,6 @@ function submit() {
 @media (max-width: 900px) {
   .ticket-submit-page {
     padding: 12px;
-  }
-
-  .hero {
-    padding: 18px;
-  }
-
-  .hero-right {
-    display: none;
   }
 
   .content-grid {

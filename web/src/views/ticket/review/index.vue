@@ -209,15 +209,6 @@ const columns = [
 <template>
   <CommonPage title="工单审核" show-footer>
     <div class="ticket-review-page">
-      <div class="hero-panel review-hero">
-        <div>
-          <div class="hero-kicker">Review Queue</div>
-          <h2>工单审核台</h2>
-          <p>客服在这里统一筛查提交内容、确认问题归类，并将有效问题流转给技术处理。</p>
-        </div>
-        <div class="hero-badge">客服视角</div>
-      </div>
-
       <div class="summary-grid review-grid">
         <div v-for="item in summaryCards" :key="item.label" class="summary-card" :data-tone="item.tone">
           <span>{{ item.label }}</span>
@@ -311,53 +302,6 @@ const columns = [
   gap: 18px;
 }
 
-.hero-panel {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  color: #111827;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  box-shadow: none;
-}
-
-.review-hero {
-  background: #fff;
-}
-
-.hero-kicker {
-  margin-bottom: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.85;
-}
-
-.hero-panel h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.hero-panel p {
-  max-width: 620px;
-  margin: 6px 0 0;
-  line-height: 1.55;
-  font-size: 13px;
-  opacity: 0.92;
-}
-
-.hero-badge {
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .summary-grid {
   display: grid;
   gap: 14px;
@@ -424,16 +368,5 @@ const columns = [
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .hero-panel {
-    padding: 18px;
-  }
-
-  .hero-panel h2 {
-    font-size: 24px;
-  }
-
-  .hero-badge {
-    display: none;
-  }
 }
 </style>
