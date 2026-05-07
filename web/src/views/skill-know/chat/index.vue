@@ -1,5 +1,6 @@
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
 
@@ -13,6 +14,8 @@ const messages = ref([])
 const conversationId = ref(null)
 const currentConversation = ref(null)
 const scroller = ref(null)
+const progressSteps = ref([])
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 onMounted(async () => {
   await loadConversations()
@@ -43,20 +46,40 @@ function newConversation() {
   currentConversation.value = null
   messages.value = []
   input.value = ''
+  progressSteps.value = []
 }
 
 async function send() {
   const text = input.value.trim()
+  return await sendMessage(text)
+}
+
+async function sendMessage(text) {
   if (!text || sending.value) return
   input.value = ''
+  progressSteps.value = [
+    { key: 'retrieve', label: '检索知识库', status: 'active' },
+    { key: 'reason', label: '整理上下文', status: 'pending' },
+    { key: 'answer', label: '生成回答', status: 'pending' },
+  ]
   const localUser = { id: `local-user-${Date.now()}`, role: 'user', content: text }
-  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '正在思考...', pending: true }
+  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true }
   messages.value.push(localUser, localAssistant)
   await scrollToBottom()
   sending.value = true
   try {
+    progressSteps.value = [
+      { key: 'retrieve', label: '检索知识库', status: 'done' },
+      { key: 'reason', label: '整理上下文', status: 'active' },
+      { key: 'answer', label: '生成回答', status: 'pending' },
+    ]
     const res = await api.skillKnowChat({ message: text, conversation_id: conversationId.value })
     const data = res.data || {}
+    progressSteps.value = [
+      { key: 'retrieve', label: '检索知识库', status: 'done' },
+      { key: 'reason', label: '整理上下文', status: 'done' },
+      { key: 'answer', label: '生成回答', status: 'done' },
+    ]
     conversationId.value = data.conversation_id || conversationId.value
     Object.assign(localAssistant, {
       id: data.message_id || localAssistant.id,
@@ -70,6 +93,7 @@ async function send() {
   } catch (error) {
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
+    progressSteps.value = []
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -81,6 +105,22 @@ async function rateMessage(msg, rating, isHelpful) {
   await api.skillKnowFeedbackMessage({ message_id: msg.id, rating, is_helpful: isHelpful })
   msg.rated = true
   $message.success('评分已提交')
+}
+
+async function copyMessage(msg) {
+  await navigator.clipboard.writeText(msg.content || '')
+  $message.success('已复制')
+}
+
+function continueAsk(msg) {
+  input.value = `${msg.content || ''}\n\n请继续说明：`
+}
+
+async function retryFromMessage(msg) {
+  const userMessageId = msg.extra_metadata?.user_message_id
+  const userMessage = messages.value.find((item) => item.id === userMessageId)
+  if (!userMessage?.content) return $message.warning('未找到对应问题，无法重新回答')
+  await sendMessage(userMessage.content)
 }
 
 async function deleteConversation(item) {
@@ -106,6 +146,10 @@ async function scrollToBottom() {
 function conversationTitle(item) {
   return item?.title || `会话 ${item?.id || ''}`
 }
+
+function renderMessage(content) {
+  return md.render(String(content || ''))
+}
 </script>
 
 <template>
@@ -122,6 +166,7 @@ function conversationTitle(item) {
             @click="openConversation(item)"
           >
             <div class="conversation-title">{{ conversationTitle(item) }}</div>
+            <div v-if="item.last_message_preview" class="conversation-preview">{{ item.last_message_preview }}</div>
             <div class="conversation-time">{{ item.updated_at || item.created_at }}</div>
             <NButton size="tiny" quaternary type="error" @click.stop="deleteConversation(item)">删除</NButton>
           </div>
@@ -137,19 +182,38 @@ function conversationTitle(item) {
           </div>
         </div>
 
+        <div v-if="progressSteps.length" class="progress-strip">
+          <div v-for="step in progressSteps" :key="step.key" class="progress-step" :class="step.status">
+            <span class="step-dot" />
+            <span>{{ step.label }}</span>
+          </div>
+        </div>
+
         <NSpin :show="loading">
           <div ref="scroller" class="message-scroll">
             <NEmpty v-if="!messages.length" description="输入问题开始对话，历史会话会自动保存" />
             <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
               <div class="message-bubble">
                 <div class="message-role">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
-                <div class="message-content">{{ msg.content }}</div>
+                <div v-if="msg.role === 'assistant' && msg.pending" class="thinking-state">
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-label">正在生成回答</span>
+                </div>
+                <div v-else-if="msg.role === 'assistant'" class="message-content markdown-body" v-html="renderMessage(msg.content)" />
+                <div v-else class="message-content">{{ msg.content }}</div>
                 <div v-if="msg.extra_metadata?.citations?.length" class="citations">
                   <b>引用来源</b>
                   <p v-for="cite in msg.extra_metadata.citations" :key="cite.chunk_uri || cite.chunk_id">
                     {{ cite.title }} · {{ cite.heading || '无章节' }} · {{ cite.filename || '-' }}
                   </p>
                 </div>
+                <NSpace v-if="msg.role === 'assistant' && !msg.pending" class="message-actions" size="small">
+                  <NButton size="tiny" quaternary @click="copyMessage(msg)">复制</NButton>
+                  <NButton size="tiny" quaternary @click="continueAsk(msg)">继续追问</NButton>
+                  <NButton size="tiny" quaternary @click="retryFromMessage(msg)">重新回答</NButton>
+                </NSpace>
                 <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.rated" class="rating-row">
                   <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
                   <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
@@ -177,30 +241,52 @@ function conversationTitle(item) {
 
 <style scoped>
 .chat-page { display: grid; grid-template-columns: 300px 1fr; gap: 16px; height: calc(100vh - 110px); }
-.conversation-sidebar, .chat-main { border-radius: 20px; background: rgba(255,255,255,.76); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 12px 36px rgba(15,23,42,.06); }
+.conversation-sidebar, .chat-main { border-radius: 24px; background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.92)); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 16px 50px rgba(15,23,42,.08); backdrop-filter: blur(12px); }
 .conversation-sidebar { padding: 14px; overflow: hidden; display: flex; flex-direction: column; }
 .conversation-list { margin-top: 12px; overflow: auto; }
-.conversation-item { position: relative; padding: 12px; border-radius: 14px; cursor: pointer; border: 1px solid transparent; margin-bottom: 10px; background: rgba(148,163,184,.08); }
+.conversation-item { position: relative; padding: 14px; border-radius: 16px; cursor: pointer; border: 1px solid transparent; margin-bottom: 10px; background: rgba(148,163,184,.08); }
 .conversation-item:hover, .conversation-item.active { background: rgba(32,128,240,.10); border-color: rgba(32,128,240,.24); }
 .conversation-title { font-weight: 700; padding-right: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-preview { color: #64748b; font-size: 12px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-time { color: #7b8494; font-size: 12px; margin-top: 6px; }
 .conversation-item .n-button { position: absolute; right: 8px; top: 8px; }
 .chat-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .chat-header { padding: 18px 22px; border-bottom: 1px solid rgba(148,163,184,.18); }
 .chat-header h2 { margin: 0; }
 .chat-header p { margin: 6px 0 0; color: #64748b; }
-.message-scroll { height: calc(100vh - 290px); overflow: auto; padding: 24px; background: linear-gradient(180deg, rgba(248,250,252,.55), rgba(241,245,249,.35)); }
+.progress-strip { display: flex; gap: 12px; padding: 10px 18px; border-bottom: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.72); }
+.progress-step { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
+.progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
+.progress-step.active { color: #2563eb; }
+.progress-step.done { color: #16a34a; }
+.message-scroll { height: calc(100vh - 340px); overflow: auto; padding: 28px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: flex-start; }
-.message-bubble { max-width: min(780px, 78%); padding: 14px 16px; border-radius: 18px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
-.message-row.user .message-bubble { background: #2563eb; color: white; border-top-right-radius: 6px; }
-.message-row.assistant .message-bubble { background: white; color: #172033; border: 1px solid rgba(148,163,184,.22); border-top-left-radius: 6px; }
+.message-bubble { max-width: min(820px, 78%); padding: 16px 18px; border-radius: 20px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+.message-row.user .message-bubble { background: linear-gradient(180deg, #2563eb, #1d4ed8); color: white; border-top-right-radius: 8px; }
+.message-row.assistant .message-bubble { background: rgba(255,255,255,.96); color: #172033; border: 1px solid rgba(148,163,184,.18); border-top-left-radius: 8px; }
 .message-role { font-size: 12px; opacity: .72; margin-bottom: 6px; }
+.markdown-body :deep(p) { margin: 8px 0; }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 20px; margin: 8px 0; }
+.markdown-body :deep(pre) { padding: 12px; border-radius: 10px; background: rgba(15, 23, 42, .06); overflow: auto; }
+.markdown-body :deep(code) { padding: 2px 5px; border-radius: 4px; background: rgba(15, 23, 42, .06); }
+.markdown-body :deep(table) { width: 100%; border-collapse: collapse; margin: 10px 0; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid rgba(148,163,184,.25); padding: 8px; text-align: left; }
+.thinking-state { display: inline-flex; align-items: center; gap: 8px; color: #64748b; }
+.thinking-dot { width: 8px; height: 8px; border-radius: 999px; background: #60a5fa; animation: pulse 1.2s infinite ease-in-out; }
+.thinking-dot:nth-child(2) { animation-delay: .15s; }
+.thinking-dot:nth-child(3) { animation-delay: .3s; }
+.thinking-label { margin-left: 4px; font-size: 13px; }
 .citations { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(148,163,184,.38); color: #64748b; font-size: 12px; }
 .citations p { margin: 4px 0; }
+.message-actions { margin-top: 10px; }
 .rating-row, .rated-tag { margin-top: 10px; }
 .input-bar { display: grid; grid-template-columns: 1fr 110px; gap: 12px; padding: 16px; border-top: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.86); }
+@keyframes pulse {
+  0%, 80%, 100% { opacity: .35; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
 @media (max-width: 900px) {
   .chat-page { grid-template-columns: 1fr; height: auto; }
   .conversation-sidebar { max-height: 260px; }

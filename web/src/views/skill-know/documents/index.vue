@@ -63,7 +63,33 @@ async function uploadFile(e) {
   if (!file) return
   uploading.value = true
   try {
-    const res = await api.skillKnowUploadDocument(file)
+    const chunkSize = 2 * 1024 * 1024
+    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize))
+    const initRes = await api.skillKnowInitChunkUpload({
+      filename: file.name,
+      title: file.name,
+      file_size: file.size,
+      total_chunks: totalChunks,
+    })
+    const uploadId = initRes.data?.upload_id
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * chunkSize
+      const end = Math.min(file.size, start + chunkSize)
+      const blob = file.slice(start, end)
+      const formData = new FormData()
+      formData.append('upload_id', uploadId)
+      formData.append('chunk_index', String(index))
+      formData.append('total_chunks', String(totalChunks))
+      formData.append('file', blob, `${file.name}.part`)
+      await api.skillKnowUploadChunk(formData)
+    }
+    const res = await api.skillKnowCompleteChunkUpload({
+      upload_id: uploadId,
+      filename: file.name,
+      title: file.name,
+      file_size: file.size,
+      total_chunks: totalChunks,
+    })
     selected.value = res.data
     $message.success('已开始后台转换，请稍候')
     startPolling(res.data.id)

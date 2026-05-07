@@ -20,7 +20,7 @@ from app.core.exceptions import (
     ResponseValidationHandle,
 )
 from app.log import logger
-from app.models.admin import Api, Menu, Role
+from app.models.admin import Api, Menu, Role, SkillKnowSystemConfig
 from app.schemas.menus import MenuType
 from app.settings.config import settings
 
@@ -646,9 +646,38 @@ async def init_roles():
     await role_map["管理员"].menus.add(*webdav_menus)
 
 
+async def init_skill_know_config_defaults():
+    item = await SkillKnowSystemConfig.filter(key="retrieval_max_context_chars").first()
+    if not item:
+        await SkillKnowSystemConfig.create(
+            key="retrieval_max_context_chars",
+            value=128000,
+            group="retrieval",
+            description="最大上下文字符数",
+            is_sensitive=False,
+        )
+        return
+
+    current_value = item.value
+    if isinstance(current_value, dict) and "__raw" in current_value:
+        current_value = current_value.get("__raw")
+    try:
+        normalized = int(current_value)
+    except Exception:
+        normalized = None
+
+    if normalized in {None, 12000}:
+        item.value = 128000
+        item.group = "retrieval"
+        item.description = item.description or "最大上下文字符数"
+        item.is_sensitive = False
+        await item.save()
+
+
 async def init_data():
     await init_db()
     await init_superuser()
     await init_menus()
     await init_apis()
     await init_roles()
+    await init_skill_know_config_defaults()

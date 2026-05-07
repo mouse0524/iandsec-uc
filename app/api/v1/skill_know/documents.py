@@ -1,8 +1,8 @@
-from fastapi import APIRouter, BackgroundTasks, File, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile
 
 from app.models.enums import SkillKnowDocumentStatus
 from app.schemas.base import Success, SuccessExtra
-from app.schemas.skill_know import SkillKnowDocumentUpdate, SkillKnowMoveIn
+from app.schemas.skill_know import SkillKnowChunkUploadCompleteIn, SkillKnowChunkUploadInitIn, SkillKnowDocumentUpdate, SkillKnowMoveIn
 from app.services.skill_know.document_service import skill_know_document_service
 
 router = APIRouter()
@@ -16,6 +16,26 @@ async def upload_document(
     folder_id: int | None = None,
 ):
     return Success(data=await skill_know_document_service.upload(file, background_tasks=background_tasks, title=title, folder_id=folder_id))
+
+
+@router.post("/upload/init", summary="初始化分片上传")
+async def init_chunk_upload(payload: SkillKnowChunkUploadInitIn):
+    return Success(data=await skill_know_document_service.init_chunk_upload(payload))
+
+
+@router.post("/upload/chunk", summary="上传文档分片")
+async def upload_chunk(
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    file: UploadFile = File(...),
+):
+    return Success(data=await skill_know_document_service.save_chunk(upload_id, chunk_index, total_chunks, file))
+
+
+@router.post("/upload/complete", summary="完成分片上传")
+async def complete_chunk_upload(payload: SkillKnowChunkUploadCompleteIn):
+    return Success(data=await skill_know_document_service.complete_chunk_upload(payload))
 
 
 @router.get("/list", summary="文档列表")

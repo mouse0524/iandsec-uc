@@ -124,6 +124,12 @@ export default {
   skillKnowUpdateFolder: (data = {}) => request.post('/skill-know/folders/update', data),
   skillKnowDeleteFolder: (params = {}) => request.delete('/skill-know/folders/delete', { params }),
   // skill know - documents
+  skillKnowInitChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/init', data, { timeout: 300000 }),
+  skillKnowUploadChunk: (formData) => request.post('/skill-know/documents/upload/chunk', formData, {
+    timeout: 300000,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
+  skillKnowCompleteChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/complete', data, { timeout: 300000 }),
   skillKnowUploadDocument: (file, data = {}) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -131,6 +137,7 @@ export default {
       if (data[key] !== undefined && data[key] !== null && data[key] !== '') formData.append(key, data[key])
     })
     return request.post('/skill-know/documents/upload', formData, {
+      timeout: 300000,
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

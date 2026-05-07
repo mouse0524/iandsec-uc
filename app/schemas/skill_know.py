@@ -35,6 +35,18 @@ class SkillKnowDocumentUpdate(BaseModel):
     folder_id: int | None = None
 
 
+class SkillKnowChunkUploadInitIn(BaseModel):
+    filename: str = Field(..., min_length=1)
+    title: str | None = None
+    folder_id: int | None = None
+    file_size: int = Field(..., gt=0)
+    total_chunks: int = Field(..., ge=1)
+
+
+class SkillKnowChunkUploadCompleteIn(SkillKnowChunkUploadInitIn):
+    upload_id: str = Field(..., min_length=1)
+
+
 class SkillKnowMoveIn(BaseModel):
     target_id: int
     folder_id: int | None = None

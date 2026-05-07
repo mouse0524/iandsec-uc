@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import uuid
@@ -29,6 +30,25 @@ class SkillKnowDocumentService:
         os.makedirs(path, exist_ok=True)
         return path
 
+    def _chunk_dir(self) -> str:
+        path = os.path.join(self._temp_dir(), "chunks")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    async def _save_upload_to_temp(self, file: UploadFile, temp_path: str) -> int:
+        size = 0
+        chunk_size = 1024 * 1024
+        with open(temp_path, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > settings.MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=400, detail="文件大小超限")
+                f.write(chunk)
+        return size
+
     def _metadata(self, document: SkillKnowDocument) -> dict:
         return dict(document.extra_metadata or {})
 
@@ -49,11 +69,7 @@ class SkillKnowDocumentService:
         stored_name = f"{uid}.md"
         abs_path = os.path.join(self._upload_dir(), stored_name)
         temp_path = os.path.join(self._temp_dir(), f"{uid}.{ext}")
-        content_bytes = await file.read()
-        if len(content_bytes) > settings.MAX_UPLOAD_SIZE:
-            raise HTTPException(status_code=400, detail="文件大小超限")
-        with open(temp_path, "wb") as f:
-            f.write(content_bytes)
+        temp_size = await self._save_upload_to_temp(file, temp_path)
         doc_title = title or filename
         document = await SkillKnowDocument.create(
             uuid=new_uuid(),
@@ -67,7 +83,7 @@ class SkillKnowDocumentService:
             extra_metadata={
                 "original_filename": filename,
                 "original_file_type": ext,
-                "original_file_size": len(content_bytes),
+                "original_file_size": temp_size,
                 "converted_by": "markitdown",
                 "index_status": "pending",
                 "process_stage": "uploaded",
@@ -75,7 +91,103 @@ class SkillKnowDocumentService:
             },
             status=SkillKnowDocumentStatus.PROCESSING,
         )
-        background_tasks.add_task(self.process_document, document.id, temp_path, ext, doc_title, abs_path)
+        asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title, abs_path))
+        return await document_to_dict(document)
+
+    async def init_chunk_upload(self, data) -> dict:
+        filename = data.filename.strip()
+        if not filename:
+            raise HTTPException(status_code=400, detail="文件名不能为空")
+        ext = Path(filename).suffix.lower().lstrip(".") or "txt"
+        if ext not in SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=SUPPORTED_MARKDOWN_UPLOAD_MESSAGE)
+        if data.file_size > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="文件大小超限")
+
+        upload_id = uuid.uuid4().hex
+        chunk_path = os.path.join(self._chunk_dir(), upload_id)
+        os.makedirs(chunk_path, exist_ok=True)
+        return {
+            "upload_id": upload_id,
+            "filename": filename,
+            "title": data.title or filename,
+            "folder_id": data.folder_id,
+            "file_size": data.file_size,
+            "file_type": ext,
+            "total_chunks": data.total_chunks,
+        }
+
+    async def save_chunk(self, upload_id: str, chunk_index: int, total_chunks: int, file: UploadFile) -> dict:
+        if chunk_index < 0:
+            raise HTTPException(status_code=400, detail="chunk_index 非法")
+        if total_chunks < 1:
+            raise HTTPException(status_code=400, detail="total_chunks 非法")
+        chunk_dir = os.path.join(self._chunk_dir(), upload_id)
+        if not os.path.isdir(chunk_dir):
+            raise HTTPException(status_code=404, detail="上传任务不存在")
+        chunk_path = os.path.join(chunk_dir, f"{chunk_index:08d}.part")
+        size = await self._save_upload_to_temp(file, chunk_path)
+        return {"upload_id": upload_id, "chunk_index": chunk_index, "size": size, "uploaded": True}
+
+    async def complete_chunk_upload(self, data) -> dict:
+        filename = data.filename.strip()
+        ext = Path(filename).suffix.lower().lstrip(".") or "txt"
+        chunk_dir = os.path.join(self._chunk_dir(), data.upload_id)
+        if not os.path.isdir(chunk_dir):
+            raise HTTPException(status_code=404, detail="上传任务不存在")
+
+        parts = sorted(Path(chunk_dir).glob("*.part"))
+        if len(parts) != data.total_chunks:
+            raise HTTPException(status_code=400, detail="分片数量不完整")
+
+        uid = uuid.uuid4().hex
+        stored_name = f"{uid}.md"
+        abs_path = os.path.join(self._upload_dir(), stored_name)
+        temp_path = os.path.join(self._temp_dir(), f"{uid}.{ext}")
+
+        try:
+            with open(temp_path, "wb") as merged:
+                for part in parts:
+                    with open(part, "rb") as src:
+                        while True:
+                            chunk = src.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            merged.write(chunk)
+        finally:
+            for part in parts:
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+            try:
+                Path(chunk_dir).rmdir()
+            except OSError:
+                pass
+
+        document = await SkillKnowDocument.create(
+            uuid=new_uuid(),
+            uri=make_uri("documents", uid),
+            title=data.title or filename,
+            filename=filename,
+            file_path=abs_path,
+            file_size=0,
+            file_type="md",
+            folder_id=data.folder_id,
+            extra_metadata={
+                "original_filename": filename,
+                "original_file_type": ext,
+                "original_file_size": data.file_size,
+                "converted_by": "markitdown",
+                "index_status": "pending",
+                "process_stage": "uploaded",
+                "process_progress": 5,
+                "upload_mode": "chunked",
+                "total_chunks": data.total_chunks,
+            },
+            status=SkillKnowDocumentStatus.PROCESSING,
+        )
+        asyncio.create_task(self.process_document(document.id, temp_path, ext, data.title or filename, abs_path))
         return await document_to_dict(document)
 
     async def process_document(self, document_id: int, temp_path: str, ext: str, doc_title: str, abs_path: str) -> None:

@@ -15,7 +15,7 @@ from app.services.skill_know.config_service import skill_know_config_service
 from app.services.skill_know.openai_client import skill_know_openai_client
 from app.services.skill_know.prompt_service import skill_know_prompt_service
 from app.services.skill_know.retriever import skill_know_retriever
-from app.services.skill_know.utils import new_uuid
+from app.services.skill_know.utils import new_uuid, preview_text
 
 
 def event(event_type: str, payload: dict | None = None) -> dict:
@@ -67,7 +67,7 @@ class SkillKnowChatService:
                 f"章节：{item.get('heading') or '-'}",
                 f"匹配分：{item.get('score')}",
                 "```markdown",
-                content[:2400],
+                content[:1200],
                 "```",
             ])
             if used + len(block) > max_chars:
@@ -124,7 +124,8 @@ class SkillKnowChatService:
         timeline.append(phase)
         yield phase
 
-        context_items = await skill_know_retriever.retrieve_document_chunks(message)
+        retrieval_top_k = int(await skill_know_config_service.get("retrieval_top_k", 8) or 8)
+        context_items = await skill_know_retriever.retrieve_document_chunks(message, limit=min(retrieval_top_k, 6))
         citations = self._citations(context_items)
         search_event = event("search.results", {"query": message, "items": context_items, "citations": citations, "total": len(context_items)})
         timeline.append(search_event)
@@ -204,7 +205,18 @@ class SkillKnowChatService:
         query = SkillKnowConversation.all()
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
-        return total, [await item.to_dict() for item in rows]
+        result = []
+        for item in rows:
+            data = await item.to_dict()
+            last_message = await SkillKnowMessage.filter(conversation_id=item.id).order_by("-id").first()
+            if last_message:
+                data["last_message_preview"] = preview_text(last_message.content, 72)
+                data["last_message_role"] = str(last_message.role)
+            else:
+                data["last_message_preview"] = ""
+                data["last_message_role"] = ""
+            result.append(data)
+        return total, result
 
     async def get_conversation(self, conversation_id: int) -> dict:
         conv = await SkillKnowConversation.get(id=conversation_id)

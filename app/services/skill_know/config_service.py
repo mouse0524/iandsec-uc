@@ -8,7 +8,7 @@ class SkillKnowConfigService:
         "llm_chat_model": "gpt-4o-mini",
         "llm_embedding_model": "text-embedding-3-small",
         "llm_temperature": 0.2,
-        "llm_timeout": 60,
+        "llm_timeout": 120,
         "retrieval_top_k": 8,
         "retrieval_score_threshold": 0.25,
         "retrieval_max_context_chars": 128000,
