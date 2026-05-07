@@ -395,6 +395,123 @@ async def init_menus():
             redirect="",
         )
 
+    skill_know_parent = await Menu.filter(path="/skill-know").first()
+    if not skill_know_parent:
+        skill_know_parent = await Menu.create(
+            menu_type=MenuType.CATALOG,
+            name="AI知识库",
+            path="/skill-know",
+            order=6,
+            parent_id=0,
+            icon="carbon:machine-learning-model",
+            is_hidden=False,
+            component="Layout",
+            keepalive=False,
+            redirect="/skill-know/search",
+        )
+    else:
+        skill_know_parent.menu_type = MenuType.CATALOG
+        skill_know_parent.name = "AI知识库"
+        skill_know_parent.order = 6
+        skill_know_parent.parent_id = 0
+        skill_know_parent.icon = "carbon:machine-learning-model"
+        skill_know_parent.is_hidden = False
+        skill_know_parent.component = "Layout"
+        skill_know_parent.keepalive = False
+        skill_know_parent.redirect = "/skill-know/search"
+        await skill_know_parent.save()
+
+    skill_know_children = [
+        {
+            "name": "知识搜索",
+            "path": "search",
+            "order": 1,
+            "icon": "material-symbols:search-rounded",
+            "component": "/skill-know/search",
+        },
+        {
+            "name": "智能对话",
+            "path": "chat",
+            "order": 2,
+            "icon": "material-symbols:chat-outline-rounded",
+            "component": "/skill-know/chat",
+        },
+        {
+            "name": "文档管理",
+            "path": "documents",
+            "order": 3,
+            "icon": "material-symbols:docs-outline-rounded",
+            "component": "/skill-know/documents",
+        },
+        {
+            "name": "技能管理",
+            "path": "skills",
+            "order": 4,
+            "icon": "material-symbols:psychology-outline-rounded",
+            "component": "/skill-know/skills",
+        },
+        {
+            "name": "知识图谱",
+            "path": "graph",
+            "order": 5,
+            "icon": "material-symbols:hub-outline-rounded",
+            "component": "/skill-know/graph",
+        },
+        {
+            "name": "提示词管理",
+            "path": "prompts",
+            "order": 6,
+            "icon": "material-symbols:format-quote-outline-rounded",
+            "component": "/skill-know/prompts",
+        },
+        {
+            "name": "快速设置",
+            "path": "quick-setup",
+            "order": 7,
+            "icon": "material-symbols:tune-rounded",
+            "component": "/skill-know/quick-setup",
+        },
+        {
+            "name": "批量上传",
+            "path": "upload-tasks",
+            "order": 8,
+            "icon": "material-symbols:upload-file-outline-rounded",
+            "component": "/skill-know/upload-tasks",
+        },
+        {
+            "name": "知识包",
+            "path": "packs",
+            "order": 9,
+            "icon": "material-symbols:deployed-code-outline-rounded",
+            "component": "/skill-know/packs",
+        },
+    ]
+    for child in skill_know_children:
+        skill_know_menu = await Menu.filter(
+            Q(component=child["component"]) | Q(path=child["path"], parent_id=skill_know_parent.id)
+        ).first()
+        if skill_know_menu:
+            skill_know_menu.menu_type = MenuType.MENU
+            skill_know_menu.name = child["name"]
+            skill_know_menu.path = child["path"]
+            skill_know_menu.order = child["order"]
+            skill_know_menu.parent_id = skill_know_parent.id
+            skill_know_menu.icon = child["icon"]
+            skill_know_menu.is_hidden = False
+            skill_know_menu.component = child["component"]
+            skill_know_menu.keepalive = False
+            skill_know_menu.redirect = ""
+            await skill_know_menu.save()
+        else:
+            await Menu.create(
+                menu_type=MenuType.MENU,
+                parent_id=skill_know_parent.id,
+                is_hidden=False,
+                keepalive=False,
+                redirect="",
+                **child,
+            )
+
 
 
 async def init_apis():
@@ -442,6 +559,10 @@ async def init_roles():
                 break
 
         if has_role_bindings:
+            admin_role = next((role for role in existing_roles if role.name == "管理员"), None)
+            if admin_role:
+                await admin_role.apis.add(*await Api.all())
+                await admin_role.menus.add(*await Menu.all())
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 

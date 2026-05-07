@@ -253,7 +253,7 @@ async def get_userinfo():
 @router.get("/usermenu", summary="查看用户菜单", dependencies=[DependAuth])
 async def get_user_menu():
     user_id = CTX_USER_ID.get()
-    cache_key = f"perm:menu:user:{user_id}:v1"
+    cache_key = f"perm:menu:user:{user_id}:v2"
     try:
         cached = await execute_redis("get", cache_key)
         if cached:
@@ -293,7 +293,7 @@ async def get_user_menu():
 @router.get("/userapi", summary="查看用户API", dependencies=[DependAuth])
 async def get_user_api():
     user_id = CTX_USER_ID.get()
-    cache_key = f"perm:api:user:{user_id}:v1"
+    cache_key = f"perm:api:user:{user_id}:v2"
     try:
         cached = await execute_redis("get", cache_key)
         if cached:
