@@ -457,7 +457,7 @@ const columns = [
   justify-content: space-between;
   align-items: center;
   overflow: hidden;
-  padding: 18px 20px;
+  padding: 12px 14px;
   border-radius: 14px;
   color: #111827;
   background: #fff;
@@ -466,7 +466,7 @@ const columns = [
 }
 
 .hero-kicker {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -476,20 +476,21 @@ const columns = [
 
 .hero-panel h2 {
   margin: 0;
-  font-size: 30px;
+  font-size: 22px;
 }
 
 .hero-panel p {
   max-width: 620px;
-  margin: 10px 0 0;
-  line-height: 1.7;
+  margin: 6px 0 0;
+  line-height: 1.55;
+  font-size: 13px;
   opacity: 0.9;
 }
 
 .hero-rings {
   position: relative;
-  width: 180px;
-  height: 110px;
+  width: 120px;
+  height: 70px;
 }
 
 .ring {
@@ -499,17 +500,17 @@ const columns = [
 }
 
 .ring-a {
-  width: 120px;
-  height: 120px;
+  width: 74px;
+  height: 74px;
   right: -20px;
-  top: -12px;
+  top: -8px;
 }
 
 .ring-b {
-  width: 72px;
-  height: 72px;
-  right: 56px;
-  top: 34px;
+  width: 42px;
+  height: 42px;
+  right: 42px;
+  top: 20px;
 }
 
 .summary-grid {
@@ -630,8 +631,8 @@ const columns = [
 }
 
 .captcha-img {
-  width: 120px;
-  height: 40px;
+  width: 156px;
+  height: 52px;
   border-radius: 6px;
   border: 1px solid #e5e7eb;
   cursor: pointer;

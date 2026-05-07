@@ -19,6 +19,20 @@ _MAX_LOCAL_CACHE_SIZE = 5000
 
 class CaptchaController:
     @staticmethod
+    def _load_font(font_size: int):
+        font_candidates = [
+            "DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "arial.ttf",
+        ]
+        for font_name in font_candidates:
+            try:
+                return ImageFont.truetype(font_name, font_size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    @staticmethod
     def _generate_code(length: int = 4) -> str:
         chars = "23456789"
         return "".join(random.choice(chars) for _ in range(length))
@@ -72,26 +86,23 @@ class CaptchaController:
 
     @staticmethod
     def _generate_image_base64(code: str) -> str:
-        width, height = 120, 40
+        width, height = 156, 52
         image = Image.new("RGB", (width, height), color=(255, 255, 255))
         draw = ImageDraw.Draw(image)
-        try:
-            font = ImageFont.truetype("arial.ttf", 24)
-        except OSError:
-            font = ImageFont.load_default()
+        font = CaptchaController._load_font(32)
 
         for i, ch in enumerate(code):
-            draw.text((10 + i * 25, 8), ch, fill=(20, 20, 20), font=font)
+            draw.text((12 + i * 34, 7), ch, fill=(16, 16, 16), font=font)
 
-        for _ in range(6):
+        for _ in range(4):
             x1 = random.randint(0, width)
             y1 = random.randint(0, height)
             x2 = random.randint(0, width)
             y2 = random.randint(0, height)
-            draw.line((x1, y1, x2, y2), fill=(160, 160, 160), width=1)
+            draw.line((x1, y1, x2, y2), fill=(168, 168, 168), width=1)
 
-        for _ in range(30):
-            draw.point((random.randint(0, width - 1), random.randint(0, height - 1)), fill=(190, 190, 190))
+        for _ in range(18):
+            draw.point((random.randint(0, width - 1), random.randint(0, height - 1)), fill=(185, 185, 185))
 
         buf = io.BytesIO()
         image.save(buf, format="PNG")

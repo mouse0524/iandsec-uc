@@ -844,7 +844,8 @@ watch(showForgotPasswordModal, (v) => {
 }
 
 .captcha-img {
-  height: 40px;
+  width: 156px;
+  height: 52px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   cursor: pointer;

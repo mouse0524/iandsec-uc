@@ -315,7 +315,7 @@ const columns = [
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 18px 20px;
+  padding: 12px 14px;
   border-radius: 14px;
   color: #111827;
   background: #fff;
@@ -328,7 +328,7 @@ const columns = [
 }
 
 .hero-kicker {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -338,22 +338,23 @@ const columns = [
 
 .hero-panel h2 {
   margin: 0;
-  font-size: 30px;
+  font-size: 22px;
 }
 
 .hero-panel p {
   max-width: 620px;
-  margin: 10px 0 0;
-  line-height: 1.7;
+  margin: 6px 0 0;
+  line-height: 1.55;
+  font-size: 13px;
   opacity: 0.92;
 }
 
 .hero-badge {
-  padding: 10px 14px;
+  padding: 6px 10px;
   border-radius: 999px;
   background: #f3f4f6;
   color: #6b7280;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 

@@ -482,7 +482,7 @@ function submit() {
   justify-content: space-between;
   align-items: center;
   border-radius: 14px;
-  padding: 18px 20px;
+  padding: 12px 14px;
   background: #fff;
   color: #111827;
   border: 1px solid #e5e7eb;
@@ -493,8 +493,8 @@ function submit() {
 .eyebrow {
   display: inline-flex;
   align-items: center;
-  margin-bottom: 10px;
-  padding: 6px 10px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: #f3f4f6;
   color: #6b7280;
@@ -505,15 +505,15 @@ function submit() {
 
 .hero-left h2 {
   margin: 0;
-  font-size: 30px;
+  font-size: 22px;
   line-height: 1.2;
 }
 
 .hero-left p {
   max-width: 560px;
-  margin: 10px 0 16px;
+  margin: 6px 0 10px;
   opacity: 0.92;
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .hero-tag {
@@ -526,8 +526,8 @@ function submit() {
 }
 
 .submit-btn {
-  min-width: 136px;
-  height: 42px;
+  min-width: 112px;
+  height: 34px;
   border-radius: 999px;
 }
 
@@ -554,8 +554,8 @@ function submit() {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  width: 260px;
-  height: 120px;
+  width: 220px;
+  height: 84px;
 }
 
 .hero-stat-card {
@@ -563,8 +563,8 @@ function submit() {
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 16px 18px;
+  gap: 4px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
   backdrop-filter: blur(10px);
@@ -572,12 +572,12 @@ function submit() {
 }
 
 .hero-stat-card strong {
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .stat-label,
 .stat-tip {
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.88;
 }
 
@@ -588,18 +588,18 @@ function submit() {
 }
 
 .orb-a {
-  width: 120px;
-  height: 120px;
+  width: 82px;
+  height: 82px;
   right: -18px;
   top: -18px;
   background: rgba(255, 255, 255, 0.2);
 }
 
 .orb-b {
-  width: 70px;
-  height: 70px;
-  right: 70px;
-  top: 34px;
+  width: 50px;
+  height: 50px;
+  right: 58px;
+  top: 24px;
   background: rgba(255, 255, 255, 0.26);
 }
 
@@ -671,7 +671,8 @@ function submit() {
 }
 
 .captcha-img {
-  height: 40px;
+  width: 156px;
+  height: 52px;
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid #e5e7eb;

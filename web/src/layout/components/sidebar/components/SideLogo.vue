@@ -6,11 +6,14 @@
       v-show="!appStore.collapsed"
       ml-2
       mr-8
-      max-w-150
+      max-w-220
       flex-shrink-0
-      text-16
+      text-14
       font-bold
       color-primary
+      whitespace-nowrap
+      overflow-hidden
+      text-ellipsis
     >
       {{ appStore.siteTitle || title }}
     </h2>
