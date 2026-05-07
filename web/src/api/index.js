@@ -123,15 +123,6 @@ export default {
   skillKnowCreateFolder: (data = {}) => request.post('/skill-know/folders/create', data),
   skillKnowUpdateFolder: (data = {}) => request.post('/skill-know/folders/update', data),
   skillKnowDeleteFolder: (params = {}) => request.delete('/skill-know/folders/delete', { params }),
-  // skill know - skills
-  skillKnowInitialize: () => request.post('/skill-know/skills/initialize'),
-  skillKnowSkills: (params = {}) => request.get('/skill-know/skills/list', { params }),
-  skillKnowGetSkill: (params = {}) => request.get('/skill-know/skills/get', { params }),
-  skillKnowCreateSkill: (data = {}) => request.post('/skill-know/skills/create', data),
-  skillKnowUpdateSkill: (data = {}) => request.post('/skill-know/skills/update', data),
-  skillKnowDeleteSkill: (params = {}) => request.delete('/skill-know/skills/delete', { params }),
-  skillKnowMoveSkill: (data = {}) => request.post('/skill-know/skills/move', data),
-  skillKnowSearchSkills: (data = {}) => request.post('/skill-know/skills/search', data),
   // skill know - documents
   skillKnowUploadDocument: (file, data = {}) => {
     const formData = new FormData()
@@ -148,53 +139,32 @@ export default {
   skillKnowUpdateDocument: (data = {}) => request.post('/skill-know/documents/update', data),
   skillKnowDeleteDocument: (params = {}) => request.delete('/skill-know/documents/delete', { params }),
   skillKnowMoveDocument: (data = {}) => request.post('/skill-know/documents/move', data),
-  skillKnowConvertDocument: (data = {}) => request.post('/skill-know/documents/convert-to-skill', data),
-  skillKnowBatchConvertDocuments: (data = {}) => request.post('/skill-know/documents/batch-convert', data),
   skillKnowSearchDocuments: (params = {}) => request.get('/skill-know/documents/search', { params }),
-  // skill know - search/chat/prompts/setup
-  skillKnowSearch: (params = {}) => request.get('/skill-know/search', { params }),
-  skillKnowSqlSearch: (data = {}) => request.post('/skill-know/search/sql', data),
-  skillKnowSearchTables: () => request.get('/skill-know/search/tables'),
-  skillKnowSupportTaxonomy: () => request.get('/skill-know/support/taxonomy'),
-  skillKnowSupportMatch: (data = {}) => request.post('/skill-know/support/match', data),
-  skillKnowEvaluateSupportSkill: (data = {}) => request.post('/skill-know/support/evaluate-skill', data),
-  skillKnowGraph: (params = {}) => request.get('/skill-know/graph', { params }),
-  skillKnowGraphRelations: (params = {}) => request.get('/skill-know/graph/relations', { params }),
-  skillKnowCreateGraphRelation: (data = {}) => request.post('/skill-know/graph/relations/create', data),
-  skillKnowDeleteGraphRelation: (params = {}) => request.delete('/skill-know/graph/relations/delete', { params }),
+  skillKnowReindexDocument: (params = {}) => request.post('/skill-know/documents/reindex', null, { params }),
+  // skill know - chat/prompts/settings
   skillKnowChat: (data = {}) => request.post('/skill-know/chat', data),
   skillKnowConversations: (params = {}) => request.get('/skill-know/chat/conversations', { params }),
   skillKnowGetConversation: (params = {}) => request.get('/skill-know/chat/conversations/get', { params }),
   skillKnowConversationMessages: (params = {}) => request.get('/skill-know/chat/conversations/messages', { params }),
   skillKnowConversationStats: (params = {}) => request.get('/skill-know/chat/conversations/stats', { params }),
   skillKnowDeleteConversation: (params = {}) => request.delete('/skill-know/chat/conversations/delete', { params }),
+  skillKnowFeedbackMessage: (data = {}) => request.post('/skill-know/chat/messages/feedback', data),
+  skillKnowFeedbackList: (params = {}) => request.get('/skill-know/chat/feedback/list', { params }),
+  skillKnowLearningCandidates: (params = {}) => request.get('/skill-know/chat/learning/candidates', { params }),
+  skillKnowCreateLearningCandidate: (data = {}) => request.post('/skill-know/chat/learning/candidates/create', data),
+  skillKnowApproveLearningCandidate: (data = {}) => request.post('/skill-know/chat/learning/candidates/approve', data),
+  skillKnowRejectLearningCandidate: (data = {}) => request.post('/skill-know/chat/learning/candidates/reject', data),
   skillKnowPrompts: (params = {}) => request.get('/skill-know/prompts/list', { params }),
   skillKnowGetPrompt: (params = {}) => request.get('/skill-know/prompts/get', { params }),
   skillKnowUpdatePrompt: (key, data = {}) => request.post(`/skill-know/prompts/update?key=${encodeURIComponent(key)}`, data),
   skillKnowResetPrompt: (key) => request.post(`/skill-know/prompts/reset?key=${encodeURIComponent(key)}`),
-  skillKnowSetupState: () => request.get('/skill-know/quick-setup/state'),
-  skillKnowSetupChecklist: () => request.get('/skill-know/quick-setup/checklist'),
-  skillKnowProviders: () => request.get('/skill-know/quick-setup/providers'),
-  skillKnowProviderModels: (providerId) => request.get(`/skill-know/quick-setup/providers/${providerId}/models`),
-  skillKnowCompleteSetup: (data = {}) => request.post('/skill-know/quick-setup/essential', data),
-  skillKnowTestConnection: (data = {}) => request.post('/skill-know/quick-setup/test-connection', data),
-  skillKnowResetSetup: () => request.post('/skill-know/quick-setup/reset'),
-  skillKnowBatchUpload: (files = [], data = {}) => {
-    const formData = new FormData()
-    files.forEach((file) => formData.append('files', file))
-    Object.keys(data).forEach((key) => {
-      if (data[key] !== undefined && data[key] !== null && data[key] !== '') formData.append(key, data[key])
-    })
-    return request.post('/skill-know/upload/batch', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-  },
-  skillKnowUploadTask: (params = {}) => request.get('/skill-know/upload/tasks/get', { params }),
-  skillKnowDeleteUploadTask: (params = {}) => request.delete('/skill-know/upload/tasks/delete', { params }),
-  skillKnowExportPack: (params = {}) => request.post('/skill-know/pack/export', null, { params }),
-  skillKnowImportPack: (file, data = {}) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return request.post('/skill-know/pack/import', formData, { params: data, headers: { 'Content-Type': 'multipart/form-data' } })
-  },
+  skillKnowSetupState: () => request.get('/skill-know/llm-settings/state'),
+  skillKnowSetupChecklist: () => request.get('/skill-know/llm-settings/checklist'),
+  skillKnowProviders: () => request.get('/skill-know/llm-settings/providers'),
+  skillKnowProviderModels: (providerId) => request.get(`/skill-know/llm-settings/providers/${providerId}/models`),
+  skillKnowCompleteSetup: (data = {}) => request.post('/skill-know/llm-settings/essential', data),
+  skillKnowTestConnection: (data = {}) => request.post('/skill-know/llm-settings/test-connection', data),
+  skillKnowResetSetup: () => request.post('/skill-know/llm-settings/reset'),
   skillKnowHealth: () => request.get('/skill-know/health'),
   skillKnowHealthDetail: () => request.get('/skill-know/health/detail'),
 }

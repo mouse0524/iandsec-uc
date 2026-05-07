@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.models.admin import SkillKnowDocument, SkillKnowFolder, SkillKnowSkill
+from app.models.admin import SkillKnowDocument, SkillKnowFolder
 from app.services.skill_know.utils import folder_to_dict, new_uuid
 
 
@@ -53,7 +53,6 @@ class SkillKnowFolderService:
             raise HTTPException(status_code=404, detail="文件夹不存在")
         if folder.is_system:
             raise HTTPException(status_code=400, detail="系统文件夹不可删除")
-        await SkillKnowSkill.filter(folder_id=folder_id).update(folder_id=None)
         await SkillKnowDocument.filter(folder_id=folder_id).update(folder_id=None)
         await SkillKnowFolder.filter(parent_id=folder_id).update(parent_id=folder.parent_id)
         await folder.delete()

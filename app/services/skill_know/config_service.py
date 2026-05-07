@@ -9,6 +9,11 @@ class SkillKnowConfigService:
         "llm_embedding_model": "text-embedding-3-small",
         "llm_temperature": 0.2,
         "llm_timeout": 60,
+        "retrieval_top_k": 8,
+        "retrieval_score_threshold": 0.25,
+        "retrieval_max_context_chars": 12000,
+        "chunk_size": 1400,
+        "chunk_overlap": 150,
     }
     SENSITIVE_KEYS = {"llm_api_key"}
 
@@ -75,6 +80,11 @@ class SkillKnowConfigService:
             "llm_embedding_model",
             "llm_temperature",
             "llm_timeout",
+            "retrieval_top_k",
+            "retrieval_score_threshold",
+            "retrieval_max_context_chars",
+            "chunk_size",
+            "chunk_overlap",
         ]
         data = {key: await self.get(key) for key in keys}
         if masked and data.get("llm_api_key"):

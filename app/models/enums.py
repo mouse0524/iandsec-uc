@@ -48,27 +48,6 @@ class RegisterType(StrEnum):
     USER = "user"
 
 
-class SkillKnowSkillType(StrEnum):
-    SYSTEM = "system"
-    DOCUMENT = "document"
-    USER = "user"
-
-
-class SkillKnowSkillCategory(StrEnum):
-    SEARCH = "search"
-    PROMPT = "prompt"
-    RETRIEVAL = "retrieval"
-    TOOL = "tool"
-    WORKFLOW = "workflow"
-    FAQ = "faq"
-    TROUBLESHOOTING = "troubleshooting"
-    FEATURE_CONSULTING = "feature_consulting"
-    CONFIGURATION = "configuration"
-    INTEGRATION = "integration"
-    KNOWN_ISSUE = "known_issue"
-    UPGRADE_GUIDE = "upgrade_guide"
-
-
 class SkillKnowDocumentStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -88,3 +67,10 @@ class SkillKnowMessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
+
+class SkillKnowLearningStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    INDEXED = "indexed"

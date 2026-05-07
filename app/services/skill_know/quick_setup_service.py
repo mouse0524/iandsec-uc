@@ -20,6 +20,7 @@ class SkillKnowQuickSetupService:
             {"key": "chat_model", "label": "Chat Model", "done": bool(await skill_know_config_service.get("llm_chat_model"))},
             {"key": "embedding_model", "label": "Embedding Model", "done": bool(await skill_know_config_service.get("llm_embedding_model"))},
             {"key": "vector_store", "label": "ChromaDB 向量库", "done": True},
+            {"key": "retrieval", "label": "检索与分块参数", "done": True},
         ]
 
     async def complete(self, data) -> dict:
@@ -42,13 +43,28 @@ class SkillKnowQuickSetupService:
         await skill_know_config_service.set("llm_base_url", data.llm_base_url, description="OpenAI Base URL")
         await skill_know_config_service.set("llm_chat_model", data.llm_chat_model, description="OpenAI Chat Model")
         await skill_know_config_service.set("llm_embedding_model", data.llm_embedding_model, description="OpenAI Embedding Model")
+        await skill_know_config_service.set("retrieval_top_k", data.retrieval_top_k, group="retrieval", description="检索 Top K")
+        await skill_know_config_service.set("retrieval_score_threshold", data.retrieval_score_threshold, group="retrieval", description="检索分数阈值")
+        await skill_know_config_service.set("retrieval_max_context_chars", data.retrieval_max_context_chars, group="retrieval", description="最大上下文字符数")
+        await skill_know_config_service.set("chunk_size", data.chunk_size, group="retrieval", description="Markdown 分块大小")
+        await skill_know_config_service.set("chunk_overlap", data.chunk_overlap, group="retrieval", description="Markdown 分块重叠")
         return await self.state()
 
     async def test_connection(self, data) -> dict:
         return await skill_know_openai_client.test_connection(data.model_dump())
 
     async def reset(self) -> dict:
-        for key in ["llm_api_key", "llm_base_url", "llm_chat_model", "llm_embedding_model"]:
+        for key in [
+            "llm_api_key",
+            "llm_base_url",
+            "llm_chat_model",
+            "llm_embedding_model",
+            "retrieval_top_k",
+            "retrieval_score_threshold",
+            "retrieval_max_context_chars",
+            "chunk_size",
+            "chunk_overlap",
+        ]:
             await skill_know_config_service.set(key, None)
         return await self.state()
 

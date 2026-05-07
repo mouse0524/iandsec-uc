@@ -5,10 +5,9 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import (
     SkillKnowDocumentStatus,
+    SkillKnowLearningStatus,
     SkillKnowMessageRole,
     SkillKnowPromptCategory,
-    SkillKnowSkillCategory,
-    SkillKnowSkillType,
 )
 
 
@@ -27,83 +26,6 @@ class SkillKnowFolderUpdate(BaseModel):
     sort_order: int | None = None
 
 
-class SkillKnowSupportSolutionLevel(BaseModel):
-    level: int = Field(..., ge=1, le=3)
-    title: str
-    steps: list[str] = Field(default_factory=list)
-
-
-class SkillKnowSupportProfile(BaseModel):
-    product_type: str | None = None
-    product_module: str | None = None
-    issue_category: str | None = None
-    symptoms: list[str] = Field(default_factory=list)
-    root_causes: list[str] = Field(default_factory=list)
-    affected_versions: list[str] = Field(default_factory=list)
-    severity: str | None = None
-    solution_levels: list[SkillKnowSupportSolutionLevel] = Field(default_factory=list)
-    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    match_policy: dict[str, Any] = Field(default_factory=dict)
-
-
-class SkillKnowSkillIn(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    description: str = Field(..., min_length=1)
-    category: SkillKnowSkillCategory = SkillKnowSkillCategory.PROMPT
-    abstract: str | None = None
-    overview: str | None = None
-    content: str = Field(..., min_length=1)
-    trigger_keywords: list[str] = Field(default_factory=list)
-    trigger_intents: list[str] = Field(default_factory=list)
-    always_apply: bool = False
-    folder_id: int | None = None
-    priority: int = 100
-    config: dict[str, Any] = Field(default_factory=dict)
-    support: SkillKnowSupportProfile | None = None
-
-
-class SkillKnowSkillUpdate(BaseModel):
-    skill_id: int
-    name: str | None = None
-    description: str | None = None
-    category: SkillKnowSkillCategory | None = None
-    abstract: str | None = None
-    overview: str | None = None
-    content: str | None = None
-    trigger_keywords: list[str] | None = None
-    trigger_intents: list[str] | None = None
-    always_apply: bool | None = None
-    folder_id: int | None = None
-    priority: int | None = None
-    is_active: bool | None = None
-    config: dict[str, Any] | None = None
-    support: SkillKnowSupportProfile | None = None
-
-
-class SkillKnowMoveIn(BaseModel):
-    target_id: int
-    folder_id: int | None = None
-
-
-class SkillKnowSearchIn(BaseModel):
-    query: str = Field(..., min_length=1)
-    category: SkillKnowSkillCategory | None = None
-    type: SkillKnowSkillType | None = None
-    limit: int = Field(default=20, ge=1, le=100)
-
-
-class SkillKnowSupportMatchIn(BaseModel):
-    query: str = Field(..., min_length=1)
-    product_type: str | None = None
-    product_module: str | None = None
-    issue_category: str | None = None
-    limit: int = Field(default=5, ge=1, le=20)
-
-
-class SkillKnowSupportEvaluateSkillIn(BaseModel):
-    skill_id: int
-
-
 class SkillKnowDocumentUpdate(BaseModel):
     document_id: int
     title: str | None = None
@@ -113,16 +35,8 @@ class SkillKnowDocumentUpdate(BaseModel):
     folder_id: int | None = None
 
 
-class SkillKnowConvertIn(BaseModel):
-    document_id: int
-    use_llm: bool = True
-    auto_activate: bool = True
-    folder_id: int | None = None
-
-
-class SkillKnowBatchConvertIn(BaseModel):
-    document_ids: list[int]
-    use_llm: bool = True
+class SkillKnowMoveIn(BaseModel):
+    target_id: int
     folder_id: int | None = None
 
 
@@ -136,6 +50,11 @@ class SkillKnowQuickSetupIn(BaseModel):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
+    retrieval_top_k: int = Field(default=8, ge=1, le=30)
+    retrieval_score_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    retrieval_max_context_chars: int = Field(default=12000, ge=2000, le=50000)
+    chunk_size: int = Field(default=1400, ge=300, le=5000)
+    chunk_overlap: int = Field(default=150, ge=0, le=1000)
 
 
 class SkillKnowTestConnectionIn(BaseModel):
@@ -148,11 +67,27 @@ class SkillKnowTestConnectionIn(BaseModel):
 class SkillKnowChatIn(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: int | None = None
-    use_tools: bool = True
 
 
-class SkillKnowSqlIn(BaseModel):
-    query: str = Field(..., min_length=1)
+class SkillKnowMessageFeedbackIn(BaseModel):
+    message_id: int
+    rating: int | None = Field(default=None, ge=1, le=5)
+    is_helpful: bool | None = None
+    reason: str | None = None
+    correct_answer: str | None = None
+
+
+class SkillKnowLearningCandidateIn(BaseModel):
+    question: str = Field(..., min_length=1)
+    assistant_answer: str | None = None
+    feedback_reason: str | None = None
+    correct_answer: str | None = None
+    candidate_markdown: str | None = None
+
+
+class SkillKnowLearningReviewIn(BaseModel):
+    candidate_id: int
+    candidate_markdown: str | None = None
 
 
 class SkillKnowFolderOut(BaseModel):
@@ -166,33 +101,6 @@ class SkillKnowFolderOut(BaseModel):
     created_at: datetime | str | None = None
     updated_at: datetime | str | None = None
     children: list["SkillKnowFolderOut"] = Field(default_factory=list)
-
-
-class SkillKnowSkillOut(BaseModel):
-    id: int
-    uuid: str
-    uri: str | None
-    name: str
-    description: str
-    type: SkillKnowSkillType
-    category: SkillKnowSkillCategory
-    abstract: str | None
-    overview: str | None
-    content: str
-    trigger_keywords: list[str]
-    trigger_intents: list[str]
-    always_apply: bool
-    version: str
-    author: str | None
-    is_active: bool
-    source_document_id: int | None
-    folder_id: int | None
-    priority: int
-    config: dict[str, Any]
-    is_editable: bool
-    is_deletable: bool
-    created_at: datetime | str | None = None
-    updated_at: datetime | str | None = None
 
 
 class SkillKnowDocumentOut(BaseModel):
@@ -214,9 +122,7 @@ class SkillKnowDocumentOut(BaseModel):
     category: str | None
     tags: list[str]
     folder_id: int | None
-    skill_id: int | None
-    is_converted: bool
-    converted_at: datetime | str | None = None
+    extra_metadata: dict[str, Any]
     created_at: datetime | str | None = None
     updated_at: datetime | str | None = None
 
@@ -243,6 +149,7 @@ class SkillKnowMessageOut(BaseModel):
     tool_calls: list | None
     timeline: list
     latency_ms: int | None
+    extra_metadata: dict[str, Any]
     created_at: datetime | str | None = None
 
 
@@ -250,9 +157,27 @@ class SkillKnowConversationOut(BaseModel):
     id: int
     uuid: str
     title: str | None
+    extra_metadata: dict[str, Any]
     created_at: datetime | str | None = None
     updated_at: datetime | str | None = None
     messages: list[SkillKnowMessageOut] = Field(default_factory=list)
+
+
+class SkillKnowLearningCandidateOut(BaseModel):
+    id: int
+    question: str
+    assistant_answer: str | None
+    feedback_reason: str | None
+    correct_answer: str | None
+    source_conversation_id: int | None
+    source_message_id: int | None
+    status: SkillKnowLearningStatus
+    candidate_markdown: str | None
+    reviewed_by: int | None
+    reviewed_at: datetime | str | None = None
+    extra_metadata: dict[str, Any]
+    created_at: datetime | str | None = None
+    updated_at: datetime | str | None = None
 
 
 SkillKnowFolderOut.model_rebuild()

@@ -407,7 +407,7 @@ async def init_menus():
             is_hidden=False,
             component="Layout",
             keepalive=False,
-            redirect="/skill-know/search",
+            redirect="/skill-know/chat",
         )
     else:
         skill_know_parent.menu_type = MenuType.CATALOG
@@ -418,74 +418,55 @@ async def init_menus():
         skill_know_parent.is_hidden = False
         skill_know_parent.component = "Layout"
         skill_know_parent.keepalive = False
-        skill_know_parent.redirect = "/skill-know/search"
+        skill_know_parent.redirect = "/skill-know/chat"
         await skill_know_parent.save()
 
     skill_know_children = [
         {
-            "name": "知识搜索",
-            "path": "search",
-            "order": 1,
-            "icon": "material-symbols:search-rounded",
-            "component": "/skill-know/search",
-        },
-        {
             "name": "智能对话",
             "path": "chat",
-            "order": 2,
+            "order": 1,
             "icon": "material-symbols:chat-outline-rounded",
             "component": "/skill-know/chat",
         },
         {
             "name": "文档管理",
             "path": "documents",
-            "order": 3,
+            "order": 2,
             "icon": "material-symbols:docs-outline-rounded",
             "component": "/skill-know/documents",
         },
         {
-            "name": "技能管理",
-            "path": "skills",
-            "order": 4,
-            "icon": "material-symbols:psychology-outline-rounded",
-            "component": "/skill-know/skills",
-        },
-        {
-            "name": "知识图谱",
-            "path": "graph",
-            "order": 5,
-            "icon": "material-symbols:hub-outline-rounded",
-            "component": "/skill-know/graph",
-        },
-        {
             "name": "提示词管理",
             "path": "prompts",
-            "order": 6,
+            "order": 3,
             "icon": "material-symbols:format-quote-outline-rounded",
             "component": "/skill-know/prompts",
         },
         {
-            "name": "快速设置",
-            "path": "quick-setup",
-            "order": 7,
+            "name": "LLM设置",
+            "path": "llm-settings",
+            "order": 4,
             "icon": "material-symbols:tune-rounded",
-            "component": "/skill-know/quick-setup",
+            "component": "/skill-know/llm-settings",
         },
         {
-            "name": "批量上传",
-            "path": "upload-tasks",
-            "order": 8,
-            "icon": "material-symbols:upload-file-outline-rounded",
-            "component": "/skill-know/upload-tasks",
-        },
-        {
-            "name": "知识包",
-            "path": "packs",
-            "order": 9,
-            "icon": "material-symbols:deployed-code-outline-rounded",
-            "component": "/skill-know/packs",
+            "name": "对话管理（评分）",
+            "path": "conversations",
+            "order": 5,
+            "icon": "material-symbols:rate-review-outline-rounded",
+            "component": "/skill-know/conversations",
         },
     ]
+    legacy_skill_know_components = [
+        "/skill-know/search",
+        "/skill-know/skills",
+        "/skill-know/graph",
+        "/skill-know/quick-setup",
+        "/skill-know/upload-tasks",
+        "/skill-know/packs",
+    ]
+    await Menu.filter(parent_id=skill_know_parent.id, component__in=legacy_skill_know_components).delete()
     for child in skill_know_children:
         skill_know_menu = await Menu.filter(
             Q(component=child["component"]) | Q(path=child["path"], parent_id=skill_know_parent.id)

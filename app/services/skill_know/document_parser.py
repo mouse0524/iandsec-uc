@@ -6,8 +6,11 @@ from pathlib import Path
 
 SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS = {
     "pdf",
+    "ppt",
     "pptx",
+    "doc",
     "docx",
+    "xls",
     "xlsx",
     "html",
     "htm",

@@ -4,8 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from app.models.admin import SkillKnowDocument, SkillKnowFolder, SkillKnowPrompt, SkillKnowSkill
-from app.models.enums import SkillKnowSkillType
+from app.models.admin import SkillKnowDocument, SkillKnowFolder, SkillKnowPrompt
 
 
 def new_uuid() -> str:
@@ -40,15 +39,12 @@ async def folder_to_dict(folder: SkillKnowFolder, children: list[dict] | None = 
     return data
 
 
-async def skill_to_dict(skill: SkillKnowSkill) -> dict[str, Any]:
-    data = await skill.to_dict()
-    data["is_editable"] = skill.type != SkillKnowSkillType.SYSTEM
-    data["is_deletable"] = skill.type != SkillKnowSkillType.SYSTEM
+async def document_to_dict(document: SkillKnowDocument, *, include_content: bool = True) -> dict[str, Any]:
+    data = await document.to_dict()
+    if not include_content:
+        content = data.pop("content", None) or ""
+        data["content_preview"] = preview_text(content, 240)
     return data
-
-
-async def document_to_dict(document: SkillKnowDocument) -> dict[str, Any]:
-    return await document.to_dict()
 
 
 async def prompt_to_dict(prompt: SkillKnowPrompt) -> dict[str, Any]:

@@ -54,27 +54,4 @@ class SkillKnowContentAnalyzer:
     def _make_overview(self, title: str, content: str) -> str:
         return f"## {title}\n\n{preview_text(content, 1200)}"
 
-    def analyze_support_by_rule(self, title: str, content: str) -> dict:
-        text = f"{title}\n{content}"
-        base = self._analyze_by_rule(title, content)
-        troubleshooting_words = ["报错", "失败", "无法", "不能", "异常", "打不开", "超时", "错误"]
-        config_words = ["配置", "参数", "设置", "SMTP", "WebDAV", "API", "Key", "URL"]
-        if any(word.lower() in text.lower() for word in troubleshooting_words):
-            issue_category = "troubleshooting"
-        elif any(word.lower() in text.lower() for word in config_words):
-            issue_category = "configuration"
-        elif "升级" in text or "迁移" in text:
-            issue_category = "upgrade_guide"
-        elif "如何" in text or "怎么" in text:
-            issue_category = "feature_consulting"
-        else:
-            issue_category = "faq"
-        solution_levels = [
-            {"level": 1, "title": "快速解决", "steps": [base["abstract"]]},
-            {"level": 2, "title": "深入排查", "steps": [base["overview"]]},
-            {"level": 3, "title": "升级处理", "steps": ["如仍未解决，请补充错误信息、操作步骤、环境版本和相关日志后升级技术处理。"]},
-        ]
-        return {**base, "issue_category": issue_category, "solution_levels": solution_levels, "quality_score": 0.5}
-
-
 skill_know_content_analyzer = SkillKnowContentAnalyzer()

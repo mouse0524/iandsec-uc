@@ -8,10 +8,9 @@ from .enums import (
     PartnerRegisterStatus,
     RegisterType,
     SkillKnowDocumentStatus,
+    SkillKnowLearningStatus,
     SkillKnowMessageRole,
     SkillKnowPromptCategory,
-    SkillKnowSkillCategory,
-    SkillKnowSkillType,
     TicketActionType,
     TicketStatus,
 )
@@ -223,36 +222,6 @@ class SkillKnowFolder(BaseModel, TimestampMixin):
         table = "sk_folder"
 
 
-class SkillKnowSkill(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="技能UUID", index=True)
-    uri = fields.CharField(max_length=500, null=True, unique=True, description="Skill URI", index=True)
-    name = fields.CharField(max_length=100, description="技能名称", index=True)
-    description = fields.TextField(description="技能描述")
-    type = fields.CharEnumField(SkillKnowSkillType, default=SkillKnowSkillType.USER, description="技能类型", index=True)
-    category = fields.CharEnumField(
-        SkillKnowSkillCategory,
-        default=SkillKnowSkillCategory.PROMPT,
-        description="技能分类",
-        index=True,
-    )
-    abstract = fields.TextField(null=True, description="L0摘要")
-    overview = fields.TextField(null=True, description="L1概览")
-    content = fields.TextField(description="L2完整内容")
-    trigger_keywords = fields.JSONField(default=list, description="触发关键词")
-    trigger_intents = fields.JSONField(default=list, description="触发意图")
-    always_apply = fields.BooleanField(default=False, description="是否总是应用", index=True)
-    version = fields.CharField(max_length=20, default="1.0.0", description="版本")
-    author = fields.CharField(max_length=100, null=True, description="作者")
-    is_active = fields.BooleanField(default=True, description="是否启用", index=True)
-    source_document_id = fields.BigIntField(null=True, description="来源文档ID", index=True)
-    folder_id = fields.BigIntField(null=True, description="所属文件夹ID", index=True)
-    priority = fields.IntField(default=100, description="优先级", index=True)
-    config = fields.JSONField(default=dict, description="扩展配置")
-
-    class Meta:
-        table = "sk_skill"
-
-
 class SkillKnowDocument(BaseModel, TimestampMixin):
     uuid = fields.CharField(max_length=36, unique=True, description="文档UUID", index=True)
     uri = fields.CharField(max_length=500, null=True, unique=True, description="Document URI", index=True)
@@ -277,10 +246,6 @@ class SkillKnowDocument(BaseModel, TimestampMixin):
     tags = fields.JSONField(default=list, description="标签")
     folder_id = fields.BigIntField(null=True, description="所属文件夹ID", index=True)
     extra_metadata = fields.JSONField(default=dict, description="元数据")
-    skill_id = fields.BigIntField(null=True, description="转换后的技能ID", index=True)
-    is_converted = fields.BooleanField(default=False, description="是否已转技能", index=True)
-    converted_at = fields.DatetimeField(null=True, description="转换时间", index=True)
-
     class Meta:
         table = "sk_document"
 
@@ -336,6 +301,42 @@ class SkillKnowMessage(BaseModel, TimestampMixin):
 
     class Meta:
         table = "sk_message"
+
+
+class SkillKnowMessageFeedback(BaseModel, TimestampMixin):
+    message_id = fields.BigIntField(description="消息ID", index=True)
+    conversation_id = fields.BigIntField(description="会话ID", index=True)
+    rating = fields.IntField(null=True, description="评分1-5", index=True)
+    is_helpful = fields.BooleanField(null=True, description="是否有帮助", index=True)
+    reason = fields.TextField(null=True, description="反馈原因")
+    correct_answer = fields.TextField(null=True, description="正确答案")
+    created_by = fields.BigIntField(null=True, description="反馈人ID", index=True)
+    extra_metadata = fields.JSONField(default=dict, description="元数据")
+
+    class Meta:
+        table = "sk_message_feedback"
+
+
+class SkillKnowLearningCandidate(BaseModel, TimestampMixin):
+    question = fields.TextField(description="用户问题")
+    assistant_answer = fields.TextField(null=True, description="助手回答")
+    feedback_reason = fields.TextField(null=True, description="反馈原因")
+    correct_answer = fields.TextField(null=True, description="正确答案")
+    source_conversation_id = fields.BigIntField(null=True, description="来源会话ID", index=True)
+    source_message_id = fields.BigIntField(null=True, description="来源消息ID", index=True)
+    status = fields.CharEnumField(
+        SkillKnowLearningStatus,
+        default=SkillKnowLearningStatus.PENDING,
+        description="学习候选状态",
+        index=True,
+    )
+    candidate_markdown = fields.TextField(null=True, description="候选Markdown")
+    reviewed_by = fields.BigIntField(null=True, description="审核人ID", index=True)
+    reviewed_at = fields.DatetimeField(null=True, description="审核时间", index=True)
+    extra_metadata = fields.JSONField(default=dict, description="元数据")
+
+    class Meta:
+        table = "sk_learning_candidate"
 
 
 class SkillKnowPrompt(BaseModel, TimestampMixin):
