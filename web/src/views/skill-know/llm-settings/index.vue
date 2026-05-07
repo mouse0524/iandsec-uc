@@ -49,7 +49,9 @@ async function loadState() {
 async function testConnection() {
   testing.value = true
   try {
-    const res = await api.skillKnowTestConnection(form)
+    const payload = { ...form }
+    if (!payload.llm_api_key?.trim()) delete payload.llm_api_key
+    const res = await api.skillKnowTestConnection(payload)
     if (res.data?.success) $message.success(res.data.message || '连接成功')
     else $message.error(res.data?.message || '连接失败')
   } finally {

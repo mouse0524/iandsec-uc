@@ -51,7 +51,10 @@ class SkillKnowQuickSetupService:
         return await self.state()
 
     async def test_connection(self, data) -> dict:
-        return await skill_know_openai_client.test_connection(data.model_dump())
+        payload = data.model_dump()
+        if not str(payload.get("llm_api_key") or "").strip():
+            payload.pop("llm_api_key", None)
+        return await skill_know_openai_client.test_connection(payload)
 
     async def reset(self) -> dict:
         for key in [

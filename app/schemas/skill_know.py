@@ -58,7 +58,7 @@ class SkillKnowQuickSetupIn(BaseModel):
 
 
 class SkillKnowTestConnectionIn(BaseModel):
-    llm_api_key: str = Field(..., min_length=1)
+    llm_api_key: str | None = None
     llm_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
