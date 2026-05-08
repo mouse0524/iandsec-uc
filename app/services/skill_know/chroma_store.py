@@ -1,6 +1,7 @@
 import os
 from typing import Any
 
+from app.log import logger
 from app.models.admin import SkillKnowDocumentChunk, SkillKnowVectorIndex
 from app.settings import settings
 from app.services.skill_know.config_service import skill_know_config_service
@@ -94,12 +95,25 @@ class SkillKnowChromaStore:
         if not text:
             return None
         if await skill_know_config_service.is_configured():
-            embeddings = await skill_know_openai_client.embeddings([text])
-            embedding = embeddings[0] if embeddings else None
-            if embedding:
-                clean_metadata = {k: v for k, v in metadata.items() if v is not None}
-                self._document_collection().upsert(ids=[chunk_uri], documents=[text], embeddings=[embedding], metadatas=[clean_metadata])
-                return chunk_uri
+            try:
+                embeddings = await skill_know_openai_client.embeddings([text])
+                embedding = embeddings[0] if embeddings else None
+                if embedding:
+                    clean_metadata = {k: v for k, v in metadata.items() if v is not None}
+                    self._document_collection().upsert(ids=[chunk_uri], documents=[text], embeddings=[embedding], metadatas=[clean_metadata])
+                    return chunk_uri
+            except Exception as exc:
+                logger.exception(
+                    "[skill_know.chroma.upsert_document_chunk.failed] chunk_uri={} document_id={} chunk_index={} title={} heading={} embedding_base_url={} error={}",
+                    chunk_uri,
+                    metadata.get("document_id"),
+                    metadata.get("chunk_index"),
+                    metadata.get("title"),
+                    metadata.get("heading"),
+                    await skill_know_config_service.get("llm_embedding_base_url", await skill_know_config_service.get("llm_base_url")),
+                    str(exc),
+                )
+                return None
         return None
 
     async def delete_document_chunks(self, chunk_uris: list[str]) -> None:

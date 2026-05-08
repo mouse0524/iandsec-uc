@@ -10,12 +10,13 @@ from pathlib import Path
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from tortoise.expressions import Q
 
+from app.log import logger
 from app.models.admin import SkillKnowDocument
 from app.models.enums import SkillKnowDocumentStatus
 from app.services.skill_know.content_analyzer import skill_know_content_analyzer
 from app.services.skill_know.document_index_service import skill_know_document_index_service
 from app.services.skill_know.document_parser import SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS, SUPPORTED_MARKDOWN_UPLOAD_MESSAGE, skill_know_document_parser
-from app.services.skill_know.utils import document_to_dict, make_uri, new_uuid, sha256_text
+from app.services.skill_know.utils import document_to_dict, make_uri, new_uuid, preview_text, sha256_text
 from app.settings import settings
 
 
@@ -263,7 +264,18 @@ class SkillKnowDocumentService:
             try:
                 index_result = await skill_know_document_index_service.rebuild(document)
             except Exception as index_exc:
-                raise RuntimeError(f"Markdown 已生成，但索引失败: {index_exc}") from index_exc
+                logger.exception(
+                    "[skill_know.document.process.index_failed] document_id={} filename={} title={} ext={} chat_base_url={} embedding_base_url={} error={}",
+                    document.id,
+                    document.filename,
+                    document.title,
+                    ext,
+                    await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
+                    await skill_know_config_service.get("llm_embedding_base_url", await skill_know_config_service.get("llm_base_url")),
+                    str(index_exc),
+                )
+                compact_error = preview_text(str(index_exc), 240)
+                raise RuntimeError(f"Markdown 已生成，但索引失败: {compact_error}") from index_exc
             metadata = dict(document.extra_metadata or {})
             metadata.update(index_result)
             metadata.update({"process_stage": "completed", "process_progress": 100})
@@ -306,9 +318,18 @@ class SkillKnowDocumentService:
         document = await SkillKnowDocument.filter(id=data.document_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
-        for field in ["title", "description", "category", "tags", "folder_id"]:
+        for field in ["title", "description", "abstract", "overview", "content", "category", "tags", "folder_id"]:
             if field in data.model_fields_set:
                 setattr(document, field, getattr(data, field))
+        if "content" in data.model_fields_set:
+            content_text = document.content or ""
+            document.content_hash = sha256_text(content_text) if content_text else None
+            document.file_size = len(content_text.encode("utf-8", errors="ignore")) if content_text else 0
+            metadata = dict(document.extra_metadata or {})
+            metadata["index_status"] = "pending"
+            metadata["process_stage"] = "edited"
+            metadata["process_progress"] = 0
+            document.extra_metadata = metadata
         await document.save()
         return await document_to_dict(document)
 

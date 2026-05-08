@@ -30,6 +30,9 @@ class SkillKnowDocumentUpdate(BaseModel):
     document_id: int
     title: str | None = None
     description: str | None = None
+    abstract: str | None = None
+    overview: str | None = None
+    content: str | None = None
     category: str | None = None
     tags: list[str] | None = None
     folder_id: int | None = None

@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
+import { getToken } from '@/utils'
 
 defineOptions({ name: '智能对话' })
 
@@ -68,25 +69,72 @@ async function sendMessage(text) {
   await scrollToBottom()
   sending.value = true
   try {
-    progressSteps.value = [
-      { key: 'retrieve', label: '检索知识库', status: 'done' },
-      { key: 'reason', label: '整理上下文', status: 'active' },
-      { key: 'answer', label: '生成回答', status: 'pending' },
-    ]
-    const res = await api.skillKnowChat({ message: text, conversation_id: conversationId.value })
-    const data = res.data || {}
-    progressSteps.value = [
-      { key: 'retrieve', label: '检索知识库', status: 'done' },
-      { key: 'reason', label: '整理上下文', status: 'done' },
-      { key: 'answer', label: '生成回答', status: 'done' },
-    ]
-    conversationId.value = data.conversation_id || conversationId.value
-    Object.assign(localAssistant, {
-      id: data.message_id || localAssistant.id,
-      content: data.content || '未返回内容',
-      pending: false,
-      extra_metadata: { citations: data.citations || [] },
+    const resp = await fetch(`${import.meta.env.VITE_BASE_API}/skill-know/chat/agent/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', token: getToken() || '' },
+      body: JSON.stringify({ message: text, conversation_id: conversationId.value }),
     })
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() || ''
+      for (const part of parts) {
+        const line = part.split('\n').find((i) => i.startsWith('data:'))
+        if (!line) continue
+        const item = JSON.parse(line.replace(/^data:\s*/, ''))
+
+        if (item.type === 'phase.changed') {
+          progressSteps.value = [
+            { key: 'retrieve', label: '检索知识库', status: 'active' },
+            { key: 'reason', label: '整理上下文', status: 'pending' },
+            { key: 'answer', label: '生成回答', status: 'pending' },
+          ]
+        }
+        else if (item.type === 'search.results') {
+          progressSteps.value = [
+            { key: 'retrieve', label: '检索知识库', status: 'done' },
+            { key: 'reason', label: '整理上下文', status: 'active' },
+            { key: 'answer', label: '生成回答', status: 'pending' },
+          ]
+        }
+        else if (item.type === 'llm.call.started') {
+          progressSteps.value = [
+            { key: 'retrieve', label: '检索知识库', status: 'done' },
+            { key: 'reason', label: '整理上下文', status: 'done' },
+            { key: 'answer', label: '生成回答', status: 'active' },
+          ]
+        }
+        else if (item.type === 'assistant.delta') {
+          localAssistant.content += item.payload?.content || ''
+        }
+        else if (item.type === 'final') {
+          const data = item.payload || {}
+          progressSteps.value = [
+            { key: 'retrieve', label: '检索知识库', status: 'done' },
+            { key: 'reason', label: '整理上下文', status: 'done' },
+            { key: 'answer', label: '生成回答', status: 'done' },
+          ]
+          conversationId.value = data.conversation_id || conversationId.value
+          Object.assign(localAssistant, {
+            id: data.message_id || localAssistant.id,
+            content: data.content || localAssistant.content || '未返回内容',
+            pending: false,
+            extra_metadata: { citations: data.citations || [] },
+          })
+        }
+        else if (item.type === 'error') {
+          localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
+          localAssistant.pending = false
+          progressSteps.value = []
+        }
+      }
+    }
+
     await loadConversations()
     const current = conversations.value.find((item) => item.id === conversationId.value)
     if (current) currentConversation.value = current

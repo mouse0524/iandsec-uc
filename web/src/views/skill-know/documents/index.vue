@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
@@ -9,6 +9,7 @@ defineOptions({ name: '文档管理' })
 const loading = ref(false)
 const uploading = ref(false)
 const reindexing = ref(false)
+const saving = ref(false)
 const documents = ref([])
 const selected = ref(null)
 const keyword = ref('')
@@ -19,8 +20,8 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const uploadProgress = ref(0)
 const uploadStage = ref('')
 const uploadResumeKeyPrefix = 'skill-know-upload:'
-const uploadTasks = ref([])
 const activeAbortControllers = ref([])
+const editForm = ref(null)
 
 const filteredDocuments = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -69,15 +70,6 @@ async function uploadFile(e) {
   uploading.value = true
   uploadProgress.value = 0
   uploadStage.value = '初始化上传任务'
-  const task = {
-    id: `upload-${Date.now()}`,
-    filename: file.name,
-    size: file.size,
-    stage: uploadStage.value,
-    progress: 0,
-    status: 'uploading',
-  }
-  uploadTasks.value = [task, ...uploadTasks.value.filter((item) => item.filename !== file.name)].slice(0, 8)
   try {
     const chunkSize = 2 * 1024 * 1024
     const concurrency = 3
@@ -116,7 +108,6 @@ async function uploadFile(e) {
 
     let uploadedChunks = 0
     uploadStage.value = '上传文件分片'
-    task.stage = uploadStage.value
     uploadedChunks = uploadedSet.size
     for (let batchStart = 0; batchStart < totalChunks; batchStart += concurrency) {
       const tasks = []
@@ -141,11 +132,9 @@ async function uploadFile(e) {
       if (tasks.length) await Promise.all(tasks)
       uploadedChunks += tasks.length
       uploadProgress.value = Math.min(95, Math.round((uploadedChunks / totalChunks) * 100))
-      task.progress = uploadProgress.value
     }
 
     uploadStage.value = '提交合并任务'
-    task.stage = uploadStage.value
     const res = await api.skillKnowCompleteChunkUpload({
       upload_id: uploadId,
       filename: file.name,
@@ -155,9 +144,6 @@ async function uploadFile(e) {
     })
     uploadProgress.value = 100
     uploadStage.value = '后台转换 Markdown'
-    task.stage = uploadStage.value
-    task.progress = 100
-    task.status = 'processing'
     selected.value = res.data
     $message.success('已开始后台转换，请稍候')
     localStorage.removeItem(resumeKey)
@@ -165,13 +151,9 @@ async function uploadFile(e) {
     await loadDocuments()
   } catch (error) {
     if (error?.code === 'ERR_CANCELED' || error?.error?.code === 'ERR_CANCELED') {
-      task.stage = '已取消'
-      task.status = 'cancelled'
       $message.warning('上传已取消，可重新选择同一文件继续续传')
     }
     else {
-      task.stage = '上传失败'
-      task.status = 'failed'
       throw error
     }
   } finally {
@@ -230,6 +212,51 @@ async function reindexDocument() {
   }
 }
 
+function syncEditForm() {
+  if (!selected.value) {
+    editForm.value = null
+    return
+  }
+  editForm.value = {
+    title: selected.value.title || '',
+    description: selected.value.description || '',
+    abstract: selected.value.abstract || '',
+    overview: selected.value.overview || '',
+    content: selected.value.content || '',
+    category: selected.value.category || '',
+  }
+}
+
+async function saveDocument(reindexAfterSave = false) {
+  if (!selected.value || !editForm.value) return
+  saving.value = true
+  try {
+    const res = await api.skillKnowUpdateDocument({
+      document_id: selected.value.id,
+      title: editForm.value.title,
+      description: editForm.value.description,
+      abstract: editForm.value.abstract,
+      overview: editForm.value.overview,
+      content: editForm.value.content,
+      category: editForm.value.category,
+    })
+    selected.value = res.data
+    syncEditForm()
+    if (reindexAfterSave) {
+      const reindexed = await api.skillKnowReindexDocument({ document_id: selected.value.id })
+      selected.value = reindexed.data
+      syncEditForm()
+      $message.success('已保存并重建索引')
+    }
+    else {
+      $message.success('保存成功')
+    }
+    await loadDocuments()
+  } finally {
+    saving.value = false
+  }
+}
+
 async function deleteDocument() {
   if (!selected.value) return
   window.$dialog.warning({
@@ -260,6 +287,8 @@ function stageText(stage) {
   }[stage] || stage || '-'
 }
 
+watch(selected, syncEditForm, { immediate: true })
+
 </script>
 
 <template>
@@ -284,13 +313,6 @@ function stageText(stage) {
                 <NButton size="tiny" secondary type="error" @click="cancelUpload">取消上传</NButton>
               </NSpace>
             </NAlert>
-            <NCard v-if="uploadTasks.length" size="small" title="上传任务">
-              <div v-for="task in uploadTasks" :key="task.id" class="upload-task-item">
-                <div class="item-title">{{ task.filename }}</div>
-                <div class="item-desc">{{ task.stage }} · {{ task.status }}</div>
-                <NProgress type="line" :percentage="task.progress" :show-indicator="false" />
-              </div>
-            </NCard>
             <NInput v-model:value="keyword" clearable placeholder="搜索文档标题、文件名或 Markdown 内容" />
             <NSpin :show="loading">
               <div class="doc-list">
@@ -323,6 +345,8 @@ function stageText(stage) {
             <NSpace justify="space-between" align="start">
               <div><h2>{{ selected.title }}</h2><p class="muted">{{ selected.description || selected.filename }}</p></div>
               <NSpace>
+                <NButton type="primary" :loading="saving" @click="saveDocument(false)">保存修改</NButton>
+                <NButton secondary type="primary" :loading="saving || reindexing" @click="saveDocument(true)">保存并重建索引</NButton>
                 <NButton secondary :loading="reindexing" :disabled="selected.status !== 'completed'" @click="reindexDocument">重建索引</NButton>
                 <NButton secondary type="error" @click="deleteDocument">删除</NButton>
               </NSpace>
@@ -338,19 +362,27 @@ function stageText(stage) {
               <NProgress type="line" :percentage="selected.extra_metadata?.process_progress || 5" />
             </NAlert>
             <NAlert v-if="selected.error_message" type="error" class="section-card">{{ selected.error_message }}</NAlert>
-            <NCard size="small" title="摘要" class="section-card">{{ selected.abstract || '-' }}</NCard>
-            <NCard size="small" title="概览" class="section-card"><pre>{{ selected.overview || '-' }}</pre></NCard>
+            <NForm v-if="editForm" label-placement="top" class="section-card">
+              <NGrid :cols="2" :x-gap="12">
+                <NGi><NFormItem label="标题"><NInput v-model:value="editForm.title" /></NFormItem></NGi>
+                <NGi><NFormItem label="分类"><NInput v-model:value="editForm.category" /></NFormItem></NGi>
+              </NGrid>
+              <NFormItem label="描述"><NInput v-model:value="editForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></NFormItem>
+              <NFormItem label="摘要"><NInput v-model:value="editForm.abstract" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" /></NFormItem>
+              <NFormItem label="概览"><NInput v-model:value="editForm.overview" type="textarea" :autosize="{ minRows: 6, maxRows: 12 }" /></NFormItem>
+            </NForm>
             <NCard size="small" class="section-card">
               <template #header>
                 <NSpace justify="space-between" align="center">
-                  <span>Markdown</span>
+                  <span>Markdown 文档</span>
                   <NButtonGroup size="small">
                     <NButton :type="activeTab === 'preview' ? 'primary' : 'default'" @click="activeTab = 'preview'">预览</NButton>
                     <NButton :type="activeTab === 'source' ? 'primary' : 'default'" @click="activeTab = 'source'">源码</NButton>
                   </NButtonGroup>
                 </NSpace>
               </template>
-              <div v-if="activeTab === 'preview'" class="markdown-preview" v-html="renderedMarkdown || '<p>-</p>'" />
+              <div v-if="activeTab === 'preview'" class="markdown-preview" v-html="md.render(editForm?.content || '') || '<p>-</p>'" />
+              <NInput v-else-if="editForm" v-model:value="editForm.content" type="textarea" :autosize="{ minRows: 18, maxRows: 30 }" />
               <pre v-else>{{ selected.content || '-' }}</pre>
             </NCard>
           </template>
