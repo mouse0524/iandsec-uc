@@ -215,6 +215,13 @@ function conversationTitle(item) {
 function renderMessage(content) {
   return md.render(sanitizeAssistantContent(content || ''))
 }
+
+function handleInputKeydown(event) {
+  if (event.key !== 'Enter') return
+  if (event.shiftKey) return
+  event.preventDefault()
+  send()
+}
 </script>
 
 <template>
@@ -241,13 +248,9 @@ function renderMessage(content) {
 
       <section class="chat-main">
         <div class="chat-header">
-          <NSpace justify="space-between" align="center" class="header-bar">
-            <div>
-            <h2>{{ currentConversation ? conversationTitle(currentConversation) : '新会话' }}</h2>
-            <p>基于知识库 Markdown 文档回答，保留会话上下文。</p>
-            </div>
+          <div class="header-bar header-bar-compact">
             <NButton secondary size="small" @click="sidebarCollapsed = !sidebarCollapsed">{{ sidebarCollapsed ? '展开会话' : '收起会话' }}</NButton>
-          </NSpace>
+          </div>
         </div>
 
         <div v-if="progressSteps.length" class="progress-strip">
@@ -310,8 +313,8 @@ function renderMessage(content) {
             v-model:value="input"
             type="textarea"
             :autosize="{ minRows: 2, maxRows: 5 }"
-            placeholder="继续追问或输入新的产品技术支持/数据安全问题，Ctrl+Enter 发送"
-            @keydown.ctrl.enter="send"
+            placeholder="继续追问或输入新的产品技术支持/数据安全问题，Enter 发送，Shift+Enter 换行"
+            @keydown="handleInputKeydown"
           />
           <NButton type="primary" size="large" :loading="sending" :disabled="!input.trim()" @click="send">发送</NButton>
         </div>
@@ -336,10 +339,9 @@ function renderMessage(content) {
 .conversation-time { color: #7b8494; font-size: 12px; margin-top: 6px; }
 .conversation-item .n-button { position: absolute; right: 8px; top: 8px; }
 .chat-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.chat-header { padding: 18px 22px; border-bottom: 1px solid rgba(148,163,184,.18); }
+.chat-header { padding: 8px 14px; border-bottom: 1px solid rgba(148,163,184,.10); }
 .header-bar { width: 100%; }
-.chat-header h2 { margin: 0; }
-.chat-header p { margin: 6px 0 0; color: #64748b; }
+.header-bar-compact { display: flex; justify-content: flex-end; }
 .progress-strip { display: flex; gap: 12px; padding: 10px 18px; border-bottom: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.72); }
 .stream-debug-bar { display: flex; gap: 8px; padding: 8px 18px; border-bottom: 1px dashed rgba(148,163,184,.18); background: rgba(239,246,255,.68); }
 .progress-tools { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; padding-right: 12px; border-right: 1px solid rgba(148,163,184,.18); }
@@ -348,7 +350,7 @@ function renderMessage(content) {
 .progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
 .progress-step.active { color: #2563eb; }
 .progress-step.done { color: #16a34a; }
-.message-scroll { height: calc(100vh - 268px); overflow: auto; padding: 28px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
+.message-scroll { height: calc(100vh - 220px); overflow: auto; padding: 22px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: stretch; }
@@ -372,7 +374,11 @@ function renderMessage(content) {
 .citations p { margin: 4px 0; }
 .message-actions { margin-top: 10px; }
 .rating-row, .rated-tag { margin-top: 10px; }
-.input-bar { display: grid; grid-template-columns: 1fr 110px; gap: 12px; padding: 16px; border-top: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.86); }
+.input-bar { display: grid; grid-template-columns: 1fr 120px; gap: 12px; padding: 16px; border-top: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.92); align-items: stretch; }
+.input-bar :deep(.n-input) { height: 100%; }
+.input-bar :deep(.n-input-wrapper) { min-height: 52px; border-radius: 16px; align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+.input-bar :deep(textarea) { line-height: 1.7; }
+.input-bar :deep(.n-button) { height: 52px; border-radius: 16px; font-weight: 700; }
 @keyframes pulse {
   0%, 80%, 100% { opacity: .35; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
@@ -380,7 +386,7 @@ function renderMessage(content) {
 @media (max-width: 900px) {
   .chat-page { grid-template-columns: 1fr; height: auto; }
   .conversation-sidebar { max-height: 260px; }
-  .message-scroll { height: 68vh; }
+  .message-scroll { height: 72vh; }
   .message-bubble { max-width: 92%; }
 }
 </style>
