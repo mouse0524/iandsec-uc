@@ -17,6 +17,7 @@ const currentConversation = ref(null)
 const scroller = ref(null)
 const progressSteps = ref([])
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+const streamDebug = ref({ enabled: false, deltaCount: 0, firstTokenAt: '' })
 
 onMounted(async () => {
   await loadConversations()
@@ -48,6 +49,7 @@ function newConversation() {
   messages.value = []
   input.value = ''
   progressSteps.value = []
+  streamDebug.value = { enabled: false, deltaCount: 0, firstTokenAt: '' }
 }
 
 async function send() {
@@ -58,6 +60,7 @@ async function send() {
 async function sendMessage(text) {
   if (!text || sending.value) return
   input.value = ''
+  streamDebug.value = { enabled: true, deltaCount: 0, firstTokenAt: '' }
   progressSteps.value = [
     { key: 'retrieve', label: '检索知识库', status: 'active' },
     { key: 'reason', label: '整理上下文', status: 'pending' },
@@ -110,6 +113,8 @@ async function sendMessage(text) {
           ]
         }
         else if (item.type === 'assistant.delta') {
+          streamDebug.value.deltaCount += 1
+          if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
           localAssistant.content += item.payload?.content || ''
         }
         else if (item.type === 'final') {
@@ -126,11 +131,13 @@ async function sendMessage(text) {
             pending: false,
             extra_metadata: { citations: data.citations || [] },
           })
+          streamDebug.value.enabled = false
         }
         else if (item.type === 'error') {
           localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
           localAssistant.pending = false
           progressSteps.value = []
+          streamDebug.value.enabled = false
         }
       }
     }
@@ -142,6 +149,7 @@ async function sendMessage(text) {
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
     progressSteps.value = []
+    streamDebug.value.enabled = false
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -237,6 +245,12 @@ function renderMessage(content) {
           </div>
         </div>
 
+        <div v-if="streamDebug.enabled || streamDebug.deltaCount" class="stream-debug-bar">
+          <NTag size="small" type="info">STREAM MODE</NTag>
+          <NTag size="small">delta: {{ streamDebug.deltaCount }}</NTag>
+          <NTag v-if="streamDebug.firstTokenAt" size="small">first token: {{ streamDebug.firstTokenAt }}</NTag>
+        </div>
+
         <NSpin :show="loading">
           <div ref="scroller" class="message-scroll">
             <NEmpty v-if="!messages.length" description="输入问题开始对话，历史会话会自动保存" />
@@ -306,6 +320,7 @@ function renderMessage(content) {
 .chat-header h2 { margin: 0; }
 .chat-header p { margin: 6px 0 0; color: #64748b; }
 .progress-strip { display: flex; gap: 12px; padding: 10px 18px; border-bottom: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.72); }
+.stream-debug-bar { display: flex; gap: 8px; padding: 8px 18px; border-bottom: 1px dashed rgba(148,163,184,.18); background: rgba(239,246,255,.68); }
 .progress-step { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
 .progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
 .progress-step.active { color: #2563eb; }
@@ -313,10 +328,10 @@ function renderMessage(content) {
 .message-scroll { height: calc(100vh - 340px); overflow: auto; padding: 28px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
-.message-row.assistant { justify-content: flex-start; }
+.message-row.assistant { justify-content: stretch; }
 .message-bubble { max-width: min(820px, 78%); padding: 16px 18px; border-radius: 20px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
 .message-row.user .message-bubble { background: linear-gradient(180deg, #2563eb, #1d4ed8); color: white; border-top-right-radius: 8px; }
-.message-row.assistant .message-bubble { background: rgba(255,255,255,.96); color: #172033; border: 1px solid rgba(148,163,184,.18); border-top-left-radius: 8px; }
+.message-row.assistant .message-bubble { width: 100%; max-width: none; background: rgba(255,255,255,.96); color: #172033; border: 1px solid rgba(148,163,184,.18); border-top-left-radius: 8px; }
 .message-role { font-size: 12px; opacity: .72; margin-bottom: 6px; }
 .markdown-body :deep(p) { margin: 8px 0; }
 .markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 20px; margin: 8px 0; }
