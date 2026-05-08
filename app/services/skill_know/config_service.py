@@ -5,6 +5,8 @@ from app.models.admin import SkillKnowSystemConfig
 class SkillKnowConfigService:
     DEFAULTS = {
         "llm_base_url": "https://api.openai.com/v1",
+        "llm_chat_base_url": "https://api.openai.com/v1",
+        "llm_embedding_base_url": "https://api.openai.com/v1",
         "llm_chat_model": "gpt-4o-mini",
         "llm_embedding_model": "text-embedding-3-small",
         "llm_temperature": 0.2,
@@ -76,6 +78,8 @@ class SkillKnowConfigService:
         keys = [
             "llm_api_key",
             "llm_base_url",
+            "llm_chat_base_url",
+            "llm_embedding_base_url",
             "llm_chat_model",
             "llm_embedding_model",
             "llm_temperature",

@@ -12,7 +12,8 @@ const health = ref(null)
 const state = ref(null)
 const form = reactive({
   llm_api_key: '',
-  llm_base_url: 'https://api.openai.com/v1',
+  llm_chat_base_url: 'https://api.openai.com/v1',
+  llm_embedding_base_url: 'https://api.openai.com/v1',
   llm_chat_model: 'gpt-4o-mini',
   llm_embedding_model: 'text-embedding-3-small',
   retrieval_top_k: 8,
@@ -31,8 +32,10 @@ async function loadState() {
     state.value = stateRes.data
     health.value = healthRes.data
     const llm = stateRes.data?.llm || {}
+    const fallbackBaseUrl = llm.llm_base_url || 'https://api.openai.com/v1'
     Object.assign(form, {
-      llm_base_url: llm.llm_base_url || form.llm_base_url,
+      llm_chat_base_url: llm.llm_chat_base_url || fallbackBaseUrl || form.llm_chat_base_url,
+      llm_embedding_base_url: llm.llm_embedding_base_url || fallbackBaseUrl || form.llm_embedding_base_url,
       llm_chat_model: llm.llm_chat_model || form.llm_chat_model,
       llm_embedding_model: llm.llm_embedding_model || form.llm_embedding_model,
       retrieval_top_k: Number(llm.retrieval_top_k || form.retrieval_top_k),
@@ -88,8 +91,9 @@ async function save() {
             <NForm label-placement="top">
               <NFormItem label="API Key"><NInput v-model:value="form.llm_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存 Key" /></NFormItem>
               <div v-if="state?.llm?.llm_api_key" class="muted">已保存 Key（脱敏）：{{ state.llm.llm_api_key }}</div>
-              <NFormItem label="Base URL"><NInput v-model:value="form.llm_base_url" /></NFormItem>
+              <NFormItem label="对话端点"><NInput v-model:value="form.llm_chat_base_url" /></NFormItem>
               <NFormItem label="Chat Model"><NInput v-model:value="form.llm_chat_model" /></NFormItem>
+              <NFormItem label="Embedding 端点"><NInput v-model:value="form.llm_embedding_base_url" /></NFormItem>
               <NFormItem label="Embedding Model"><NInput v-model:value="form.llm_embedding_model" /></NFormItem>
             </NForm>
           </NCard>

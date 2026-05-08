@@ -33,6 +33,11 @@ async def upload_chunk(
     return Success(data=await skill_know_document_service.save_chunk(upload_id, chunk_index, total_chunks, file))
 
 
+@router.get("/upload/status", summary="查询分片上传状态")
+async def chunk_upload_status(upload_id: str = Query(...), total_chunks: int | None = Query(None)):
+    return Success(data=await skill_know_document_service.chunk_upload_status(upload_id, total_chunks))
+
+
 @router.post("/upload/complete", summary="完成分片上传")
 async def complete_chunk_upload(payload: SkillKnowChunkUploadCompleteIn):
     return Success(data=await skill_know_document_service.complete_chunk_upload(payload))

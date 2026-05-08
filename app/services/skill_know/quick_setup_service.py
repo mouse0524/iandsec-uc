@@ -30,17 +30,19 @@ class SkillKnowQuickSetupService:
         else:
             key_preview = "(empty)"
         logger.info(
-            "[skill_know.quick_setup.complete] api_key_type={} api_key_preview={} base_url={} chat_model={} embedding_model={}",
+            "[skill_know.quick_setup.complete] api_key_type={} api_key_preview={} chat_base_url={} embedding_base_url={} chat_model={} embedding_model={}",
             type(data.llm_api_key).__name__,
             key_preview,
-            data.llm_base_url,
+            data.llm_chat_base_url,
+            data.llm_embedding_base_url,
             data.llm_chat_model,
             data.llm_embedding_model,
         )
         # 空 key 不覆盖已有 key，防止“保存其他项时把 key 清空”
         if isinstance(data.llm_api_key, str) and data.llm_api_key.strip():
             await skill_know_config_service.set("llm_api_key", data.llm_api_key.strip(), description="OpenAI API Key")
-        await skill_know_config_service.set("llm_base_url", data.llm_base_url, description="OpenAI Base URL")
+        await skill_know_config_service.set("llm_chat_base_url", data.llm_chat_base_url, description="Chat Base URL")
+        await skill_know_config_service.set("llm_embedding_base_url", data.llm_embedding_base_url, description="Embedding Base URL")
         await skill_know_config_service.set("llm_chat_model", data.llm_chat_model, description="OpenAI Chat Model")
         await skill_know_config_service.set("llm_embedding_model", data.llm_embedding_model, description="OpenAI Embedding Model")
         await skill_know_config_service.set("retrieval_top_k", data.retrieval_top_k, group="retrieval", description="检索 Top K")
@@ -59,7 +61,8 @@ class SkillKnowQuickSetupService:
     async def reset(self) -> dict:
         for key in [
             "llm_api_key",
-            "llm_base_url",
+            "llm_chat_base_url",
+            "llm_embedding_base_url",
             "llm_chat_model",
             "llm_embedding_model",
             "retrieval_top_k",

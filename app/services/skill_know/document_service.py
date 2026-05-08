@@ -4,7 +4,7 @@ import asyncio
 import os
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import BackgroundTasks, HTTPException, UploadFile
@@ -20,6 +20,8 @@ from app.settings import settings
 
 
 class SkillKnowDocumentService:
+    CHUNK_EXPIRE_HOURS = 24
+
     def _upload_dir(self) -> str:
         path = os.path.join(settings.UPLOAD_DIR, "skill_know", datetime.now().strftime("%Y%m%d"))
         os.makedirs(path, exist_ok=True)
@@ -34,6 +36,30 @@ class SkillKnowDocumentService:
         path = os.path.join(self._temp_dir(), "chunks")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _cleanup_stale_chunk_dirs(self) -> None:
+        root = Path(self._chunk_dir())
+        if not root.exists():
+            return
+        expire_before = datetime.now() - timedelta(hours=self.CHUNK_EXPIRE_HOURS)
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            try:
+                modified_at = datetime.fromtimestamp(child.stat().st_mtime)
+            except OSError:
+                continue
+            if modified_at >= expire_before:
+                continue
+            for part in child.glob("*.part"):
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+            try:
+                child.rmdir()
+            except OSError:
+                pass
 
     async def _save_upload_to_temp(self, file: UploadFile, temp_path: str) -> int:
         size = 0
@@ -95,6 +121,7 @@ class SkillKnowDocumentService:
         return await document_to_dict(document)
 
     async def init_chunk_upload(self, data) -> dict:
+        self._cleanup_stale_chunk_dirs()
         filename = data.filename.strip()
         if not filename:
             raise HTTPException(status_code=400, detail="文件名不能为空")
@@ -115,6 +142,25 @@ class SkillKnowDocumentService:
             "file_size": data.file_size,
             "file_type": ext,
             "total_chunks": data.total_chunks,
+        }
+
+    async def chunk_upload_status(self, upload_id: str, total_chunks: int | None = None) -> dict:
+        chunk_dir = Path(self._chunk_dir()) / upload_id
+        if not chunk_dir.exists() or not chunk_dir.is_dir():
+            raise HTTPException(status_code=404, detail="上传任务不存在")
+        uploaded_indexes = sorted(
+            int(part.stem)
+            for part in chunk_dir.glob("*.part")
+            if part.stem.isdigit()
+        )
+        total = total_chunks or len(uploaded_indexes)
+        progress = 0 if total <= 0 else min(100, round(len(uploaded_indexes) / total * 100))
+        return {
+            "upload_id": upload_id,
+            "uploaded_chunks": uploaded_indexes,
+            "uploaded_count": len(uploaded_indexes),
+            "total_chunks": total,
+            "progress": progress,
         }
 
     async def save_chunk(self, upload_id: str, chunk_index: int, total_chunks: int, file: UploadFile) -> dict:

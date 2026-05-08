@@ -12,7 +12,9 @@ class SkillKnowOpenAIClient:
         data = await skill_know_config_service.llm_config()
         if override:
             data.update({k: v for k, v in override.items() if v is not None})
-        data["llm_base_url"] = str(data.get("llm_base_url") or "https://api.openai.com/v1").rstrip("/")
+        legacy_base = str(data.get("llm_base_url") or "https://api.openai.com/v1").rstrip("/")
+        data["llm_chat_base_url"] = str(data.get("llm_chat_base_url") or legacy_base).rstrip("/")
+        data["llm_embedding_base_url"] = str(data.get("llm_embedding_base_url") or legacy_base).rstrip("/")
         return data
 
     async def chat(
@@ -36,7 +38,7 @@ class SkillKnowOpenAIClient:
             payload["tool_choice"] = "auto"
         async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
             resp = await client.post(
-                f"{config['llm_base_url']}/chat/completions",
+                f"{config['llm_chat_base_url']}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
             )
@@ -66,7 +68,7 @@ class SkillKnowOpenAIClient:
         async with httpx.AsyncClient(timeout=stream_timeout) as client:
             async with client.stream(
                 "POST",
-                f"{config['llm_base_url']}/chat/completions",
+                f"{config['llm_chat_base_url']}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
             ) as resp:
@@ -89,7 +91,7 @@ class SkillKnowOpenAIClient:
             raise RuntimeError("未配置 OpenAI API Key")
         async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
             resp = await client.post(
-                f"{config['llm_base_url']}/embeddings",
+                f"{config['llm_embedding_base_url']}/embeddings",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"model": config.get("llm_embedding_model") or "text-embedding-3-small", "input": texts},
             )

@@ -125,10 +125,12 @@ export default {
   skillKnowDeleteFolder: (params = {}) => request.delete('/skill-know/folders/delete', { params }),
   // skill know - documents
   skillKnowInitChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/init', data, { timeout: 300000 }),
-  skillKnowUploadChunk: (formData) => request.post('/skill-know/documents/upload/chunk', formData, {
+  skillKnowUploadChunk: (formData, signal) => request.post('/skill-know/documents/upload/chunk', formData, {
+    signal,
     timeout: 300000,
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
+  skillKnowChunkUploadStatus: (params = {}) => request.get('/skill-know/documents/upload/status', { params, timeout: 300000 }),
   skillKnowCompleteChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/complete', data, { timeout: 300000 }),
   skillKnowUploadDocument: (file, data = {}) => {
     const formData = new FormData()

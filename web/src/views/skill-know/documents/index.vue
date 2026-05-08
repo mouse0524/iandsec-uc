@@ -16,6 +16,11 @@ const fileInput = ref(null)
 const activeTab = ref('preview')
 const pollingTimers = new Map()
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+const uploadProgress = ref(0)
+const uploadStage = ref('')
+const uploadResumeKeyPrefix = 'skill-know-upload:'
+const uploadTasks = ref([])
+const activeAbortControllers = ref([])
 
 const filteredDocuments = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -62,27 +67,85 @@ async function uploadFile(e) {
   const file = e.target.files?.[0]
   if (!file) return
   uploading.value = true
+  uploadProgress.value = 0
+  uploadStage.value = '初始化上传任务'
+  const task = {
+    id: `upload-${Date.now()}`,
+    filename: file.name,
+    size: file.size,
+    stage: uploadStage.value,
+    progress: 0,
+    status: 'uploading',
+  }
+  uploadTasks.value = [task, ...uploadTasks.value.filter((item) => item.filename !== file.name)].slice(0, 8)
   try {
     const chunkSize = 2 * 1024 * 1024
+    const concurrency = 3
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize))
-    const initRes = await api.skillKnowInitChunkUpload({
-      filename: file.name,
-      title: file.name,
-      file_size: file.size,
-      total_chunks: totalChunks,
-    })
-    const uploadId = initRes.data?.upload_id
-    for (let index = 0; index < totalChunks; index += 1) {
-      const start = index * chunkSize
-      const end = Math.min(file.size, start + chunkSize)
-      const blob = file.slice(start, end)
-      const formData = new FormData()
-      formData.append('upload_id', uploadId)
-      formData.append('chunk_index', String(index))
-      formData.append('total_chunks', String(totalChunks))
-      formData.append('file', blob, `${file.name}.part`)
-      await api.skillKnowUploadChunk(formData)
+    const resumeKey = `${uploadResumeKeyPrefix}${file.name}:${file.size}:${totalChunks}`
+    let uploadId = localStorage.getItem(resumeKey)
+    if (!uploadId) {
+      const initRes = await api.skillKnowInitChunkUpload({
+        filename: file.name,
+        title: file.name,
+        file_size: file.size,
+        total_chunks: totalChunks,
+      })
+      uploadId = initRes.data?.upload_id
+      if (uploadId) localStorage.setItem(resumeKey, uploadId)
     }
+
+    let uploadedSet = new Set()
+    if (uploadId) {
+      try {
+        const statusRes = await api.skillKnowChunkUploadStatus({ upload_id: uploadId, total_chunks: totalChunks })
+        uploadedSet = new Set(statusRes.data?.uploaded_chunks || [])
+        uploadProgress.value = Math.min(95, statusRes.data?.progress || 0)
+      } catch {
+        localStorage.removeItem(resumeKey)
+        const initRes = await api.skillKnowInitChunkUpload({
+          filename: file.name,
+          title: file.name,
+          file_size: file.size,
+          total_chunks: totalChunks,
+        })
+        uploadId = initRes.data?.upload_id
+        if (uploadId) localStorage.setItem(resumeKey, uploadId)
+      }
+    }
+
+    let uploadedChunks = 0
+    uploadStage.value = '上传文件分片'
+    task.stage = uploadStage.value
+    uploadedChunks = uploadedSet.size
+    for (let batchStart = 0; batchStart < totalChunks; batchStart += concurrency) {
+      const tasks = []
+      for (let index = batchStart; index < Math.min(totalChunks, batchStart + concurrency); index += 1) {
+        if (uploadedSet.has(index)) continue
+        const start = index * chunkSize
+        const end = Math.min(file.size, start + chunkSize)
+        const blob = file.slice(start, end)
+        const formData = new FormData()
+        formData.append('upload_id', uploadId)
+        formData.append('chunk_index', String(index))
+        formData.append('total_chunks', String(totalChunks))
+        formData.append('file', blob, `${file.name}.part`)
+        const controller = new AbortController()
+        activeAbortControllers.value.push(controller)
+        tasks.push(
+          api.skillKnowUploadChunk(formData, controller.signal).finally(() => {
+            activeAbortControllers.value = activeAbortControllers.value.filter((item) => item !== controller)
+          }),
+        )
+      }
+      if (tasks.length) await Promise.all(tasks)
+      uploadedChunks += tasks.length
+      uploadProgress.value = Math.min(95, Math.round((uploadedChunks / totalChunks) * 100))
+      task.progress = uploadProgress.value
+    }
+
+    uploadStage.value = '提交合并任务'
+    task.stage = uploadStage.value
     const res = await api.skillKnowCompleteChunkUpload({
       upload_id: uploadId,
       filename: file.name,
@@ -90,14 +153,38 @@ async function uploadFile(e) {
       file_size: file.size,
       total_chunks: totalChunks,
     })
+    uploadProgress.value = 100
+    uploadStage.value = '后台转换 Markdown'
+    task.stage = uploadStage.value
+    task.progress = 100
+    task.status = 'processing'
     selected.value = res.data
     $message.success('已开始后台转换，请稍候')
+    localStorage.removeItem(resumeKey)
     startPolling(res.data.id)
     await loadDocuments()
+  } catch (error) {
+    if (error?.code === 'ERR_CANCELED' || error?.error?.code === 'ERR_CANCELED') {
+      task.stage = '已取消'
+      task.status = 'cancelled'
+      $message.warning('上传已取消，可重新选择同一文件继续续传')
+    }
+    else {
+      task.stage = '上传失败'
+      task.status = 'failed'
+      throw error
+    }
   } finally {
     uploading.value = false
+    activeAbortControllers.value = []
+    uploadProgress.value = 0
+    uploadStage.value = ''
     e.target.value = ''
   }
+}
+
+function cancelUpload() {
+  activeAbortControllers.value.forEach((controller) => controller.abort())
 }
 
 function startPolling(documentId) {
@@ -190,6 +277,20 @@ function stageText(stage) {
               <NButton class="sk-btn" type="primary" :loading="uploading" @click="fileInput?.click()">上传文档</NButton>
               <NButton class="sk-btn" secondary :loading="loading" @click="loadDocuments">刷新</NButton>
             </div>
+            <NAlert v-if="uploading" type="info" :show-icon="false">
+              {{ uploadStage }}
+              <NProgress type="line" :percentage="uploadProgress" />
+              <NSpace justify="end" class="progress-actions">
+                <NButton size="tiny" secondary type="error" @click="cancelUpload">取消上传</NButton>
+              </NSpace>
+            </NAlert>
+            <NCard v-if="uploadTasks.length" size="small" title="上传任务">
+              <div v-for="task in uploadTasks" :key="task.id" class="upload-task-item">
+                <div class="item-title">{{ task.filename }}</div>
+                <div class="item-desc">{{ task.stage }} · {{ task.status }}</div>
+                <NProgress type="line" :percentage="task.progress" :show-indicator="false" />
+              </div>
+            </NCard>
             <NInput v-model:value="keyword" clearable placeholder="搜索文档标题、文件名或 Markdown 内容" />
             <NSpin :show="loading">
               <div class="doc-list">
@@ -268,7 +369,7 @@ function stageText(stage) {
 .doc-list-item:hover, .doc-list-item.active { background: rgba(32, 128, 240, .08); border-color: rgba(32, 128, 240, .22); }
 .item-title { font-weight: 700; }
 .item-desc, .muted, .metric-label { color: #7b8494; font-size: 12px; }
-.item-tags, .metric-grid, .section-card, .progress { margin-top: 12px; }
+.item-tags, .metric-grid, .section-card, .progress, .progress-actions, .upload-task-item { margin-top: 12px; }
 pre { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 420px; overflow: auto; }
 .markdown-preview { max-height: 620px; overflow: auto; line-height: 1.75; word-break: break-word; }
 .markdown-preview :deep(h1), .markdown-preview :deep(h2), .markdown-preview :deep(h3) { margin: 18px 0 10px; font-weight: 800; }

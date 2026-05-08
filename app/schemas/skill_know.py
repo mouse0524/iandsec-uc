@@ -59,7 +59,8 @@ class SkillKnowPromptUpdate(BaseModel):
 
 class SkillKnowQuickSetupIn(BaseModel):
     llm_api_key: str | None = None
-    llm_base_url: str = "https://api.openai.com/v1"
+    llm_chat_base_url: str = "https://api.openai.com/v1"
+    llm_embedding_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
     retrieval_top_k: int = Field(default=8, ge=1, le=30)
@@ -71,7 +72,8 @@ class SkillKnowQuickSetupIn(BaseModel):
 
 class SkillKnowTestConnectionIn(BaseModel):
     llm_api_key: str | None = None
-    llm_base_url: str = "https://api.openai.com/v1"
+    llm_chat_base_url: str = "https://api.openai.com/v1"
+    llm_embedding_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
 
