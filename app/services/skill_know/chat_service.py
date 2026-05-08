@@ -161,8 +161,27 @@ class SkillKnowChatService:
             done = event("llm.call.completed", {"length": len(answer)})
             timeline.append(done)
             yield done
+        except httpx.ConnectTimeout as exc:
+            logger.warning(
+                "[skill_know.chat.stream] connect timeout conv_id={} chat_base_url={} model={} error={}",
+                conv.id,
+                await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
+                await skill_know_config_service.get("llm_chat_model"),
+                str(exc),
+            )
+            answer = answer or "模型端点连接超时，请检查对话端点网络连通性或稍后重试"
+            yield event("assistant.delta", {"content": answer})
+            err = event("error", {"message": "模型端点连接超时，请检查对话端点网络连通性或稍后重试"})
+            timeline.append(err)
+            yield err
         except httpx.ConnectError as exc:
-            logger.warning("[skill_know.chat.stream] network connect error conv_id={} error={}", conv.id, str(exc))
+            logger.warning(
+                "[skill_know.chat.stream] network connect error conv_id={} chat_base_url={} model={} error={}",
+                conv.id,
+                await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
+                await skill_know_config_service.get("llm_chat_model"),
+                str(exc),
+            )
             answer = answer or "网络连接失败，请检查网络设置"
             yield event("assistant.delta", {"content": answer})
             err = event("error", {"message": "网络连接失败，请检查网络设置"})

@@ -6,10 +6,12 @@ import api from '@/api'
 defineOptions({ name: 'LLM设置' })
 
 const loading = ref(false)
-const testing = ref(false)
+const testingChat = ref(false)
+const testingEmbedding = ref(false)
 const saving = ref(false)
 const health = ref(null)
 const state = ref(null)
+const testResult = ref(null)
 const form = reactive({
   llm_api_key: '',
   llm_chat_base_url: 'https://api.openai.com/v1',
@@ -49,16 +51,35 @@ async function loadState() {
   }
 }
 
-async function testConnection() {
-  testing.value = true
+function buildPayload() {
+  const payload = { ...form }
+  if (!payload.llm_api_key?.trim()) delete payload.llm_api_key
+  return payload
+}
+
+async function testChatConnection() {
+  testingChat.value = true
   try {
-    const payload = { ...form }
-    if (!payload.llm_api_key?.trim()) delete payload.llm_api_key
+    const payload = buildPayload()
     const res = await api.skillKnowTestConnection(payload)
-    if (res.data?.success) $message.success(res.data.message || '连接成功')
-    else $message.error(res.data?.message || '连接失败')
+    testResult.value = res.data
+    if (res.data?.chat?.success) $message.success(res.data.chat.message || '对话端点连接成功')
+    else $message.error(res.data?.chat?.message || '对话端点连接失败')
   } finally {
-    testing.value = false
+    testingChat.value = false
+  }
+}
+
+async function testEmbeddingConnection() {
+  testingEmbedding.value = true
+  try {
+    const payload = buildPayload()
+    const res = await api.skillKnowTestConnection(payload)
+    testResult.value = res.data
+    if (res.data?.embedding?.success) $message.success(res.data.embedding.message || 'Embedding 端点连接成功')
+    else $message.error(res.data?.embedding?.message || 'Embedding 端点连接失败')
+  } finally {
+    testingEmbedding.value = false
   }
 }
 
@@ -108,7 +129,14 @@ async function save() {
           </NCard>
           <NCard :bordered="false" title="健康状态">
             <pre>{{ JSON.stringify(health, null, 2) }}</pre>
-            <NSpace class="actions"><NButton secondary :loading="testing" @click="testConnection">测试连接</NButton><NButton type="primary" :loading="saving" @click="save">保存配置</NButton></NSpace>
+            <NCard v-if="testResult" size="small" title="端点测试结果" class="section-card">
+              <pre>{{ JSON.stringify(testResult, null, 2) }}</pre>
+            </NCard>
+            <NSpace class="actions">
+              <NButton secondary :loading="testingChat" @click="testChatConnection">测试对话端点</NButton>
+              <NButton secondary :loading="testingEmbedding" @click="testEmbeddingConnection">测试 Embedding 端点</NButton>
+              <NButton type="primary" :loading="saving" @click="save">保存配置</NButton>
+            </NSpace>
           </NCard>
         </div>
       </NSpin>
@@ -121,6 +149,7 @@ async function save() {
 .settings-shell > :last-child { grid-column: 1 / -1; }
 .muted { color: #7b8494; margin: -8px 0 8px; }
 .actions { margin-top: 16px; }
+.section-card { margin-top: 16px; }
 pre { white-space: pre-wrap; margin: 0; }
 @media (max-width: 900px) { .settings-shell { grid-template-columns: 1fr; } }
 </style>
