@@ -17,7 +17,9 @@ const currentConversation = ref(null)
 const scroller = ref(null)
 const progressSteps = ref([])
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
-const streamDebug = ref({ enabled: false, deltaCount: 0, firstTokenAt: '' })
+const streamDebugEnabled = ref(false)
+const streamDebug = ref({ deltaCount: 0, firstTokenAt: '' })
+const sidebarCollapsed = ref(true)
 
 onMounted(async () => {
   await loadConversations()
@@ -49,7 +51,7 @@ function newConversation() {
   messages.value = []
   input.value = ''
   progressSteps.value = []
-  streamDebug.value = { enabled: false, deltaCount: 0, firstTokenAt: '' }
+  streamDebug.value = { deltaCount: 0, firstTokenAt: '' }
 }
 
 async function send() {
@@ -60,7 +62,7 @@ async function send() {
 async function sendMessage(text) {
   if (!text || sending.value) return
   input.value = ''
-  streamDebug.value = { enabled: true, deltaCount: 0, firstTokenAt: '' }
+  streamDebug.value = { deltaCount: 0, firstTokenAt: '' }
   progressSteps.value = [
     { key: 'retrieve', label: '检索知识库', status: 'active' },
     { key: 'reason', label: '整理上下文', status: 'pending' },
@@ -80,6 +82,7 @@ async function sendMessage(text) {
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
+    let paintCounter = 0
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
@@ -115,7 +118,12 @@ async function sendMessage(text) {
         else if (item.type === 'assistant.delta') {
           streamDebug.value.deltaCount += 1
           if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
-          localAssistant.content += item.payload?.content || ''
+          localAssistant.content += sanitizeAssistantContent(item.payload?.content || '')
+          paintCounter += 1
+          if (paintCounter % 12 === 0) {
+            await nextTick()
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+          }
         }
         else if (item.type === 'final') {
           const data = item.payload || {}
@@ -127,17 +135,15 @@ async function sendMessage(text) {
           conversationId.value = data.conversation_id || conversationId.value
           Object.assign(localAssistant, {
             id: data.message_id || localAssistant.id,
-            content: data.content || localAssistant.content || '未返回内容',
+            content: sanitizeAssistantContent(data.content || localAssistant.content || '未返回内容'),
             pending: false,
             extra_metadata: { citations: data.citations || [] },
           })
-          streamDebug.value.enabled = false
         }
         else if (item.type === 'error') {
           localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
           localAssistant.pending = false
           progressSteps.value = []
-          streamDebug.value.enabled = false
         }
       }
     }
@@ -149,11 +155,14 @@ async function sendMessage(text) {
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
     progressSteps.value = []
-    streamDebug.value.enabled = false
   } finally {
     sending.value = false
     await scrollToBottom()
   }
+}
+
+function sanitizeAssistantContent(content) {
+  return String(content || '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim()
 }
 
 async function rateMessage(msg, rating, isHelpful) {
@@ -164,12 +173,12 @@ async function rateMessage(msg, rating, isHelpful) {
 }
 
 async function copyMessage(msg) {
-  await navigator.clipboard.writeText(msg.content || '')
+  await navigator.clipboard.writeText(sanitizeAssistantContent(msg.content || ''))
   $message.success('已复制')
 }
 
 function continueAsk(msg) {
-  input.value = `${msg.content || ''}\n\n请继续说明：`
+  input.value = `${sanitizeAssistantContent(msg.content || '')}\n\n请继续说明：`
 }
 
 async function retryFromMessage(msg) {
@@ -204,14 +213,14 @@ function conversationTitle(item) {
 }
 
 function renderMessage(content) {
-  return md.render(String(content || ''))
+  return md.render(sanitizeAssistantContent(content || ''))
 }
 </script>
 
 <template>
-  <CommonPage title="智能对话" show-footer>
-    <div class="sk-theme-page chat-page">
-      <aside class="conversation-sidebar">
+  <CommonPage title="智能对话" :show-header="false" show-footer>
+    <div class="sk-theme-page chat-page" :class="{ expanded: !sidebarCollapsed }">
+      <aside class="conversation-sidebar" :class="{ collapsed: sidebarCollapsed }">
         <NButton type="primary" block @click="newConversation">开启新会话</NButton>
         <div class="conversation-list">
           <div
@@ -232,20 +241,27 @@ function renderMessage(content) {
 
       <section class="chat-main">
         <div class="chat-header">
-          <div>
+          <NSpace justify="space-between" align="center" class="header-bar">
+            <div>
             <h2>{{ currentConversation ? conversationTitle(currentConversation) : '新会话' }}</h2>
             <p>基于知识库 Markdown 文档回答，保留会话上下文。</p>
-          </div>
+            </div>
+            <NButton secondary size="small" @click="sidebarCollapsed = !sidebarCollapsed">{{ sidebarCollapsed ? '展开会话' : '收起会话' }}</NButton>
+          </NSpace>
         </div>
 
         <div v-if="progressSteps.length" class="progress-strip">
+          <div class="progress-tools">
+            <NSwitch v-model:value="streamDebugEnabled" size="small" />
+            <span class="debug-switch-label">调试模式</span>
+          </div>
           <div v-for="step in progressSteps" :key="step.key" class="progress-step" :class="step.status">
             <span class="step-dot" />
             <span>{{ step.label }}</span>
           </div>
         </div>
 
-        <div v-if="streamDebug.enabled || streamDebug.deltaCount" class="stream-debug-bar">
+        <div v-if="streamDebugEnabled && (sending || streamDebug.deltaCount)" class="stream-debug-bar">
           <NTag size="small" type="info">STREAM MODE</NTag>
           <NTag size="small">delta: {{ streamDebug.deltaCount }}</NTag>
           <NTag v-if="streamDebug.firstTokenAt" size="small">first token: {{ streamDebug.firstTokenAt }}</NTag>
@@ -305,9 +321,13 @@ function renderMessage(content) {
 </template>
 
 <style scoped>
-.chat-page { display: grid; grid-template-columns: 300px 1fr; gap: 16px; height: calc(100vh - 110px); }
+.chat-page { display: grid; grid-template-columns: 92px 1fr; gap: 16px; height: calc(100vh - 38px); transition: grid-template-columns .22s ease; }
+.chat-page.expanded { grid-template-columns: 300px 1fr; }
 .conversation-sidebar, .chat-main { border-radius: 24px; background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.92)); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 16px 50px rgba(15,23,42,.08); backdrop-filter: blur(12px); }
 .conversation-sidebar { padding: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.conversation-sidebar.collapsed .conversation-list { display: none; }
+.conversation-sidebar.collapsed { padding-bottom: 14px; }
+.conversation-sidebar:not(.collapsed) { min-width: 300px; }
 .conversation-list { margin-top: 12px; overflow: auto; }
 .conversation-item { position: relative; padding: 14px; border-radius: 16px; cursor: pointer; border: 1px solid transparent; margin-bottom: 10px; background: rgba(148,163,184,.08); }
 .conversation-item:hover, .conversation-item.active { background: rgba(32,128,240,.10); border-color: rgba(32,128,240,.24); }
@@ -317,15 +337,18 @@ function renderMessage(content) {
 .conversation-item .n-button { position: absolute; right: 8px; top: 8px; }
 .chat-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .chat-header { padding: 18px 22px; border-bottom: 1px solid rgba(148,163,184,.18); }
+.header-bar { width: 100%; }
 .chat-header h2 { margin: 0; }
 .chat-header p { margin: 6px 0 0; color: #64748b; }
 .progress-strip { display: flex; gap: 12px; padding: 10px 18px; border-bottom: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.72); }
 .stream-debug-bar { display: flex; gap: 8px; padding: 8px 18px; border-bottom: 1px dashed rgba(148,163,184,.18); background: rgba(239,246,255,.68); }
+.progress-tools { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; padding-right: 12px; border-right: 1px solid rgba(148,163,184,.18); }
+.debug-switch-label { font-size: 12px; color: #64748b; }
 .progress-step { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
 .progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
 .progress-step.active { color: #2563eb; }
 .progress-step.done { color: #16a34a; }
-.message-scroll { height: calc(100vh - 340px); overflow: auto; padding: 28px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
+.message-scroll { height: calc(100vh - 268px); overflow: auto; padding: 28px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: stretch; }
@@ -357,7 +380,7 @@ function renderMessage(content) {
 @media (max-width: 900px) {
   .chat-page { grid-template-columns: 1fr; height: auto; }
   .conversation-sidebar { max-height: 260px; }
-  .message-scroll { height: 58vh; }
+  .message-scroll { height: 68vh; }
   .message-bubble { max-width: 92%; }
 }
 </style>
