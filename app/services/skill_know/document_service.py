@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, HTTPException, UploadFile
 from tortoise.expressions import Q
 
 from app.log import logger
-from app.models.admin import SkillKnowDocument
+from app.models.admin import SkillKnowDocument, SkillKnowDocumentChunk
 from app.models.enums import SkillKnowDocumentStatus
 from app.services.skill_know.content_analyzer import skill_know_content_analyzer
 from app.services.skill_know.document_index_service import skill_know_document_index_service
@@ -312,7 +312,10 @@ class SkillKnowDocumentService:
         document = await SkillKnowDocument.filter(id=document_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
-        return await document_to_dict(document)
+        data = await document_to_dict(document)
+        chunks = await SkillKnowDocumentChunk.filter(document_id=document_id).order_by("chunk_index")
+        data["chunks"] = [await chunk.to_dict() for chunk in chunks]
+        return data
 
     async def update(self, data) -> dict:
         document = await SkillKnowDocument.filter(id=data.document_id).first()

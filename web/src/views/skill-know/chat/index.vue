@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
@@ -21,6 +21,7 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const streamDebugEnabled = ref(false)
 const streamDebug = ref({ deltaCount: 0, firstTokenAt: '' })
 const sidebarCollapsed = ref(true)
+const stickToBottom = ref(true)
 const router = useRouter()
 
 onMounted(async () => {
@@ -40,8 +41,9 @@ async function openConversation(item) {
     const res = await api.skillKnowGetConversation({ conversation_id: item.id })
     currentConversation.value = res.data
     conversationId.value = res.data.id
-    messages.value = (res.data.messages || []).filter((msg) => ['user', 'assistant'].includes(msg.role))
-    await scrollToBottom()
+    messages.value = normalizeMessages(res.data.messages || [])
+    stickToBottom.value = true
+    await scrollToBottom(true)
   } finally {
     loading.value = false
   }
@@ -54,6 +56,7 @@ function newConversation() {
   input.value = ''
   progressSteps.value = []
   streamDebug.value = { deltaCount: 0, firstTokenAt: '' }
+  stickToBottom.value = true
 }
 
 async function send() {
@@ -71,9 +74,10 @@ async function sendMessage(text) {
     { key: 'answer', label: '生成回答', status: 'pending' },
   ]
   const localUser = { id: `local-user-${Date.now()}`, role: 'user', content: text }
-  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true, citationsCollapsed: true, streaming: true }
+  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true, revealing: true, citationsCollapsed: true, streaming: true }
   messages.value.push(localUser, localAssistant)
-  await scrollToBottom()
+  stickToBottom.value = true
+  await scrollToBottom(true)
   sending.value = true
   let rawAnswer = ''
   let revealedLength = 0
@@ -96,9 +100,9 @@ async function sendMessage(text) {
     revealDoneResolve?.()
   }
   const waitForReveal = async () => {
-    localAssistant.pending = false
-    localAssistant.content = compactAssistantContent(rawAnswer)
     await revealDone
+    localAssistant.content = compactAssistantContent(rawAnswer)
+    localAssistant.revealing = false
   }
   pumpReveal()
   try {
@@ -164,6 +168,7 @@ async function sendMessage(text) {
             id: data.message_id || localAssistant.id,
             content: compactAssistantContent(rawAnswer),
             pending: false,
+            revealing: false,
             streaming: false,
             extra_metadata: { citations: data.citations || [] },
             citationsCollapsed: true,
@@ -174,6 +179,7 @@ async function sendMessage(text) {
           localAssistant.pending = false
           await waitForReveal()
           localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
+          localAssistant.revealing = false
           localAssistant.streaming = false
           progressSteps.value = []
         }
@@ -187,12 +193,19 @@ async function sendMessage(text) {
   } catch (error) {
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
+    localAssistant.revealing = false
     localAssistant.streaming = false
     progressSteps.value = []
   } finally {
     sending.value = false
     await scrollToBottom()
   }
+}
+
+function normalizeMessages(rows) {
+  return rows
+    .filter((msg) => ['user', 'assistant'].includes(msg.role))
+    .map((msg) => ({ ...msg, citationsCollapsed: true, streaming: false, revealing: false, pending: false }))
 }
 
 function sanitizeAssistantContent(content) {
@@ -255,9 +268,20 @@ async function deleteConversation(item) {
   })
 }
 
-async function scrollToBottom() {
+function isNearBottom() {
+  const el = scroller.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 96
+}
+
+async function scrollToBottom(force = false) {
   await nextTick()
-  if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
+  if (!scroller.value) return
+  if (force || stickToBottom.value || isNearBottom()) scroller.value.scrollTop = scroller.value.scrollHeight
+}
+
+function handleMessageScroll() {
+  stickToBottom.value = isNearBottom()
 }
 
 function conversationTitle(item) {
@@ -322,7 +346,7 @@ function handleInputKeydown(event) {
           <NTag v-if="streamDebug.firstTokenAt" size="small">first token: {{ streamDebug.firstTokenAt }}</NTag>
         </div>
 
-        <div ref="scroller" class="message-scroll" :class="{ loading }">
+        <div ref="scroller" class="message-scroll" :class="{ loading }" @scroll="handleMessageScroll">
           <NSpin v-if="loading" class="message-loading" size="small" />
           <NEmpty v-if="!messages.length" description="输入问题开始对话，历史会话会自动保存" />
           <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
@@ -358,12 +382,12 @@ function handleInputKeydown(event) {
                   </button>
                 </div>
               </div>
-              <div v-if="msg.role === 'assistant' && !msg.pending" class="message-actions">
+              <div v-if="msg.role === 'assistant' && !msg.pending && !msg.streaming && !msg.revealing" class="message-actions">
                 <NButton size="small" secondary round @click="copyMessage(msg)">复制</NButton>
                 <NButton size="small" secondary round type="primary" @click="continueAsk(msg)">继续追问</NButton>
                 <NButton size="small" secondary round @click="retryFromMessage(msg)">重新回答</NButton>
               </div>
-              <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.rated" class="rating-row">
+              <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.streaming && !msg.revealing && !msg.rated" class="rating-row">
                 <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
                 <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
               </NSpace>

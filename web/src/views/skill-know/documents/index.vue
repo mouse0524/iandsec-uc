@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
@@ -15,6 +15,7 @@ const documents = ref([])
 const selected = ref(null)
 const keyword = ref('')
 const fileInput = ref(null)
+const chunkPreview = ref(null)
 const activeTab = ref('preview')
 const pollingTimers = new Map()
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -36,6 +37,10 @@ onMounted(loadDocuments)
 onUnmounted(stopAllPolling)
 
 const renderedMarkdown = computed(() => md.render(selected.value?.content || ''))
+const highlightedChunk = computed(() => {
+  if (!highlightedChunkId.value) return null
+  return (selected.value?.chunks || []).find((chunk) => String(chunk.id) === String(highlightedChunkId.value)) || null
+})
 
 async function loadDocuments() {
   loading.value = true
@@ -46,7 +51,9 @@ async function loadDocuments() {
     const queryDocument = queryDocumentId ? documents.value.find((item) => item.id === queryDocumentId) : null
     if (queryDocument) {
       highlightedChunkId.value = String(route.query.chunk_id || '')
+      activeTab.value = 'preview'
       await selectDocument(queryDocument)
+      await scrollToHighlightedChunk()
     }
     else if (!selected.value && documents.value.length) await selectDocument(documents.value[0])
     else if (selected.value) {
@@ -57,6 +64,11 @@ async function loadDocuments() {
   } finally {
     loading.value = false
   }
+}
+
+async function scrollToHighlightedChunk() {
+  await nextTick()
+  chunkPreview.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 watch(
@@ -74,6 +86,7 @@ async function selectDocument(item, options = {}) {
   try {
     const res = await api.skillKnowGetDocument({ document_id: item.id })
     selected.value = res.data
+    if (highlightedChunkId.value) await scrollToHighlightedChunk()
     if (['processing', 'pending'].includes(res.data?.status)) startPolling(item.id)
     else stopPolling(item.id)
   } catch (error) {
@@ -378,8 +391,8 @@ watch(selected, syncEditForm, { immediate: true })
               {{ stageText(selected.extra_metadata?.process_stage) }}，进度 {{ selected.extra_metadata?.process_progress || 5 }}%
               <NProgress type="line" :percentage="selected.extra_metadata?.process_progress || 5" />
             </NAlert>
-            <NAlert v-if="highlightedChunkId" type="success" class="section-card" :show-icon="false">
-              已从智能对话跳转到引用来源，引用块 ID：{{ highlightedChunkId }}
+            <NAlert v-if="highlightedChunkId" type="success" class="section-card citation-highlight" :show-icon="false">
+              已定位到智能对话引用片段，引用块 ID：{{ highlightedChunkId }}。
             </NAlert>
             <NAlert v-if="selected.error_message" type="error" class="section-card">{{ selected.error_message }}</NAlert>
             <NForm v-if="editForm" label-placement="top" class="section-card">
@@ -401,7 +414,16 @@ watch(selected, syncEditForm, { immediate: true })
                   </NButtonGroup>
                 </NSpace>
               </template>
-              <div v-if="activeTab === 'preview'" class="markdown-preview" v-html="md.render(editForm?.content || '') || '<p>-</p>'" />
+              <div v-if="activeTab === 'preview'" class="preview-stack">
+                <NAlert v-if="highlightedChunk" ref="chunkPreview" type="info" class="chunk-preview" :show-icon="false">
+                  <div class="chunk-preview-title">引用片段 #{{ highlightedChunk.chunk_index + 1 }} <span v-if="highlightedChunk.heading">· {{ highlightedChunk.heading }}</span></div>
+                  <div class="markdown-preview chunk-markdown" v-html="md.render(highlightedChunk.content || '') || '<p>-</p>'" />
+                </NAlert>
+                <NAlert v-else-if="highlightedChunkId" ref="chunkPreview" type="warning" class="chunk-preview" :show-icon="false">
+                  未找到引用块 {{ highlightedChunkId }}，可能文档已重新索引。下方显示完整文档。
+                </NAlert>
+                <div class="markdown-preview" v-html="md.render(editForm?.content || '') || '<p>-</p>'" />
+              </div>
               <NInput v-else-if="editForm" v-model:value="editForm.content" type="textarea" :autosize="{ minRows: 18, maxRows: 30 }" />
               <pre v-else>{{ selected.content || '-' }}</pre>
             </NCard>
@@ -422,7 +444,12 @@ watch(selected, syncEditForm, { immediate: true })
 .item-title { font-weight: 700; }
 .item-desc, .muted, .metric-label { color: #7b8494; font-size: 12px; }
 .item-tags, .metric-grid, .section-card, .progress, .progress-actions, .upload-task-item { margin-top: 12px; }
+.citation-highlight { border: 1px solid rgba(22, 163, 74, .32); box-shadow: 0 10px 24px rgba(22, 163, 74, .10); }
 pre { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 420px; overflow: auto; }
+.preview-stack { display: grid; gap: 14px; }
+.chunk-preview { border: 1px solid rgba(37, 99, 235, .32); box-shadow: 0 14px 30px rgba(37, 99, 235, .12); }
+.chunk-preview-title { margin-bottom: 8px; color: #1d4ed8; font-weight: 800; }
+.chunk-markdown { max-height: none; border-radius: 12px; padding: 12px; background: rgba(239, 246, 255, .76); }
 .markdown-preview { max-height: 620px; overflow: auto; line-height: 1.75; word-break: break-word; }
 .markdown-preview :deep(h1), .markdown-preview :deep(h2), .markdown-preview :deep(h3) { margin: 18px 0 10px; font-weight: 800; }
 .markdown-preview :deep(p) { margin: 8px 0; }
