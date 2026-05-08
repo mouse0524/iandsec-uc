@@ -243,13 +243,16 @@ function renderMessage(content) {
             <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
               <div class="message-bubble">
                 <div class="message-role">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
-                <div v-if="msg.role === 'assistant' && msg.pending" class="thinking-state">
-                  <span class="thinking-dot" />
-                  <span class="thinking-dot" />
-                  <span class="thinking-dot" />
-                  <span class="thinking-label">正在生成回答</span>
-                </div>
-                <div v-else-if="msg.role === 'assistant'" class="message-content markdown-body" v-html="renderMessage(msg.content)" />
+                <template v-if="msg.role === 'assistant'">
+                  <div v-if="msg.pending && !msg.content" class="thinking-state">
+                    <span class="thinking-dot" />
+                    <span class="thinking-dot" />
+                    <span class="thinking-dot" />
+                    <span class="thinking-label">正在生成回答</span>
+                  </div>
+                  <div v-else class="message-content markdown-body" v-html="renderMessage(msg.content)" />
+                  <div v-if="msg.pending && msg.content" class="streaming-hint">生成中...</div>
+                </template>
                 <div v-else class="message-content">{{ msg.content }}</div>
                 <div v-if="msg.extra_metadata?.citations?.length" class="citations">
                   <b>引用来源</b>
@@ -326,6 +329,7 @@ function renderMessage(content) {
 .thinking-dot:nth-child(2) { animation-delay: .15s; }
 .thinking-dot:nth-child(3) { animation-delay: .3s; }
 .thinking-label { margin-left: 4px; font-size: 13px; }
+.streaming-hint { margin-top: 8px; font-size: 12px; color: #64748b; }
 .citations { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(148,163,184,.38); color: #64748b; font-size: 12px; }
 .citations p { margin: 4px 0; }
 .message-actions { margin-top: 10px; }
