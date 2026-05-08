@@ -71,32 +71,36 @@ async function sendMessage(text) {
     { key: 'answer', label: '生成回答', status: 'pending' },
   ]
   const localUser = { id: `local-user-${Date.now()}`, role: 'user', content: text }
-  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true, citationsCollapsed: true }
+  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true, citationsCollapsed: true, streaming: true }
   messages.value.push(localUser, localAssistant)
   await scrollToBottom()
   sending.value = true
   let rawAnswer = ''
   let revealedLength = 0
-  let revealTimer = null
+  let revealRunning = false
+  let revealDoneResolve = null
+  const revealDone = new Promise((resolve) => { revealDoneResolve = resolve })
   const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
-  const startRevealTimer = () => {
-    if (revealTimer) return
-    revealTimer = window.setInterval(async () => {
-      if (revealedLength >= rawAnswer.length) return
-      revealedLength = Math.min(rawAnswer.length, revealedLength + 3)
-      localAssistant.content = compactAssistantContent(rawAnswer.slice(0, revealedLength), { trimEnd: false })
-      await scrollToBottom()
-    }, 24)
+  const pumpReveal = async () => {
+    if (revealRunning) return
+    revealRunning = true
+    while (localAssistant.pending || revealedLength < rawAnswer.length) {
+      if (revealedLength < rawAnswer.length) {
+        revealedLength = Math.min(rawAnswer.length, revealedLength + 2)
+        localAssistant.content = rawAnswer.slice(0, revealedLength).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
+        await scrollToBottom()
+      }
+      await sleep(28)
+    }
+    revealRunning = false
+    revealDoneResolve?.()
   }
   const waitForReveal = async () => {
-    while (revealedLength < rawAnswer.length) await sleep(24)
+    localAssistant.pending = false
     localAssistant.content = compactAssistantContent(rawAnswer)
-    if (revealTimer) {
-      window.clearInterval(revealTimer)
-      revealTimer = null
-    }
+    await revealDone
   }
-  startRevealTimer()
+  pumpReveal()
   try {
     const resp = await fetch(`${import.meta.env.VITE_BASE_API}/skill-know/chat/agent/stream`, {
       method: 'POST',
@@ -143,6 +147,7 @@ async function sendMessage(text) {
           streamDebug.value.deltaCount += 1
           if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
           rawAnswer += item.payload?.content || ''
+          pumpReveal()
         }
         else if (item.type === 'final') {
           const data = item.payload || {}
@@ -153,20 +158,23 @@ async function sendMessage(text) {
           ]
           conversationId.value = data.conversation_id || conversationId.value
           rawAnswer = data.content || rawAnswer || '未返回内容'
+          localAssistant.pending = false
           await waitForReveal()
           Object.assign(localAssistant, {
             id: data.message_id || localAssistant.id,
             content: compactAssistantContent(rawAnswer),
             pending: false,
+            streaming: false,
             extra_metadata: { citations: data.citations || [] },
             citationsCollapsed: true,
           })
         }
         else if (item.type === 'error') {
           rawAnswer = item.payload?.message || '对话失败，请稍后重试'
+          localAssistant.pending = false
           await waitForReveal()
           localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
-          localAssistant.pending = false
+          localAssistant.streaming = false
           progressSteps.value = []
         }
         if (index % 20 === 0) await sleep(0)
@@ -177,12 +185,11 @@ async function sendMessage(text) {
     const current = conversations.value.find((item) => item.id === conversationId.value)
     if (current) currentConversation.value = current
   } catch (error) {
-    if (revealTimer) window.clearInterval(revealTimer)
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
+    localAssistant.streaming = false
     progressSteps.value = []
   } finally {
-    if (revealTimer) window.clearInterval(revealTimer)
     sending.value = false
     await scrollToBottom()
   }
@@ -328,6 +335,7 @@ function handleInputKeydown(event) {
                   <span class="thinking-dot" />
                   <span class="thinking-label">正在生成回答</span>
                 </div>
+                <div v-else-if="msg.streaming" class="message-content streaming-content">{{ msg.content }}<span class="typing-cursor" /></div>
                 <div v-else class="message-content markdown-body" v-html="renderMessage(msg.content)" />
                 <div v-if="msg.pending && msg.content" class="streaming-hint">生成中...</div>
               </template>
@@ -421,6 +429,8 @@ function handleInputKeydown(event) {
 .markdown-body :deep(code) { padding: 2px 5px; border-radius: 4px; background: rgba(15, 23, 42, .06); }
 .markdown-body :deep(table) { width: 100%; border-collapse: collapse; margin: 10px 0; }
 .markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid rgba(148,163,184,.25); padding: 8px; text-align: left; }
+.streaming-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.typing-cursor { display: inline-block; width: 7px; height: 1.1em; margin-left: 2px; vertical-align: -2px; background: #2563eb; animation: cursor-blink .9s steps(2, start) infinite; }
 .thinking-state { display: inline-flex; align-items: center; gap: 8px; color: #64748b; }
 .thinking-dot { width: 8px; height: 8px; border-radius: 999px; background: #60a5fa; animation: pulse 1.2s infinite ease-in-out; }
 .thinking-dot:nth-child(2) { animation-delay: .15s; }
@@ -442,6 +452,10 @@ function handleInputKeydown(event) {
 @keyframes pulse {
   0%, 80%, 100% { opacity: .35; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
+}
+@keyframes cursor-blink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
 }
 @media (max-width: 900px) {
   .chat-page { grid-template-columns: 1fr; height: calc(100vh - 84px); min-height: 520px; }
