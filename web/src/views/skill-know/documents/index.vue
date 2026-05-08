@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
@@ -22,6 +23,8 @@ const uploadStage = ref('')
 const uploadResumeKeyPrefix = 'skill-know-upload:'
 const activeAbortControllers = ref([])
 const editForm = ref(null)
+const route = useRoute()
+const highlightedChunkId = ref('')
 
 const filteredDocuments = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -39,7 +42,13 @@ async function loadDocuments() {
   try {
     const res = await api.skillKnowDocuments({ page: 1, page_size: 100 })
     documents.value = res.data || []
-    if (!selected.value && documents.value.length) await selectDocument(documents.value[0])
+    const queryDocumentId = Number(route.query.document_id || 0)
+    const queryDocument = queryDocumentId ? documents.value.find((item) => item.id === queryDocumentId) : null
+    if (queryDocument) {
+      highlightedChunkId.value = String(route.query.chunk_id || '')
+      await selectDocument(queryDocument)
+    }
+    else if (!selected.value && documents.value.length) await selectDocument(documents.value[0])
     else if (selected.value) {
       const current = documents.value.find((item) => item.id === selected.value.id) || documents.value[0] || null
       if (current) await selectDocument(current, { silent: true })
@@ -49,6 +58,14 @@ async function loadDocuments() {
     loading.value = false
   }
 }
+
+watch(
+  () => route.query.document_id,
+  async () => {
+    if (route.path !== '/skill-know/documents') return
+    await loadDocuments()
+  },
+)
 
 async function selectDocument(item, options = {}) {
   if (!item) return
@@ -360,6 +377,9 @@ watch(selected, syncEditForm, { immediate: true })
             <NAlert v-if="['processing', 'pending'].includes(selected.status)" type="info" class="section-card">
               {{ stageText(selected.extra_metadata?.process_stage) }}，进度 {{ selected.extra_metadata?.process_progress || 5 }}%
               <NProgress type="line" :percentage="selected.extra_metadata?.process_progress || 5" />
+            </NAlert>
+            <NAlert v-if="highlightedChunkId" type="success" class="section-card" :show-icon="false">
+              已从智能对话跳转到引用来源，引用块 ID：{{ highlightedChunkId }}
             </NAlert>
             <NAlert v-if="selected.error_message" type="error" class="section-card">{{ selected.error_message }}</NAlert>
             <NForm v-if="editForm" label-placement="top" class="section-card">

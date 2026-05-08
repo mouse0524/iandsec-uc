@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
@@ -20,6 +21,7 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const streamDebugEnabled = ref(false)
 const streamDebug = ref({ deltaCount: 0, firstTokenAt: '' })
 const sidebarCollapsed = ref(true)
+const router = useRouter()
 
 onMounted(async () => {
   await loadConversations()
@@ -69,10 +71,24 @@ async function sendMessage(text) {
     { key: 'answer', label: '生成回答', status: 'pending' },
   ]
   const localUser = { id: `local-user-${Date.now()}`, role: 'user', content: text }
-  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true }
+  const localAssistant = { id: `local-assistant-${Date.now()}`, role: 'assistant', content: '', pending: true, citationsCollapsed: true }
   messages.value.push(localUser, localAssistant)
   await scrollToBottom()
   sending.value = true
+  let rawAnswer = ''
+  let revealedLength = 0
+  const revealAssistantContent = async (targetContent, options = {}) => {
+    const target = String(targetContent || '')
+    const chunkSize = options.fast ? 10 : 4
+    while (revealedLength < target.length) {
+      revealedLength = Math.min(target.length, revealedLength + chunkSize)
+      localAssistant.content = compactAssistantContent(target.slice(0, revealedLength), { trimEnd: false })
+      await nextTick()
+      await scrollToBottom()
+      await new Promise((resolve) => window.setTimeout(resolve, 18))
+    }
+    localAssistant.content = compactAssistantContent(target)
+  }
   try {
     const resp = await fetch(`${import.meta.env.VITE_BASE_API}/skill-know/chat/agent/stream`, {
       method: 'POST',
@@ -82,7 +98,6 @@ async function sendMessage(text) {
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    let paintCounter = 0
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
@@ -118,13 +133,8 @@ async function sendMessage(text) {
         else if (item.type === 'assistant.delta') {
           streamDebug.value.deltaCount += 1
           if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
-          localAssistant.content = compactAssistantContent(localAssistant.content + (item.payload?.content || ''))
-          paintCounter += 1
-          if (paintCounter % 2 === 0) {
-            await nextTick()
-            await scrollToBottom()
-            await new Promise((resolve) => requestAnimationFrame(resolve))
-          }
+          rawAnswer += item.payload?.content || ''
+          await revealAssistantContent(rawAnswer)
         }
         else if (item.type === 'final') {
           const data = item.payload || {}
@@ -134,11 +144,14 @@ async function sendMessage(text) {
             { key: 'answer', label: '生成回答', status: 'done' },
           ]
           conversationId.value = data.conversation_id || conversationId.value
+          rawAnswer = data.content || rawAnswer || '未返回内容'
+          await revealAssistantContent(rawAnswer, { fast: true })
           Object.assign(localAssistant, {
             id: data.message_id || localAssistant.id,
-            content: compactAssistantContent(data.content || localAssistant.content || '未返回内容'),
+            content: compactAssistantContent(rawAnswer),
             pending: false,
             extra_metadata: { citations: data.citations || [] },
+            citationsCollapsed: true,
           })
         }
         else if (item.type === 'error') {
@@ -166,12 +179,12 @@ function sanitizeAssistantContent(content) {
   return compactAssistantContent(content)
 }
 
-function compactAssistantContent(content) {
-  return String(content || '')
+function compactAssistantContent(content, options = {}) {
+  const result = String(content || '')
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return options.trimEnd === false ? result.replace(/^\s+/, '') : result.trim()
 }
 
 async function rateMessage(msg, rating, isHelpful) {
@@ -187,7 +200,17 @@ async function copyMessage(msg) {
 }
 
 function continueAsk(msg) {
-  input.value = `${sanitizeAssistantContent(msg.content || '')}\n\n请继续说明：`
+  input.value = '请基于上面的回答继续说明：'
+  nextTick(() => document.querySelector('.input-bar textarea')?.focus())
+}
+
+function citationLabel(cite, index) {
+  return `来源 ${index + 1}：${cite.title || cite.filename || '未命名文档'}${cite.heading ? ` · ${cite.heading}` : ''}`
+}
+
+function openCitation(cite) {
+  if (!cite?.document_id) return $message.warning('该引用缺少文档 ID，无法跳转')
+  router.push({ path: '/skill-know/documents', query: { document_id: cite.document_id, chunk_id: cite.chunk_id || '' } })
 }
 
 async function retryFromMessage(msg) {
@@ -297,16 +320,28 @@ function handleInputKeydown(event) {
                 </template>
                 <div v-else class="message-content">{{ msg.content }}</div>
                 <div v-if="msg.extra_metadata?.citations?.length" class="citations">
-                  <b>引用来源</b>
-                  <p v-for="cite in msg.extra_metadata.citations" :key="cite.chunk_uri || cite.chunk_id">
-                    {{ cite.title }} · {{ cite.heading || '无章节' }} · {{ cite.filename || '-' }}
-                  </p>
+                  <button class="citations-toggle" type="button" @click="msg.citationsCollapsed = !msg.citationsCollapsed">
+                    <span>引用来源 {{ msg.extra_metadata.citations.length }}</span>
+                    <span>{{ msg.citationsCollapsed ? '展开' : '收起' }}</span>
+                  </button>
+                  <div v-if="!msg.citationsCollapsed" class="citation-list">
+                    <button
+                      v-for="(cite, index) in msg.extra_metadata.citations"
+                      :key="cite.chunk_uri || cite.chunk_id || index"
+                      class="citation-link"
+                      type="button"
+                      @click="openCitation(cite)"
+                    >
+                      {{ citationLabel(cite, index) }}
+                      <span class="citation-file">{{ cite.filename || '-' }}</span>
+                    </button>
+                  </div>
                 </div>
-                <NSpace v-if="msg.role === 'assistant' && !msg.pending" class="message-actions" size="small">
-                  <NButton size="tiny" quaternary @click="copyMessage(msg)">复制</NButton>
-                  <NButton size="tiny" quaternary @click="continueAsk(msg)">继续追问</NButton>
-                  <NButton size="tiny" quaternary @click="retryFromMessage(msg)">重新回答</NButton>
-                </NSpace>
+                <div v-if="msg.role === 'assistant' && !msg.pending" class="message-actions">
+                  <NButton size="small" secondary round @click="copyMessage(msg)">复制</NButton>
+                  <NButton size="small" secondary round type="primary" @click="continueAsk(msg)">继续追问</NButton>
+                  <NButton size="small" secondary round @click="retryFromMessage(msg)">重新回答</NButton>
+                </div>
                 <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.rated" class="rating-row">
                   <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
                   <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
@@ -320,12 +355,13 @@ function handleInputKeydown(event) {
         <div class="input-bar">
           <NInput
             v-model:value="input"
+            class="chat-input"
             type="textarea"
             :autosize="{ minRows: 2, maxRows: 5 }"
             placeholder="继续追问或输入新的产品技术支持/数据安全问题，Enter 发送，Shift+Enter 换行"
             @keydown="handleInputKeydown"
           />
-          <NButton type="primary" size="large" :loading="sending" :disabled="!input.trim()" @click="send">发送</NButton>
+          <NButton class="send-button" type="primary" size="large" :loading="sending" :disabled="!input.trim()" @click="send">发送</NButton>
         </div>
       </section>
     </div>
@@ -333,7 +369,7 @@ function handleInputKeydown(event) {
 </template>
 
 <style scoped>
-.chat-page { display: grid; grid-template-columns: 1fr; gap: 16px; height: calc(100vh - 38px); transition: grid-template-columns .22s ease; }
+.chat-page { display: grid; grid-template-columns: 1fr; gap: 16px; height: calc(100vh - 118px); min-height: 620px; transition: grid-template-columns .22s ease; }
 .chat-page.expanded { grid-template-columns: 300px 1fr; }
 .conversation-sidebar, .chat-main { border-radius: 24px; background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.92)); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 16px 50px rgba(15,23,42,.08); backdrop-filter: blur(12px); }
 .conversation-sidebar { padding: 14px; overflow: hidden; display: flex; flex-direction: column; }
@@ -345,7 +381,7 @@ function handleInputKeydown(event) {
 .conversation-preview { color: #64748b; font-size: 12px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-time { color: #7b8494; font-size: 12px; margin-top: 6px; }
 .conversation-item .n-button { position: absolute; right: 8px; top: 8px; }
-.chat-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.chat-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .chat-header { padding: 8px 14px; border-bottom: 1px solid rgba(148,163,184,.10); }
 .header-bar { width: 100%; }
 .header-bar-compact { display: flex; justify-content: flex-end; }
@@ -357,7 +393,7 @@ function handleInputKeydown(event) {
 .progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
 .progress-step.active { color: #2563eb; }
 .progress-step.done { color: #16a34a; }
-.message-scroll { height: calc(100vh - 220px); overflow: auto; padding: 22px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
+.message-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: stretch; }
@@ -379,22 +415,25 @@ function handleInputKeydown(event) {
 .thinking-label { margin-left: 4px; font-size: 13px; }
 .streaming-hint { margin-top: 8px; font-size: 12px; color: #64748b; }
 .citations { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(148,163,184,.38); color: #64748b; font-size: 12px; }
-.citations p { margin: 4px 0; }
-.message-actions { margin-top: 10px; }
+.citations-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; border: 0; border-radius: 12px; padding: 8px 10px; cursor: pointer; color: #334155; background: rgba(241,245,249,.9); font-weight: 700; }
+.citation-list { display: grid; gap: 8px; margin-top: 8px; }
+.citation-link { display: flex; justify-content: space-between; gap: 12px; width: 100%; border: 1px solid rgba(37,99,235,.16); border-radius: 12px; padding: 9px 10px; color: #1d4ed8; background: rgba(239,246,255,.78); cursor: pointer; text-align: left; }
+.citation-link:hover { border-color: rgba(37,99,235,.34); background: rgba(219,234,254,.86); }
+.citation-file { flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #64748b; }
+.message-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .rating-row, .rated-tag { margin-top: 10px; }
-.input-bar { display: grid; grid-template-columns: 1fr 120px; gap: 12px; padding: 16px; border-top: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.92); align-items: stretch; }
-.input-bar :deep(.n-input) { height: 100%; }
-.input-bar :deep(.n-input-wrapper) { min-height: 52px; border-radius: 16px; align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
-.input-bar :deep(textarea) { line-height: 1.7; }
-.input-bar :deep(.n-button) { height: 52px; border-radius: 16px; font-weight: 700; }
+.input-bar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 10px; padding: 12px 14px; border-top: 1px solid rgba(148,163,184,.18); background: rgba(255,255,255,.96); align-items: end; }
+.input-bar :deep(.n-input-wrapper) { min-height: 46px; border-radius: 16px; align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.input-bar :deep(textarea) { line-height: 1.55; }
+.send-button { height: 46px; border-radius: 16px; font-weight: 800; box-shadow: 0 10px 22px rgba(37,99,235,.22); }
 @keyframes pulse {
   0%, 80%, 100% { opacity: .35; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
 }
 @media (max-width: 900px) {
-  .chat-page { grid-template-columns: 1fr; height: auto; }
+  .chat-page { grid-template-columns: 1fr; height: calc(100vh - 92px); min-height: 560px; }
   .conversation-sidebar { max-height: 260px; }
-  .message-scroll { height: 72vh; }
+  .input-bar { grid-template-columns: 1fr; }
   .message-bubble { max-width: 92%; }
 }
 </style>
