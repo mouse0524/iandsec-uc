@@ -118,10 +118,11 @@ async function sendMessage(text) {
         else if (item.type === 'assistant.delta') {
           streamDebug.value.deltaCount += 1
           if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
-          localAssistant.content += sanitizeAssistantContent(item.payload?.content || '')
+          localAssistant.content = compactAssistantContent(localAssistant.content + (item.payload?.content || ''))
           paintCounter += 1
-          if (paintCounter % 12 === 0) {
+          if (paintCounter % 2 === 0) {
             await nextTick()
+            await scrollToBottom()
             await new Promise((resolve) => requestAnimationFrame(resolve))
           }
         }
@@ -135,7 +136,7 @@ async function sendMessage(text) {
           conversationId.value = data.conversation_id || conversationId.value
           Object.assign(localAssistant, {
             id: data.message_id || localAssistant.id,
-            content: sanitizeAssistantContent(data.content || localAssistant.content || '未返回内容'),
+            content: compactAssistantContent(data.content || localAssistant.content || '未返回内容'),
             pending: false,
             extra_metadata: { citations: data.citations || [] },
           })
@@ -162,7 +163,15 @@ async function sendMessage(text) {
 }
 
 function sanitizeAssistantContent(content) {
-  return String(content || '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim()
+  return compactAssistantContent(content)
+}
+
+function compactAssistantContent(content) {
+  return String(content || '')
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 async function rateMessage(msg, rating, isHelpful) {
@@ -227,7 +236,7 @@ function handleInputKeydown(event) {
 <template>
   <CommonPage title="智能对话" :show-header="false" show-footer>
     <div class="sk-theme-page chat-page" :class="{ expanded: !sidebarCollapsed }">
-      <aside class="conversation-sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <aside v-if="!sidebarCollapsed" class="conversation-sidebar">
         <NButton type="primary" block @click="newConversation">开启新会话</NButton>
         <div class="conversation-list">
           <div
@@ -324,13 +333,11 @@ function handleInputKeydown(event) {
 </template>
 
 <style scoped>
-.chat-page { display: grid; grid-template-columns: 92px 1fr; gap: 16px; height: calc(100vh - 38px); transition: grid-template-columns .22s ease; }
+.chat-page { display: grid; grid-template-columns: 1fr; gap: 16px; height: calc(100vh - 38px); transition: grid-template-columns .22s ease; }
 .chat-page.expanded { grid-template-columns: 300px 1fr; }
 .conversation-sidebar, .chat-main { border-radius: 24px; background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.92)); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 16px 50px rgba(15,23,42,.08); backdrop-filter: blur(12px); }
 .conversation-sidebar { padding: 14px; overflow: hidden; display: flex; flex-direction: column; }
-.conversation-sidebar.collapsed .conversation-list { display: none; }
-.conversation-sidebar.collapsed { padding-bottom: 14px; }
-.conversation-sidebar:not(.collapsed) { min-width: 300px; }
+.conversation-sidebar { min-width: 300px; }
 .conversation-list { margin-top: 12px; overflow: auto; }
 .conversation-item { position: relative; padding: 14px; border-radius: 16px; cursor: pointer; border: 1px solid transparent; margin-bottom: 10px; background: rgba(148,163,184,.08); }
 .conversation-item:hover, .conversation-item.active { background: rgba(32,128,240,.10); border-color: rgba(32,128,240,.24); }
@@ -354,12 +361,13 @@ function handleInputKeydown(event) {
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: stretch; }
-.message-bubble { max-width: min(820px, 78%); padding: 16px 18px; border-radius: 20px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+.message-bubble { max-width: min(820px, 78%); padding: 16px 18px; border-radius: 20px; line-height: 1.65; white-space: normal; word-break: break-word; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
 .message-row.user .message-bubble { background: linear-gradient(180deg, #2563eb, #1d4ed8); color: white; border-top-right-radius: 8px; }
 .message-row.assistant .message-bubble { width: 100%; max-width: none; background: rgba(255,255,255,.96); color: #172033; border: 1px solid rgba(148,163,184,.18); border-top-left-radius: 8px; }
 .message-role { font-size: 12px; opacity: .72; margin-bottom: 6px; }
-.markdown-body :deep(p) { margin: 8px 0; }
-.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 20px; margin: 8px 0; }
+.markdown-body :deep(p) { margin: 4px 0; }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 20px; margin: 4px 0; }
+.markdown-body :deep(li) { margin: 2px 0; }
 .markdown-body :deep(pre) { padding: 12px; border-radius: 10px; background: rgba(15, 23, 42, .06); overflow: auto; }
 .markdown-body :deep(code) { padding: 2px 5px; border-radius: 4px; background: rgba(15, 23, 42, .06); }
 .markdown-body :deep(table) { width: 100%; border-collapse: collapse; margin: 10px 0; }
