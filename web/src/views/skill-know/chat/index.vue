@@ -77,18 +77,26 @@ async function sendMessage(text) {
   sending.value = true
   let rawAnswer = ''
   let revealedLength = 0
-  const revealAssistantContent = async (targetContent, options = {}) => {
-    const target = String(targetContent || '')
-    const chunkSize = options.fast ? 10 : 4
-    while (revealedLength < target.length) {
-      revealedLength = Math.min(target.length, revealedLength + chunkSize)
-      localAssistant.content = compactAssistantContent(target.slice(0, revealedLength), { trimEnd: false })
-      await nextTick()
+  let revealTimer = null
+  const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+  const startRevealTimer = () => {
+    if (revealTimer) return
+    revealTimer = window.setInterval(async () => {
+      if (revealedLength >= rawAnswer.length) return
+      revealedLength = Math.min(rawAnswer.length, revealedLength + 3)
+      localAssistant.content = compactAssistantContent(rawAnswer.slice(0, revealedLength), { trimEnd: false })
       await scrollToBottom()
-      await new Promise((resolve) => window.setTimeout(resolve, 18))
-    }
-    localAssistant.content = compactAssistantContent(target)
+    }, 24)
   }
+  const waitForReveal = async () => {
+    while (revealedLength < rawAnswer.length) await sleep(24)
+    localAssistant.content = compactAssistantContent(rawAnswer)
+    if (revealTimer) {
+      window.clearInterval(revealTimer)
+      revealTimer = null
+    }
+  }
+  startRevealTimer()
   try {
     const resp = await fetch(`${import.meta.env.VITE_BASE_API}/skill-know/chat/agent/stream`, {
       method: 'POST',
@@ -104,7 +112,8 @@ async function sendMessage(text) {
       buffer += decoder.decode(value, { stream: true })
       const parts = buffer.split('\n\n')
       buffer = parts.pop() || ''
-      for (const part of parts) {
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index]
         const line = part.split('\n').find((i) => i.startsWith('data:'))
         if (!line) continue
         const item = JSON.parse(line.replace(/^data:\s*/, ''))
@@ -134,7 +143,6 @@ async function sendMessage(text) {
           streamDebug.value.deltaCount += 1
           if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
           rawAnswer += item.payload?.content || ''
-          await revealAssistantContent(rawAnswer)
         }
         else if (item.type === 'final') {
           const data = item.payload || {}
@@ -145,7 +153,7 @@ async function sendMessage(text) {
           ]
           conversationId.value = data.conversation_id || conversationId.value
           rawAnswer = data.content || rawAnswer || '未返回内容'
-          await revealAssistantContent(rawAnswer, { fast: true })
+          await waitForReveal()
           Object.assign(localAssistant, {
             id: data.message_id || localAssistant.id,
             content: compactAssistantContent(rawAnswer),
@@ -155,10 +163,13 @@ async function sendMessage(text) {
           })
         }
         else if (item.type === 'error') {
+          rawAnswer = item.payload?.message || '对话失败，请稍后重试'
+          await waitForReveal()
           localAssistant.content = item.payload?.message || '对话失败，请稍后重试'
           localAssistant.pending = false
           progressSteps.value = []
         }
+        if (index % 20 === 0) await sleep(0)
       }
     }
 
@@ -166,10 +177,12 @@ async function sendMessage(text) {
     const current = conversations.value.find((item) => item.id === conversationId.value)
     if (current) currentConversation.value = current
   } catch (error) {
+    if (revealTimer) window.clearInterval(revealTimer)
     localAssistant.content = error.message || '对话失败，请稍后重试'
     localAssistant.pending = false
     progressSteps.value = []
   } finally {
+    if (revealTimer) window.clearInterval(revealTimer)
     sending.value = false
     await scrollToBottom()
   }
@@ -302,55 +315,54 @@ function handleInputKeydown(event) {
           <NTag v-if="streamDebug.firstTokenAt" size="small">first token: {{ streamDebug.firstTokenAt }}</NTag>
         </div>
 
-        <NSpin :show="loading">
-          <div ref="scroller" class="message-scroll">
-            <NEmpty v-if="!messages.length" description="输入问题开始对话，历史会话会自动保存" />
-            <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
-              <div class="message-bubble">
-                <div class="message-role">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
-                <template v-if="msg.role === 'assistant'">
-                  <div v-if="msg.pending && !msg.content" class="thinking-state">
-                    <span class="thinking-dot" />
-                    <span class="thinking-dot" />
-                    <span class="thinking-dot" />
-                    <span class="thinking-label">正在生成回答</span>
-                  </div>
-                  <div v-else class="message-content markdown-body" v-html="renderMessage(msg.content)" />
-                  <div v-if="msg.pending && msg.content" class="streaming-hint">生成中...</div>
-                </template>
-                <div v-else class="message-content">{{ msg.content }}</div>
-                <div v-if="msg.extra_metadata?.citations?.length" class="citations">
-                  <button class="citations-toggle" type="button" @click="msg.citationsCollapsed = !msg.citationsCollapsed">
-                    <span>引用来源 {{ msg.extra_metadata.citations.length }}</span>
-                    <span>{{ msg.citationsCollapsed ? '展开' : '收起' }}</span>
+        <div ref="scroller" class="message-scroll" :class="{ loading }">
+          <NSpin v-if="loading" class="message-loading" size="small" />
+          <NEmpty v-if="!messages.length" description="输入问题开始对话，历史会话会自动保存" />
+          <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
+            <div class="message-bubble">
+              <div class="message-role">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
+              <template v-if="msg.role === 'assistant'">
+                <div v-if="msg.pending && !msg.content" class="thinking-state">
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-label">正在生成回答</span>
+                </div>
+                <div v-else class="message-content markdown-body" v-html="renderMessage(msg.content)" />
+                <div v-if="msg.pending && msg.content" class="streaming-hint">生成中...</div>
+              </template>
+              <div v-else class="message-content">{{ msg.content }}</div>
+              <div v-if="msg.extra_metadata?.citations?.length" class="citations">
+                <button class="citations-toggle" type="button" @click="msg.citationsCollapsed = !msg.citationsCollapsed">
+                  <span>引用来源 {{ msg.extra_metadata.citations.length }}</span>
+                  <span>{{ msg.citationsCollapsed ? '展开' : '收起' }}</span>
+                </button>
+                <div v-if="!msg.citationsCollapsed" class="citation-list">
+                  <button
+                    v-for="(cite, index) in msg.extra_metadata.citations"
+                    :key="cite.chunk_uri || cite.chunk_id || index"
+                    class="citation-link"
+                    type="button"
+                    @click="openCitation(cite)"
+                  >
+                    {{ citationLabel(cite, index) }}
+                    <span class="citation-file">{{ cite.filename || '-' }}</span>
                   </button>
-                  <div v-if="!msg.citationsCollapsed" class="citation-list">
-                    <button
-                      v-for="(cite, index) in msg.extra_metadata.citations"
-                      :key="cite.chunk_uri || cite.chunk_id || index"
-                      class="citation-link"
-                      type="button"
-                      @click="openCitation(cite)"
-                    >
-                      {{ citationLabel(cite, index) }}
-                      <span class="citation-file">{{ cite.filename || '-' }}</span>
-                    </button>
-                  </div>
                 </div>
-                <div v-if="msg.role === 'assistant' && !msg.pending" class="message-actions">
-                  <NButton size="small" secondary round @click="copyMessage(msg)">复制</NButton>
-                  <NButton size="small" secondary round type="primary" @click="continueAsk(msg)">继续追问</NButton>
-                  <NButton size="small" secondary round @click="retryFromMessage(msg)">重新回答</NButton>
-                </div>
-                <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.rated" class="rating-row">
-                  <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
-                  <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
-                </NSpace>
-                <NTag v-if="msg.rated" size="small" type="success" class="rated-tag">已评分</NTag>
               </div>
+              <div v-if="msg.role === 'assistant' && !msg.pending" class="message-actions">
+                <NButton size="small" secondary round @click="copyMessage(msg)">复制</NButton>
+                <NButton size="small" secondary round type="primary" @click="continueAsk(msg)">继续追问</NButton>
+                <NButton size="small" secondary round @click="retryFromMessage(msg)">重新回答</NButton>
+              </div>
+              <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.rated" class="rating-row">
+                <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
+                <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
+              </NSpace>
+              <NTag v-if="msg.rated" size="small" type="success" class="rated-tag">已评分</NTag>
             </div>
           </div>
-        </NSpin>
+        </div>
 
         <div class="input-bar">
           <NInput
@@ -369,7 +381,7 @@ function handleInputKeydown(event) {
 </template>
 
 <style scoped>
-.chat-page { display: grid; grid-template-columns: 1fr; gap: 16px; height: calc(100vh - 118px); min-height: 620px; transition: grid-template-columns .22s ease; }
+.chat-page { display: grid; grid-template-columns: 1fr; gap: 16px; height: calc(100vh - 96px); min-height: 560px; transition: grid-template-columns .22s ease; }
 .chat-page.expanded { grid-template-columns: 300px 1fr; }
 .conversation-sidebar, .chat-main { border-radius: 24px; background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.92)); border: 1px solid rgba(148,163,184,.18); box-shadow: 0 16px 50px rgba(15,23,42,.08); backdrop-filter: blur(12px); }
 .conversation-sidebar { padding: 14px; overflow: hidden; display: flex; flex-direction: column; }
@@ -393,7 +405,8 @@ function handleInputKeydown(event) {
 .progress-step .step-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
 .progress-step.active { color: #2563eb; }
 .progress-step.done { color: #16a34a; }
-.message-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 24px; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
+.message-scroll { position: relative; flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 24px 28px; overscroll-behavior: contain; background: radial-gradient(circle at top, rgba(219,234,254,.35), transparent 30%), linear-gradient(180deg, rgba(248,250,252,.65), rgba(241,245,249,.40)); }
+.message-loading { position: sticky; top: 8px; left: 50%; z-index: 2; display: flex; justify-content: center; pointer-events: none; }
 .message-row { display: flex; margin-bottom: 16px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: stretch; }
@@ -431,7 +444,7 @@ function handleInputKeydown(event) {
   40% { opacity: 1; transform: translateY(-2px); }
 }
 @media (max-width: 900px) {
-  .chat-page { grid-template-columns: 1fr; height: calc(100vh - 92px); min-height: 560px; }
+  .chat-page { grid-template-columns: 1fr; height: calc(100vh - 84px); min-height: 520px; }
   .conversation-sidebar { max-height: 260px; }
   .input-bar { grid-template-columns: 1fr; }
   .message-bubble { max-width: 92%; }
