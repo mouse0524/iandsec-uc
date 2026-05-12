@@ -120,6 +120,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         min_categories = len(config.get("password_required_categories") or ["letter", "digit"])
         temp_password = generate_strong_password(min_length=max(min_length, 10), min_categories=min_categories)
         user_obj.password = get_password_hash(password=temp_password)
+        user_obj.token_version = int(getattr(user_obj, "token_version", 0) or 0) + 1
         await user_obj.save()
         await mail_controller.send_admin_reset_password_notice(to_user=user_obj, temp_password=temp_password)
         logger.info("[user.reset_password] success user_id={} username={}", user_obj.id, user_obj.username)

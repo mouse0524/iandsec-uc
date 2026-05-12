@@ -17,6 +17,7 @@ from app.core.redis_client import execute_redis
 from app.log import logger
 from app.models.admin import WebDavShareLink
 from app.controllers.system_setting import system_setting_controller
+from app.services.security import validate_external_service_url
 
 
 class WebDavController:
@@ -113,6 +114,7 @@ class WebDavController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先在系统设置中启用")
         if not data.get("webdav_base_url"):
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
+        data["webdav_base_url"] = validate_external_service_url(data.get("webdav_base_url"), label="WebDAV Base URL")
         if not data.get("webdav_username") or not data.get("webdav_password"):
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
         return data
@@ -372,6 +374,11 @@ class WebDavController:
     async def create_share(self, *, file_path: str, file_name: str, created_by: int, expire_hours: int | None = None) -> dict:
         conf = await self._get_config()
         norm_path = self._normalize_path(file_path)
+        parent_rows = await self.list_dir(self._parent_path(norm_path))
+        target = next((item for item in parent_rows if item.get("path") == norm_path), None)
+        if not target or target.get("is_dir"):
+            raise HTTPException(status_code=404, detail="分享目标文件不存在")
+        file_name = str(target.get("name") or file_name or "")
 
         existing = (
             await WebDavShareLink.filter(file_path=norm_path, created_by=created_by, is_active=True)

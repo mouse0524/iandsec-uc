@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 
 from app.log import logger
 from app.controllers.captcha import captcha_controller
@@ -13,9 +13,17 @@ router = APIRouter()
 
 
 @router.post("/upload", summary="游客上传工单附件")
-async def upload_public_ticket_attachment(file: UploadFile = File(...)):
+async def upload_public_ticket_attachment(
+    file: UploadFile = File(...),
+    captcha_id: str = Form(...),
+    captcha_code: str = Form(...),
+):
     logger.info("[api.public_ticket.upload] request filename={}", file.filename)
+    valid = await captcha_controller.verify_captcha(captcha_id, captcha_code, consume=False)
+    if not valid:
+        return Fail(code=400, msg="验证码错误或已过期")
     attachment = await ticket_controller.upload_attachment(uploader_id=0, file=file)
+    await ticket_controller.remember_guest_attachment(captcha_id=captcha_id, attachment_id=attachment.id)
     logger.info("[api.public_ticket.upload] success attachment_id={}", attachment.id)
     return Success(data=await attachment.to_dict())
 
@@ -48,7 +56,9 @@ async def create_public_ticket(payload: TicketCreate):
         return Fail(code=400, msg="问题分类不合法，请刷新页面后重试")
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
+    await ticket_controller.validate_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])
     ticket = await ticket_controller.create_ticket(submitter_id=0, payload=body)
+    await ticket_controller.consume_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])
     logger.info(
         "[api.public_ticket.create] success ticket_id={} ticket_no={} attachment_ids={}",
         ticket.id,
@@ -59,10 +69,22 @@ async def create_public_ticket(payload: TicketCreate):
 
 
 @router.get("/attachments", summary="游客工单附件列表")
-async def list_public_attachments(ids: str = Query("", description="附件ID，逗号分隔")):
+async def list_public_attachments(
+    ids: str = Query("", description="附件ID，逗号分隔"),
+    captcha_id: str = Query(..., description="验证码ID"),
+):
     id_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
     if not id_list:
         return Success(data=[])
+    await ticket_controller.validate_guest_attachment_ids(captcha_id=captcha_id, attachment_ids=id_list)
     rows = await TicketAttachment.filter(id__in=id_list, uploader_id=0).order_by("id")
-    data = [await item.to_dict() for item in rows]
+    data = [
+        {
+            "id": item.id,
+            "origin_name": item.origin_name,
+            "file_size": item.file_size,
+            "mime_type": item.mime_type,
+        }
+        for item in rows
+    ]
     return Success(data=data)

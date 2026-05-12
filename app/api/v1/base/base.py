@@ -94,6 +94,7 @@ async def login_access_token(credentials: CredentialsSchema, request: Request):
                 aud=settings.JWT_AUDIENCE,
                 iat=datetime.now(timezone.utc),
                 jti=uuid.uuid4(),
+                token_version=getattr(user, "token_version", 0),
                 exp=expire,
             )
         ),
@@ -175,6 +176,7 @@ async def reset_password_by_email(payload: ResetPasswordByEmailIn):
 
     await user_controller.validate_password_policy(payload.new_password)
     user.password = get_password_hash(payload.new_password)
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
     await user.save()
     return Success(msg="密码重置成功")
 
@@ -332,5 +334,6 @@ async def update_user_password(req_in: UpdatePassword):
         return Fail(msg="旧密码验证错误！")
     await user_controller.validate_password_policy(req_in.new_password)
     user.password = get_password_hash(req_in.new_password)
+    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
     await user.save()
     return Success(msg="修改成功")

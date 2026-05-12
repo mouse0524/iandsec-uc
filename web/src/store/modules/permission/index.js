@@ -70,11 +70,22 @@ function buildRoutes(routes = []) {
   }).filter(Boolean)
 }
 
+function collectRoutePaths(routes = [], parentPath = '') {
+  const paths = []
+  routes.forEach((route) => {
+    const current = route.path?.startsWith('/') ? route.path : `${parentPath}/${route.path || ''}`.replace(/\/+/g, '/')
+    if (current) paths.push(current === '/' ? current : current.replace(/\/$/, ''))
+    if (route.children?.length) paths.push(...collectRoutePaths(route.children, current))
+  })
+  return paths
+}
+
 export const usePermissionStore = defineStore('permission', {
   state() {
     return {
       accessRoutes: [],
       accessApis: [],
+      accessPaths: [],
     }
   },
   getters: {
@@ -95,6 +106,7 @@ export const usePermissionStore = defineStore('permission', {
     async generateRoutes() {
       const res = await api.getUserMenu() // 调用接口获取后端传来的菜单路由
       this.accessRoutes = buildRoutes(res.data) // 处理成前端路由格式
+      this.accessPaths = collectRoutePaths(this.accessRoutes)
       const tagsStore = useTagsStore()
       tagsStore.sanitizeByMenus(this.menus)
       return this.accessRoutes
@@ -106,6 +118,10 @@ export const usePermissionStore = defineStore('permission', {
     },
     resetPermission() {
       this.$reset()
+    },
+    canAccessPath(path) {
+      const normalized = String(path || '').replace(/\/$/, '') || '/'
+      return this.accessPaths.some((item) => normalized === item || normalized.startsWith(`${item}/`))
     },
   },
 })

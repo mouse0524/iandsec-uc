@@ -11,6 +11,7 @@ export function reqResolve(config) {
   const token = getToken()
   if (token) {
     config.headers.token = config.headers.token || token
+    config.headers.Authorization = config.headers.Authorization || `Bearer ${token}`
   }
 
   return config

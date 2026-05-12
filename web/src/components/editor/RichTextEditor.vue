@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Quill from 'quill'
 import 'quill/dist/quill.snow.css'
+import { sanitizeHtml } from '@/utils'
 
 const props = defineProps({
   modelValue: {
@@ -29,6 +30,10 @@ let quill = null
 let syncing = false
 let handleTextChange = null
 
+function normalizeEditorHtml(value = '') {
+  return sanitizeHtml(String(value || ''))
+}
+
 onMounted(() => {
   if (!editorRef.value) return
   quill = new Quill(editorRef.value, {
@@ -52,11 +57,11 @@ onMounted(() => {
   quill.root.style.maxHeight = `${props.maxHeight}px`
   quill.root.style.overflowY = 'auto'
   quill.root.style.boxSizing = 'border-box'
-  quill.root.innerHTML = props.modelValue || ''
+  quill.root.innerHTML = normalizeEditorHtml(props.modelValue)
   handleTextChange = () => {
     if (!quill) return
     syncing = true
-    emit('update:modelValue', quill.root.innerHTML)
+    emit('update:modelValue', normalizeEditorHtml(quill.root.innerHTML))
     syncing = false
   }
   quill.on('text-change', handleTextChange)
@@ -67,7 +72,7 @@ watch(
   (val) => {
     if (!quill || syncing) return
     if (!quill.root || !quill.root.isConnected) return
-    const html = val || ''
+    const html = normalizeEditorHtml(val)
     if (quill.root.innerHTML !== html) {
       quill.root.innerHTML = html
     }

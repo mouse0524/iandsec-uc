@@ -9,6 +9,9 @@ from app.models import Role, User
 from app.settings import settings
 
 
+TOKEN_VERSION_CLAIM = "token_version"
+
+
 class AuthControl:
     @classmethod
     async def is_authed(cls, token: str = Header(..., description="token验证")) -> Optional["User"]:
@@ -25,6 +28,11 @@ class AuthControl:
             user = await User.filter(id=user_id).first()
             if not user:
                 raise HTTPException(status_code=401, detail="Authentication failed")
+            if not user.is_active:
+                raise HTTPException(status_code=401, detail="账号已禁用")
+            token_version = decode_data.get(TOKEN_VERSION_CLAIM)
+            if token_version is not None and int(token_version) != int(getattr(user, "token_version", 0) or 0):
+                raise HTTPException(status_code=401, detail="登录状态已失效")
             CTX_USER_ID.set(int(user_id))
             CTX_USER_NAME.set(user.username or "")
             return user
@@ -32,9 +40,11 @@ class AuthControl:
             raise HTTPException(status_code=401, detail="无效的Token")
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="登录已过期")
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.warning("[auth] token verification failed error={}", repr(exc))
-            raise HTTPException(status_code=500, detail="认证失败")
+            raise HTTPException(status_code=401, detail="认证失败")
 
 
 class PermissionControl:

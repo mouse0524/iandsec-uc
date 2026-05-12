@@ -27,6 +27,10 @@ services:
     volumes:
       - app_storage:/opt/iandsec-uc/storage
       - app_logs:/opt/iandsec-uc/app/logs
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   mysql:

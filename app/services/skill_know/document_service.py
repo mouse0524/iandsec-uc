@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime, timedelta
@@ -10,6 +12,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from tortoise.expressions import Q
 
+from app.core.ctx import CTX_USER_ID
 from app.log import logger
 from app.models.admin import SkillKnowDocument, SkillKnowDocumentChunk
 from app.models.enums import SkillKnowDocumentStatus
@@ -22,6 +25,7 @@ from app.settings import settings
 
 class SkillKnowDocumentService:
     CHUNK_EXPIRE_HOURS = 24
+    MAX_TOTAL_CHUNKS = 128
 
     def _upload_dir(self) -> str:
         path = os.path.join(settings.UPLOAD_DIR, "skill_know", datetime.now().strftime("%Y%m%d"))
@@ -37,6 +41,40 @@ class SkillKnowDocumentService:
         path = os.path.join(self._temp_dir(), "chunks")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _safe_chunk_dir(self, upload_id: str) -> Path:
+        if not re.fullmatch(r"[a-f0-9]{32}", str(upload_id or "")):
+            raise HTTPException(status_code=400, detail="upload_id 非法")
+        root = Path(self._chunk_dir()).resolve()
+        path = (root / upload_id).resolve()
+        if path.parent != root:
+            raise HTTPException(status_code=400, detail="upload_id 非法")
+        return path
+
+    def _chunk_manifest_path(self, upload_id: str) -> Path:
+        return self._safe_chunk_dir(upload_id) / "manifest.json"
+
+    async def _write_chunk_manifest(self, upload_id: str, data: dict) -> None:
+        self._chunk_manifest_path(upload_id).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    async def _read_chunk_manifest(self, upload_id: str) -> dict:
+        manifest_path = self._chunk_manifest_path(upload_id)
+        if not manifest_path.exists():
+            raise HTTPException(status_code=404, detail="上传任务不存在")
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="上传任务元数据损坏") from exc
+
+    async def _validate_chunk_manifest(self, upload_id: str, *, user_id: int, total_chunks: int | None = None, file_size: int | None = None) -> dict:
+        manifest = await self._read_chunk_manifest(upload_id)
+        if int(manifest.get("user_id") or 0) != int(user_id):
+            raise HTTPException(status_code=403, detail="无权访问该上传任务")
+        if total_chunks is not None and int(manifest.get("total_chunks") or 0) != int(total_chunks):
+            raise HTTPException(status_code=400, detail="分片任务声明不一致")
+        if file_size is not None and int(manifest.get("file_size") or 0) != int(file_size):
+            raise HTTPException(status_code=400, detail="文件大小声明不一致")
+        return manifest
 
     def _cleanup_stale_chunk_dirs(self) -> None:
         root = Path(self._chunk_dir())
@@ -55,6 +93,12 @@ class SkillKnowDocumentService:
             for part in child.glob("*.part"):
                 try:
                     part.unlink()
+                except OSError:
+                    pass
+            manifest = child / "manifest.json"
+            if manifest.exists():
+                try:
+                    manifest.unlink()
                 except OSError:
                     pass
             try:
@@ -107,6 +151,7 @@ class SkillKnowDocumentService:
             file_size=0,
             file_type="md",
             folder_id=folder_id,
+            owner_id=CTX_USER_ID.get(),
             extra_metadata={
                 "original_filename": filename,
                 "original_file_type": ext,
@@ -121,7 +166,7 @@ class SkillKnowDocumentService:
         asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title, abs_path))
         return await document_to_dict(document)
 
-    async def init_chunk_upload(self, data) -> dict:
+    async def init_chunk_upload(self, data, *, user_id: int) -> dict:
         self._cleanup_stale_chunk_dirs()
         filename = data.filename.strip()
         if not filename:
@@ -131,11 +176,13 @@ class SkillKnowDocumentService:
             raise HTTPException(status_code=400, detail=SUPPORTED_MARKDOWN_UPLOAD_MESSAGE)
         if data.file_size > settings.MAX_UPLOAD_SIZE:
             raise HTTPException(status_code=400, detail="文件大小超限")
+        if data.total_chunks > self.MAX_TOTAL_CHUNKS:
+            raise HTTPException(status_code=400, detail="分片数量超限")
 
         upload_id = uuid.uuid4().hex
-        chunk_path = os.path.join(self._chunk_dir(), upload_id)
-        os.makedirs(chunk_path, exist_ok=True)
-        return {
+        chunk_path = self._safe_chunk_dir(upload_id)
+        chunk_path.mkdir(parents=False, exist_ok=True)
+        result = {
             "upload_id": upload_id,
             "filename": filename,
             "title": data.title or filename,
@@ -144,17 +191,20 @@ class SkillKnowDocumentService:
             "file_type": ext,
             "total_chunks": data.total_chunks,
         }
+        await self._write_chunk_manifest(upload_id, {**result, "user_id": int(user_id)})
+        return result
 
-    async def chunk_upload_status(self, upload_id: str, total_chunks: int | None = None) -> dict:
-        chunk_dir = Path(self._chunk_dir()) / upload_id
+    async def chunk_upload_status(self, upload_id: str, total_chunks: int | None = None, *, user_id: int) -> dict:
+        chunk_dir = self._safe_chunk_dir(upload_id)
         if not chunk_dir.exists() or not chunk_dir.is_dir():
             raise HTTPException(status_code=404, detail="上传任务不存在")
+        manifest = await self._validate_chunk_manifest(upload_id, user_id=user_id)
         uploaded_indexes = sorted(
             int(part.stem)
             for part in chunk_dir.glob("*.part")
             if part.stem.isdigit()
         )
-        total = total_chunks or len(uploaded_indexes)
+        total = total_chunks or int(manifest.get("total_chunks") or len(uploaded_indexes))
         progress = 0 if total <= 0 else min(100, round(len(uploaded_indexes) / total * 100))
         return {
             "upload_id": upload_id,
@@ -164,28 +214,48 @@ class SkillKnowDocumentService:
             "progress": progress,
         }
 
-    async def save_chunk(self, upload_id: str, chunk_index: int, total_chunks: int, file: UploadFile) -> dict:
+    async def save_chunk(self, upload_id: str, chunk_index: int, total_chunks: int, file: UploadFile, *, user_id: int) -> dict:
         if chunk_index < 0:
             raise HTTPException(status_code=400, detail="chunk_index 非法")
         if total_chunks < 1:
             raise HTTPException(status_code=400, detail="total_chunks 非法")
-        chunk_dir = os.path.join(self._chunk_dir(), upload_id)
-        if not os.path.isdir(chunk_dir):
+        if chunk_index >= total_chunks:
+            raise HTTPException(status_code=400, detail="chunk_index 非法")
+        if total_chunks > self.MAX_TOTAL_CHUNKS:
+            raise HTTPException(status_code=400, detail="分片数量超限")
+        chunk_dir = self._safe_chunk_dir(upload_id)
+        if not chunk_dir.is_dir():
             raise HTTPException(status_code=404, detail="上传任务不存在")
-        chunk_path = os.path.join(chunk_dir, f"{chunk_index:08d}.part")
-        size = await self._save_upload_to_temp(file, chunk_path)
+        await self._validate_chunk_manifest(upload_id, user_id=user_id, total_chunks=total_chunks)
+        chunk_path = chunk_dir / f"{chunk_index:08d}.part"
+        size = await self._save_upload_to_temp(file, str(chunk_path))
         return {"upload_id": upload_id, "chunk_index": chunk_index, "size": size, "uploaded": True}
 
-    async def complete_chunk_upload(self, data) -> dict:
+    async def complete_chunk_upload(self, data, *, user_id: int) -> dict:
         filename = data.filename.strip()
         ext = Path(filename).suffix.lower().lstrip(".") or "txt"
-        chunk_dir = os.path.join(self._chunk_dir(), data.upload_id)
-        if not os.path.isdir(chunk_dir):
+        if ext not in SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=SUPPORTED_MARKDOWN_UPLOAD_MESSAGE)
+        if data.file_size > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="文件大小超限")
+        if data.total_chunks > self.MAX_TOTAL_CHUNKS:
+            raise HTTPException(status_code=400, detail="分片数量超限")
+        chunk_dir = self._safe_chunk_dir(data.upload_id)
+        if not chunk_dir.is_dir():
             raise HTTPException(status_code=404, detail="上传任务不存在")
+        manifest = await self._validate_chunk_manifest(
+            data.upload_id,
+            user_id=user_id,
+            total_chunks=data.total_chunks,
+            file_size=data.file_size,
+        )
 
-        parts = sorted(Path(chunk_dir).glob("*.part"))
+        parts = sorted(chunk_dir.glob("*.part"))
         if len(parts) != data.total_chunks:
             raise HTTPException(status_code=400, detail="分片数量不完整")
+        total_size = sum(part.stat().st_size for part in parts)
+        if total_size > settings.MAX_UPLOAD_SIZE or total_size != data.file_size:
+            raise HTTPException(status_code=400, detail="文件大小校验失败")
 
         uid = uuid.uuid4().hex
         stored_name = f"{uid}.md"
@@ -207,20 +277,27 @@ class SkillKnowDocumentService:
                     part.unlink()
                 except OSError:
                     pass
+            manifest_path = chunk_dir / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest_path.unlink()
+                except OSError:
+                    pass
             try:
-                Path(chunk_dir).rmdir()
+                chunk_dir.rmdir()
             except OSError:
                 pass
 
         document = await SkillKnowDocument.create(
             uuid=new_uuid(),
             uri=make_uri("documents", uid),
-            title=data.title or filename,
+            title=data.title or str(manifest.get("title") or filename),
             filename=filename,
             file_path=abs_path,
             file_size=0,
             file_type="md",
-            folder_id=data.folder_id,
+            folder_id=manifest.get("folder_id"),
+            owner_id=int(manifest.get("user_id") or 0),
             extra_metadata={
                 "original_filename": filename,
                 "original_file_type": ext,
@@ -303,13 +380,13 @@ class SkillKnowDocumentService:
             q &= Q(category=category)
         if status:
             q &= Q(status=status)
-        query = SkillKnowDocument.filter(q)
+        query = SkillKnowDocument.filter(q, owner_id=CTX_USER_ID.get())
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
         return total, [await document_to_dict(item, include_content=False) for item in rows]
 
     async def get(self, document_id: int) -> dict:
-        document = await SkillKnowDocument.filter(id=document_id).first()
+        document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         data = await document_to_dict(document)
@@ -318,7 +395,7 @@ class SkillKnowDocumentService:
         return data
 
     async def update(self, data) -> dict:
-        document = await SkillKnowDocument.filter(id=data.document_id).first()
+        document = await SkillKnowDocument.filter(id=data.document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         for field in ["title", "description", "abstract", "overview", "content", "category", "tags", "folder_id"]:
@@ -337,7 +414,7 @@ class SkillKnowDocumentService:
         return await document_to_dict(document)
 
     async def delete(self, document_id: int) -> None:
-        document = await SkillKnowDocument.filter(id=document_id).first()
+        document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         await skill_know_document_index_service.delete(document)
@@ -352,7 +429,7 @@ class SkillKnowDocumentService:
         await document.delete()
 
     async def move(self, target_id: int, folder_id: int | None) -> dict:
-        document = await SkillKnowDocument.filter(id=target_id).first()
+        document = await SkillKnowDocument.filter(id=target_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         document.folder_id = folder_id
@@ -360,11 +437,11 @@ class SkillKnowDocumentService:
         return await document_to_dict(document)
 
     async def search(self, query: str, *, limit: int = 20) -> list[dict]:
-        rows = await SkillKnowDocument.filter(Q(title__contains=query) | Q(description__contains=query) | Q(content__contains=query)).limit(limit)
+        rows = await SkillKnowDocument.filter(owner_id=CTX_USER_ID.get()).filter(Q(title__contains=query) | Q(description__contains=query) | Q(content__contains=query)).limit(limit)
         return [await document_to_dict(item) for item in rows]
 
     async def reindex(self, document_id: int) -> dict:
-        document = await SkillKnowDocument.filter(id=document_id).first()
+        document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         if not document.content:

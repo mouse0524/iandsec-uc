@@ -262,12 +262,7 @@ pnpm run lint
 - MySQL：`localhost:33060`
 - Redis：`localhost:6379`
 
-默认账号如未修改初始化数据：
-
-```text
-username: admin
-password: 123456
-```
+首次部署必须通过 `INITIAL_ADMIN_PASSWORD` 设置高强度初始管理员密码；首次登录后请立即修改并妥善保存。
 
 ## 说明
 

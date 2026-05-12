@@ -10,6 +10,7 @@ from fastapi import HTTPException, UploadFile
 from app.log import logger
 from app.core.redis_client import execute_redis
 from app.models.admin import SystemSettingItem
+from app.services.security import validate_external_service_url
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
 
@@ -207,6 +208,7 @@ class SystemSettingController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先开启")
         if not base_url:
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
+        base_url = validate_external_service_url(base_url, label="WebDAV Base URL")
         if not username or not password:
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
 
@@ -224,8 +226,8 @@ class SystemSettingController:
                     auth=(username, password),
                 )
         except Exception as exc:
-            logger.exception("[settings.webdav.test] network_error base_url={} username={}", base_url, username)
-            raise HTTPException(status_code=400, detail=f"连接失败：{exc}")
+            logger.exception("[settings.webdav.test] network_error base_url={} username={} error={}", base_url, username, repr(exc))
+            raise HTTPException(status_code=400, detail="连接失败，请检查服务地址和网络")
 
         if response.status_code not in {200, 207}:
             raise HTTPException(status_code=400, detail=f"连接失败，HTTP状态码：{response.status_code}")
@@ -240,6 +242,8 @@ class SystemSettingController:
             payload["smtp_password"] = sections["mail"].get("smtp_password")
         if payload.get("webdav_password") == "******":
             payload["webdav_password"] = sections["webdav"].get("webdav_password")
+        if payload.get("webdav_base_url"):
+            payload["webdav_base_url"] = validate_external_service_url(payload.get("webdav_base_url"), label="WebDAV Base URL")
 
         site_keys = {"site_title", "site_logo", "allow_partner_register"}
         ticket_keys = {

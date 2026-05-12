@@ -147,7 +147,11 @@ function buildObjectUrl(rawFile) {
 }
 
 async function uploadSingleFile(rawFile, targetFile = null) {
-  const res = isAuthed.value ? await api.uploadTicketAttachment(rawFile) : await api.uploadPublicTicketAttachment(rawFile)
+  if (!isAuthed.value && (!form.value.captcha_id || !form.value.captcha_code?.trim())) {
+    throw new Error('请先输入验证码再上传附件')
+  }
+  const captcha = { captcha_id: form.value.captcha_id, captcha_code: form.value.captcha_code?.trim() }
+  const res = isAuthed.value ? await api.uploadTicketAttachment(rawFile) : await api.uploadPublicTicketAttachment(rawFile, captcha)
   const attachmentId = Number(res?.data?.id || 0)
   if (!attachmentId) throw new Error('上传成功但未返回附件ID')
   if (targetFile) {

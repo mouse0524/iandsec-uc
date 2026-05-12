@@ -3,6 +3,7 @@ from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from app.api import api_router
 from app.controllers.api import api_controller
@@ -25,6 +26,17 @@ from app.schemas.menus import MenuType
 from app.settings.config import settings
 
 from .middlewares import BackGroundTaskMiddleware, HttpAuditLogMiddleware
+
+
+def _default_basic_api_filter():
+    return Q(tags="基础模块") | Q(path__in=_default_basic_api_paths())
+
+
+def _default_basic_api_paths() -> list[str]:
+    return [
+        "/api/v1/base/update_password",
+        "/api/v1/base/workbench_stats",
+    ]
 
 
 def make_middlewares():
@@ -506,8 +518,27 @@ async def init_db():
     except Exception as exc:
         if "already exists" in str(exc).lower():
             logger.warning("[init_db] schema generation skipped because tables already exist: {}", exc)
-            return
-        raise
+        else:
+            raise
+    await ensure_security_columns()
+
+
+async def ensure_security_columns():
+    async with in_transaction() as conn:
+        for sql, label in [
+            ("ALTER TABLE `user` ADD COLUMN `token_version` INT NOT NULL DEFAULT 0", "user.token_version"),
+            ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
+            ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
+            ("ALTER TABLE `sk_learning_candidate` ADD COLUMN `created_by` BIGINT NULL", "sk_learning_candidate.created_by"),
+        ]:
+            try:
+                await conn.execute_query(sql)
+                logger.info("[init_db] added missing column {}", label)
+            except Exception as exc:
+                message = str(exc).lower()
+                if "duplicate" in message or "exists" in message:
+                    continue
+                logger.warning("[init_db] ensure column {} skipped error={}", label, exc)
 
 
 async def init_roles():
@@ -601,9 +632,7 @@ async def init_roles():
             "/api/v1/notice/read_all",
         ]
     )
-    basic_apis = await Api.filter(
-        Q(method__in=["GET"]) | Q(tags="基础模块") | Q(path__in=["/api/v1/base/update_password"])
-    )
+    basic_apis = await Api.filter(_default_basic_api_filter())
 
     submit_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/submit") | Q(component="/ticket/my"))
     tech_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/tech") | Q(component="/ticket/my"))

@@ -4,7 +4,7 @@ export function sanitizeHtml(input = '') {
 
   const parser = new DOMParser()
   const doc = parser.parseFromString(html, 'text/html')
-  const allowedTags = new Set(['P', 'BR', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'A', 'IMG', 'BLOCKQUOTE', 'CODE', 'PRE', 'SPAN'])
+  const allowedTags = new Set(['P', 'BR', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'A', 'IMG', 'BLOCKQUOTE', 'CODE', 'PRE', 'SPAN', 'H1', 'H2', 'H3', 'H4', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD'])
 
   const walk = (node) => {
     const children = Array.from(node.children || [])
@@ -34,13 +34,14 @@ export function sanitizeHtml(input = '') {
           if (!ok) child.removeAttribute(attr.name)
           continue
         }
-        if (!['alt', 'title', 'target', 'rel', 'class', 'style'].includes(name)) {
+        if (!['alt', 'title', 'target', 'rel', 'class'].includes(name)) {
           child.removeAttribute(attr.name)
         }
       }
 
       if (tag === 'A') {
         child.setAttribute('rel', 'noopener noreferrer')
+        if (child.getAttribute('target') === '_blank') child.setAttribute('target', '_blank')
       }
 
       walk(child)

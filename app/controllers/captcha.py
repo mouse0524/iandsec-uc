@@ -64,7 +64,7 @@ class CaptchaController:
         }
 
     @staticmethod
-    def _verify_local_cache(captcha_id: str, captcha_code: str) -> bool:
+    def _verify_local_cache(captcha_id: str, captcha_code: str, *, consume: bool = True) -> bool:
         CaptchaController._cleanup_local_cache()
         item = _LOCAL_CAPTCHA_CACHE.get(captcha_id)
         if not item:
@@ -76,7 +76,8 @@ class CaptchaController:
 
         is_valid = item["code"] == captcha_code
         if is_valid:
-            _LOCAL_CAPTCHA_CACHE.pop(captcha_id, None)
+            if consume:
+                _LOCAL_CAPTCHA_CACHE.pop(captcha_id, None)
             return True
 
         item["retry"] += 1
@@ -125,7 +126,7 @@ class CaptchaController:
             logger.warning("[captcha.create] cache_write_failed captcha_id={} error={}", captcha_id, str(exc))
         return captcha_id, self._generate_image_base64(code)
 
-    async def verify_captcha(self, captcha_id: str, captcha_code: str) -> bool:
+    async def verify_captcha(self, captcha_id: str, captcha_code: str, *, consume: bool = True) -> bool:
         captcha_key = f"captcha:{captcha_id}"
         retry_key = f"captcha_retry:{captcha_id}"
         input_code = self._normalize_code(captcha_code)
@@ -133,7 +134,7 @@ class CaptchaController:
         try:
             saved = await execute_redis("get", captcha_key)
             if not saved:
-                return self._verify_local_cache(captcha_id, input_code)
+                return self._verify_local_cache(captcha_id, input_code, consume=consume)
 
             retry_count_raw = await execute_redis("get", retry_key)
             retry_count = int(retry_count_raw) if retry_count_raw else 0
@@ -145,9 +146,10 @@ class CaptchaController:
             saved_code = self._normalize_code(saved)
             is_valid = saved_code == input_code
             if is_valid:
-                await execute_redis("delete", captcha_key)
-                await execute_redis("delete", retry_key)
-                _LOCAL_CAPTCHA_CACHE.pop(captcha_id, None)
+                if consume:
+                    await execute_redis("delete", captcha_key)
+                    await execute_redis("delete", retry_key)
+                    _LOCAL_CAPTCHA_CACHE.pop(captcha_id, None)
                 return True
 
             retry_count += 1
@@ -161,7 +163,7 @@ class CaptchaController:
             return False
         except Exception as exc:
             logger.warning("[captcha.verify] cache_access_failed captcha_id={} error={}", captcha_id, str(exc))
-            return self._verify_local_cache(captcha_id, input_code)
+            return self._verify_local_cache(captcha_id, input_code, consume=consume)
 
 
 captcha_controller = CaptchaController()

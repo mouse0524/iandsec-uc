@@ -28,7 +28,7 @@ services:
       VITE_DEV_OPEN: "false"
     ports:
       - "9999:9999"
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - .:/opt/iandsec-uc
       - app_storage:/opt/iandsec-uc/storage

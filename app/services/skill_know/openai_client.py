@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from app.log import logger
+from app.services.security import validate_external_service_url
 from app.services.skill_know.config_service import skill_know_config_service
 
 
@@ -14,8 +15,8 @@ class SkillKnowOpenAIClient:
         if override:
             data.update({k: v for k, v in override.items() if v is not None})
         legacy_base = str(data.get("llm_base_url") or "https://api.openai.com/v1").rstrip("/")
-        data["llm_chat_base_url"] = str(data.get("llm_chat_base_url") or legacy_base).rstrip("/")
-        data["llm_embedding_base_url"] = str(data.get("llm_embedding_base_url") or legacy_base).rstrip("/")
+        data["llm_chat_base_url"] = validate_external_service_url(str(data.get("llm_chat_base_url") or legacy_base), label="LLM对话地址")
+        data["llm_embedding_base_url"] = validate_external_service_url(str(data.get("llm_embedding_base_url") or legacy_base), label="LLM向量地址")
         return data
 
     async def chat(
@@ -106,7 +107,8 @@ class SkillKnowOpenAIClient:
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
             return {"success": True, "message": content or "连接成功"}
         except Exception as exc:
-            return {"success": False, "message": str(exc)}
+            logger.warning("[skill_know.openai.test_chat] failed error={}", repr(exc))
+            return {"success": False, "message": "连接失败，请检查模型配置和网络"}
 
     async def test_embedding_connection(self, override: dict) -> dict:
         try:
@@ -114,7 +116,8 @@ class SkillKnowOpenAIClient:
             dimension = len(vectors[0]) if vectors and vectors[0] else 0
             return {"success": True, "message": f"连接成功，向量维度 {dimension}", "dimension": dimension}
         except Exception as exc:
-            return {"success": False, "message": str(exc)}
+            logger.warning("[skill_know.openai.test_embedding] failed error={}", repr(exc))
+            return {"success": False, "message": "连接失败，请检查模型配置和网络"}
 
     async def test_connection(self, override: dict) -> dict:
         chat_result = await self.test_chat_connection(override)

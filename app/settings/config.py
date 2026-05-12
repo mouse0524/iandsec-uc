@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     PROJECT_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     BASE_DIR: str = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir))
     LOGS_ROOT: str = os.path.join(BASE_DIR, "app/logs")
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "12345678")
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     JWT_ISSUER: str = os.getenv("JWT_ISSUER", "iandsec-uc")
@@ -31,10 +31,15 @@ class Settings(BaseSettings):
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@admin.com")
     INITIAL_ADMIN_PASSWORD: str | None = os.getenv("INITIAL_ADMIN_PASSWORD")
     SKILL_KNOW_SQL_SEARCH_ENABLED: bool = os.getenv("SKILL_KNOW_SQL_SEARCH_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
+    EXTERNAL_URL_ALLOWED_HOSTS: typing.List[str] = [
+        item.strip().lower()
+        for item in os.getenv("EXTERNAL_URL_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    ]
     MYSQL_HOST: str = os.getenv("MYSQL_HOST", "127.0.0.1")
     MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
     MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
-    MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "")
+    MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "123456")
     MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "iandsec-user-center")
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))

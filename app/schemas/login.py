@@ -24,4 +24,5 @@ class JWTPayload(BaseModel):
     aud: str
     iat: datetime
     jti: UUID
+    token_version: int = 0
     exp: datetime

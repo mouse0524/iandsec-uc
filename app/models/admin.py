@@ -26,6 +26,7 @@ class User(BaseModel, TimestampMixin):
     password = fields.CharField(max_length=128, null=True, description="密码")
     is_active = fields.BooleanField(default=True, description="是否激活", index=True)
     is_superuser = fields.BooleanField(default=False, description="是否为超级管理员", index=True)
+    token_version = fields.IntField(default=0, description="令牌版本")
     last_login = fields.DatetimeField(null=True, description="最后登录时间", index=True)
     roles = fields.ManyToManyField("models.Role", related_name="user_roles")
     dept_id = fields.IntField(null=True, description="部门ID", index=True)
@@ -245,6 +246,7 @@ class SkillKnowDocument(BaseModel, TimestampMixin):
     category = fields.CharField(max_length=100, null=True, description="分类", index=True)
     tags = fields.JSONField(default=list, description="标签")
     folder_id = fields.BigIntField(null=True, description="所属文件夹ID", index=True)
+    owner_id = fields.BigIntField(null=True, description="所有者ID", index=True)
     extra_metadata = fields.JSONField(default=dict, description="元数据")
     class Meta:
         table = "sk_document"
@@ -282,6 +284,7 @@ class SkillKnowVectorIndex(BaseModel, TimestampMixin):
 class SkillKnowConversation(BaseModel, TimestampMixin):
     uuid = fields.CharField(max_length=36, unique=True, description="会话UUID", index=True)
     title = fields.CharField(max_length=200, null=True, description="会话标题", index=True)
+    owner_id = fields.BigIntField(null=True, description="所有者ID", index=True)
     extra_metadata = fields.JSONField(default=dict, description="元数据")
 
     class Meta:
@@ -331,6 +334,7 @@ class SkillKnowLearningCandidate(BaseModel, TimestampMixin):
         index=True,
     )
     candidate_markdown = fields.TextField(null=True, description="候选Markdown")
+    created_by = fields.BigIntField(null=True, description="创建人ID", index=True)
     reviewed_by = fields.BigIntField(null=True, description="审核人ID", index=True)
     reviewed_at = fields.DatetimeField(null=True, description="审核时间", index=True)
     extra_metadata = fields.JSONField(default=dict, description="元数据")

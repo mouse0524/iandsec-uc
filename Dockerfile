@@ -10,7 +10,7 @@ RUN cd /opt/iandsec-uc/web \
     && pnpm run build
 
 
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 WORKDIR /opt/iandsec-uc
 COPY requirements.txt run.py ./

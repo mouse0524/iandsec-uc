@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile
 
+from app.core.ctx import CTX_USER_ID
 from app.models.enums import SkillKnowDocumentStatus
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.skill_know import SkillKnowChunkUploadCompleteIn, SkillKnowChunkUploadInitIn, SkillKnowDocumentUpdate, SkillKnowMoveIn
@@ -20,7 +21,7 @@ async def upload_document(
 
 @router.post("/upload/init", summary="初始化分片上传")
 async def init_chunk_upload(payload: SkillKnowChunkUploadInitIn):
-    return Success(data=await skill_know_document_service.init_chunk_upload(payload))
+    return Success(data=await skill_know_document_service.init_chunk_upload(payload, user_id=CTX_USER_ID.get()))
 
 
 @router.post("/upload/chunk", summary="上传文档分片")
@@ -30,17 +31,25 @@ async def upload_chunk(
     total_chunks: int = Form(...),
     file: UploadFile = File(...),
 ):
-    return Success(data=await skill_know_document_service.save_chunk(upload_id, chunk_index, total_chunks, file))
+    return Success(
+        data=await skill_know_document_service.save_chunk(
+            upload_id,
+            chunk_index,
+            total_chunks,
+            file,
+            user_id=CTX_USER_ID.get(),
+        )
+    )
 
 
 @router.get("/upload/status", summary="查询分片上传状态")
 async def chunk_upload_status(upload_id: str = Query(...), total_chunks: int | None = Query(None)):
-    return Success(data=await skill_know_document_service.chunk_upload_status(upload_id, total_chunks))
+    return Success(data=await skill_know_document_service.chunk_upload_status(upload_id, total_chunks, user_id=CTX_USER_ID.get()))
 
 
 @router.post("/upload/complete", summary="完成分片上传")
 async def complete_chunk_upload(payload: SkillKnowChunkUploadCompleteIn):
-    return Success(data=await skill_know_document_service.complete_chunk_upload(payload))
+    return Success(data=await skill_know_document_service.complete_chunk_upload(payload, user_id=CTX_USER_ID.get()))
 
 
 @router.get("/list", summary="文档列表")

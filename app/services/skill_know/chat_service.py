@@ -6,10 +6,11 @@ from collections.abc import AsyncGenerator
 from datetime import datetime
 
 import httpx
+from fastapi import HTTPException
 
 from app.core.ctx import CTX_USER_ID
 from app.log import logger
-from app.models.admin import SkillKnowConversation, SkillKnowLearningCandidate, SkillKnowMessage, SkillKnowMessageFeedback, SkillKnowPrompt
+from app.models.admin import SkillKnowConversation, SkillKnowLearningCandidate, SkillKnowMessage, SkillKnowMessageFeedback, SkillKnowPrompt, User
 from app.models.enums import SkillKnowLearningStatus, SkillKnowMessageRole
 from app.services.skill_know.config_service import skill_know_config_service
 from app.services.skill_know.openai_client import skill_know_openai_client
@@ -41,12 +42,21 @@ def _status_hint(status_code: int | str) -> str:
 
 
 class SkillKnowChatService:
+    async def _is_superuser(self) -> bool:
+        try:
+            user_id = CTX_USER_ID.get()
+        except Exception:
+            return False
+        user = await User.filter(id=user_id).first()
+        return bool(user and user.is_superuser)
+
     async def _conversation(self, conversation_id: int | None, message: str) -> SkillKnowConversation:
+        owner_id = CTX_USER_ID.get()
         if conversation_id:
-            item = await SkillKnowConversation.filter(id=conversation_id).first()
+            item = await SkillKnowConversation.filter(id=conversation_id, owner_id=owner_id).first()
             if item:
                 return item
-        return await SkillKnowConversation.create(uuid=new_uuid(), title=message[:60])
+        return await SkillKnowConversation.create(uuid=new_uuid(), title=message[:60], owner_id=owner_id)
 
     async def _prompt(self, key: str, fallback: str) -> str:
         await skill_know_prompt_service.initialize_defaults()
@@ -221,7 +231,10 @@ class SkillKnowChatService:
         yield final
 
     async def list_conversations(self, page: int, page_size: int) -> tuple[int, list[dict]]:
-        query = SkillKnowConversation.all()
+        if await self._is_superuser():
+            query = SkillKnowConversation.all()
+        else:
+            query = SkillKnowConversation.filter(owner_id=CTX_USER_ID.get())
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
         result = []
@@ -238,23 +251,35 @@ class SkillKnowChatService:
         return total, result
 
     async def get_conversation(self, conversation_id: int) -> dict:
-        conv = await SkillKnowConversation.get(id=conversation_id)
+        if await self._is_superuser():
+            conv = await SkillKnowConversation.get(id=conversation_id)
+        else:
+            conv = await SkillKnowConversation.get(id=conversation_id, owner_id=CTX_USER_ID.get())
         data = await conv.to_dict()
         messages = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("id")
         data["messages"] = [await item.to_dict() for item in messages]
         return data
 
     async def delete_conversation(self, conversation_id: int) -> None:
+        exists = await SkillKnowConversation.filter(id=conversation_id, owner_id=CTX_USER_ID.get()).exists()
+        if not exists:
+            raise HTTPException(status_code=404, detail="会话不存在")
         await SkillKnowMessageFeedback.filter(conversation_id=conversation_id).delete()
         await SkillKnowMessage.filter(conversation_id=conversation_id).delete()
         await SkillKnowConversation.filter(id=conversation_id).delete()
 
     async def messages(self, conversation_id: int) -> list[dict]:
+        exists = await SkillKnowConversation.filter(id=conversation_id, owner_id=CTX_USER_ID.get()).exists()
+        if not exists:
+            raise HTTPException(status_code=404, detail="会话不存在")
         rows = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("id")
         return [await item.to_dict() for item in rows]
 
     async def feedback(self, data) -> dict:
         msg = await SkillKnowMessage.get(id=data.message_id)
+        exists = await SkillKnowConversation.filter(id=msg.conversation_id, owner_id=CTX_USER_ID.get()).exists()
+        if not exists:
+            raise HTTPException(status_code=404, detail="会话不存在")
         user_id = None
         try:
             user_id = CTX_USER_ID.get()
@@ -289,7 +314,10 @@ class SkillKnowChatService:
         return await feedback.to_dict()
 
     async def feedback_list(self, page: int, page_size: int, low_score_only: bool = False) -> tuple[int, list[dict]]:
-        query = SkillKnowMessageFeedback.all()
+        if await self._is_superuser():
+            query = SkillKnowMessageFeedback.all()
+        else:
+            query = SkillKnowMessageFeedback.filter(created_by=CTX_USER_ID.get())
         if low_score_only:
             query = query.filter(rating__lte=2)
         total = await query.count()
@@ -297,7 +325,10 @@ class SkillKnowChatService:
         return total, [await item.to_dict() for item in rows]
 
     async def list_learning_candidates(self, page: int, page_size: int, status: SkillKnowLearningStatus | None = None) -> tuple[int, list[dict]]:
-        query = SkillKnowLearningCandidate.all()
+        if await self._is_superuser():
+            query = SkillKnowLearningCandidate.all()
+        else:
+            query = SkillKnowLearningCandidate.filter(created_by=CTX_USER_ID.get())
         if status:
             query = query.filter(status=status)
         total = await query.count()
@@ -311,11 +342,12 @@ class SkillKnowChatService:
             feedback_reason=data.feedback_reason,
             correct_answer=data.correct_answer,
             candidate_markdown=data.candidate_markdown or self._candidate_markdown(data.question, data.assistant_answer, data.feedback_reason, data.correct_answer),
+            created_by=CTX_USER_ID.get(),
         )
         return await item.to_dict()
 
     async def approve_learning_candidate(self, data) -> dict:
-        item = await SkillKnowLearningCandidate.get(id=data.candidate_id)
+        item = await SkillKnowLearningCandidate.get(id=data.candidate_id, created_by=CTX_USER_ID.get())
         item.status = SkillKnowLearningStatus.APPROVED
         if data.candidate_markdown is not None:
             item.candidate_markdown = data.candidate_markdown
@@ -328,7 +360,7 @@ class SkillKnowChatService:
         return await item.to_dict()
 
     async def reject_learning_candidate(self, data) -> dict:
-        item = await SkillKnowLearningCandidate.get(id=data.candidate_id)
+        item = await SkillKnowLearningCandidate.get(id=data.candidate_id, created_by=CTX_USER_ID.get())
         item.status = SkillKnowLearningStatus.REJECTED
         item.reviewed_at = datetime.now()
         try:
