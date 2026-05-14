@@ -133,8 +133,13 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
                 pass
 
         body = await request.body()
+        body_sent = False
 
         async def receive():
+            nonlocal body_sent
+            if body_sent:
+                return {"type": "http.disconnect"}
+            body_sent = True
             return {"type": "http.request", "body": body, "more_body": False}
 
         request._receive = receive

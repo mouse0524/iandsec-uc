@@ -11,7 +11,7 @@ Skill-Know-main
 .env
 .trae/
 .uploads/
-
+logs/
 
 
 db.sqlite3
