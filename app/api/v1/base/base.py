@@ -178,6 +178,7 @@ async def reset_password_by_email(payload: ResetPasswordByEmailIn):
     user.password = get_password_hash(payload.new_password)
     user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
     await user.save()
+    await user_controller.clear_auth_cache(user.id)
     return Success(msg="密码重置成功")
 
 
@@ -336,4 +337,5 @@ async def update_user_password(req_in: UpdatePassword):
     user.password = get_password_hash(req_in.new_password)
     user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
     await user.save()
+    await user_controller.clear_auth_cache(user.id)
     return Success(msg="修改成功")

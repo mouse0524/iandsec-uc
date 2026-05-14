@@ -27,7 +27,11 @@ class SystemMonitorService:
         "notice:inbox:*",
         "notice:unread:*",
         "webdav:list:*",
-        "public_config:*",
+        "config:public:*",
+        "skill_know:config:*",
+        "skill_know:prompt:*",
+        "skill_know:prompts:list:*",
+        "ticket:prefill:*",
     )
 
     def _bytes(self, value: Any) -> int:

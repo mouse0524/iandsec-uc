@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import HTTPException
 
+from app.core.redis_client import execute_redis
+from app.log import logger
 from app.models.admin import SkillKnowPrompt
 from app.models.enums import SkillKnowPromptCategory
 from app.services.skill_know.utils import prompt_to_dict
@@ -156,6 +160,16 @@ DEPRECATED_DEFAULT_PROMPT_KEYS = {"learning.feedback_summary"}
 
 
 class SkillKnowPromptService:
+    CACHE_TTL_SECONDS = 600
+
+    @staticmethod
+    def _prompt_cache_key(key: str) -> str:
+        return f"skill_know:prompt:{key}:v1"
+
+    @staticmethod
+    def _list_cache_key(category: str | None, include_inactive: bool) -> str:
+        return f"skill_know:prompts:list:{category or 'all'}:{int(include_inactive)}:v1"
+
     async def initialize_defaults(self, *, update_existing: bool = False, prune_deprecated: bool = False) -> dict:
         created_count = 0
         updated_count = 0
@@ -176,29 +190,58 @@ class SkillKnowPromptService:
         deleted_count = 0
         if prune_deprecated:
             deleted_count = await SkillKnowPrompt.filter(key__in=DEPRECATED_DEFAULT_PROMPT_KEYS).delete()
+        if created_count or updated_count or deleted_count:
+            await self.clear_cache()
         return {"created": created_count, "updated": updated_count, "deleted": deleted_count}
 
     async def sync_defaults(self) -> dict:
         result = await self.initialize_defaults(update_existing=True, prune_deprecated=True)
+        await self.clear_cache()
         total = await SkillKnowPrompt.all().count()
         return {**result, "total": total}
 
     async def list(self, category: str | None = None, include_inactive: bool = False) -> list[dict]:
         await self.initialize_defaults()
+        cache_key = self._list_cache_key(category, include_inactive)
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("[skill_know.prompt.cache] list_read_failed key={} error={}", cache_key, str(exc))
+
         query = SkillKnowPrompt.all()
         if category:
             query = query.filter(category=category)
         if not include_inactive:
             query = query.filter(is_active=True)
         rows = await query.order_by("category", "key")
-        return [await prompt_to_dict(item) for item in rows]
+        data = [await prompt_to_dict(item) for item in rows]
+        try:
+            await execute_redis("setex", cache_key, self.CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[skill_know.prompt.cache] list_write_failed key={} error={}", cache_key, str(exc))
+        return data
 
     async def get(self, key: str) -> dict:
         await self.initialize_defaults()
+        cache_key = self._prompt_cache_key(key)
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("[skill_know.prompt.cache] get_read_failed key={} error={}", cache_key, str(exc))
+
         item = await SkillKnowPrompt.filter(key=key).first()
         if not item:
             raise HTTPException(status_code=404, detail="提示词不存在")
-        return await prompt_to_dict(item)
+        data = await prompt_to_dict(item)
+        try:
+            await execute_redis("setex", cache_key, self.CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[skill_know.prompt.cache] get_write_failed key={} error={}", cache_key, str(exc))
+        return data
 
     async def update(self, key: str, data) -> dict:
         item = await SkillKnowPrompt.filter(key=key).first()
@@ -209,6 +252,7 @@ class SkillKnowPromptService:
         if data.is_active is not None:
             item.is_active = data.is_active
         await item.save()
+        await self.clear_cache(key)
         return await prompt_to_dict(item)
 
     async def reset(self, key: str) -> dict:
@@ -226,7 +270,31 @@ class SkillKnowPromptService:
             item.variables = default["variables"]
             item.is_active = True
             await item.save()
+        await self.clear_cache(key)
         return await prompt_to_dict(item)
+
+    async def clear_cache(self, key: str | None = None) -> None:
+        try:
+            keys: set[str] = set()
+            if key:
+                keys.add(self._prompt_cache_key(key))
+            cursor = 0
+            while True:
+                cursor, batch = await execute_redis("scan", cursor=cursor, match="skill_know:prompts:list:*", count=200)
+                keys.update(batch or [])
+                if int(cursor or 0) == 0:
+                    break
+            if not key:
+                cursor = 0
+                while True:
+                    cursor, batch = await execute_redis("scan", cursor=cursor, match="skill_know:prompt:*", count=200)
+                    keys.update(batch or [])
+                    if int(cursor or 0) == 0:
+                        break
+            if keys:
+                await execute_redis("delete", *keys)
+        except Exception as exc:
+            logger.warning("[skill_know.prompt.cache] clear_failed key={} error={}", key or "*", str(exc))
 
 
 skill_know_prompt_service = SkillKnowPromptService()

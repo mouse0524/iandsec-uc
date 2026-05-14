@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from time import perf_counter
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -10,6 +11,7 @@ from app.controllers.captcha import captcha_controller
 from app.controllers.partner import partner_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.ticket import ticket_controller
+from app.core.redis_client import execute_redis
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
 from app.models.admin import Ticket, TicketActionLog, User
@@ -89,12 +91,24 @@ async def create_ticket(payload: TicketCreate):
 @router.get("/prefill", summary="获取工单预填信息", dependencies=[DependAuth])
 async def get_ticket_prefill():
     user = await _get_current_user()
+    cache_key = f"ticket:prefill:user:{user.id}:v1"
+    try:
+        cached = await execute_redis("get", cache_key)
+        if cached:
+            return Success(data=json.loads(cached))
+    except Exception as exc:
+        logger.warning("[api.ticket.prefill] cache_read_failed key={} error={}", cache_key, str(exc))
+
     data = {
         "company_name": user.company_name or "",
         "contact_name": user.alias or user.username,
         "email": user.email or "",
         "phone": user.phone or "",
     }
+    try:
+        await execute_redis("setex", cache_key, 600, json.dumps(data, ensure_ascii=False))
+    except Exception as exc:
+        logger.warning("[api.ticket.prefill] cache_write_failed key={} error={}", cache_key, str(exc))
     return Success(data=data)
 
 

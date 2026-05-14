@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 from tortoise.expressions import Q
 
 from app.controllers.api import api_controller
+from app.controllers.user import user_controller
 from app.schemas import Success, SuccessExtra
 from app.schemas.apis import *
 
@@ -42,6 +43,7 @@ async def create_api(
     api_in: ApiCreate,
 ):
     await api_controller.create(obj_in=api_in)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Created Successfully")
 
 
@@ -50,6 +52,7 @@ async def update_api(
     api_in: ApiUpdate,
 ):
     await api_controller.update(id=api_in.id, obj_in=api_in)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Update Successfully")
 
 
@@ -58,10 +61,12 @@ async def delete_api(
     api_id: int = Query(..., description="ApiID"),
 ):
     await api_controller.remove(id=api_id)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Deleted Success")
 
 
 @router.post("/refresh", summary="刷新API列表")
 async def refresh_api():
     await api_controller.refresh_api()
+    await user_controller.clear_all_permission_cache()
     return Success(msg="OK")

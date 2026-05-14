@@ -1,7 +1,6 @@
 <template>
   <n-dropdown :options="options" @select="handleSelect">
     <div flex cursor-pointer items-center>
-      <img :src="userStore.avatar" mr10 h-35 w-35 rounded-full />
       <span>{{ userStore.name }}</span>
     </div>
   </n-dropdown>

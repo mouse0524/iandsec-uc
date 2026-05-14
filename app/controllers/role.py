@@ -43,6 +43,8 @@ class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
             keys.extend([
                 f"perm:menu:user:{user_id}:v1",
                 f"perm:api:user:{user_id}:v1",
+                f"perm:menu:user:{user_id}:v2",
+                f"perm:api:user:{user_id}:v2",
                 f"perm:is_admin:user:{user_id}:v1",
             ])
         try:

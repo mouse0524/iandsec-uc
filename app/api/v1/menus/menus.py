@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, Query
 
 from app.controllers.menu import menu_controller
+from app.controllers.user import user_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.menus import *
 
@@ -41,6 +42,7 @@ async def create_menu(
     menu_in: MenuCreate,
 ):
     await menu_controller.create(obj_in=menu_in)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Created Success")
 
 
@@ -49,6 +51,7 @@ async def update_menu(
     menu_in: MenuUpdate,
 ):
     await menu_controller.update(id=menu_in.id, obj_in=menu_in)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Updated Success")
 
 
@@ -60,4 +63,5 @@ async def delete_menu(
     if child_menu_count > 0:
         return Fail(msg="Cannot delete a menu with child menus")
     await menu_controller.remove(id=id)
+    await user_controller.clear_all_permission_cache()
     return Success(msg="Deleted Success")

@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from app.schemas.base import Success, SuccessExtra
 from app.models.enums import SkillKnowLearningStatus
 from app.schemas.skill_know import SkillKnowChatIn, SkillKnowLearningCandidateIn, SkillKnowLearningReviewIn, SkillKnowMessageFeedbackIn
+from app.services.skill_know.chat_job_service import skill_know_chat_job_service
 from app.services.skill_know.chat_service import skill_know_chat_service, sse_encode
 
 router = APIRouter()
@@ -26,7 +27,22 @@ async def chat_stream(payload: SkillKnowChatIn):
 @router.post("/agent/stream", summary="Agent时间线流式对话")
 async def chat_agent_stream(payload: SkillKnowChatIn):
     async def generate():
-        async for item in skill_know_chat_service.stream(payload.message, conversation_id=payload.conversation_id):
+        async for item in skill_know_chat_job_service.stream_started_job(payload.message, conversation_id=payload.conversation_id):
+            yield sse_encode(item)
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/jobs/start", summary="启动对话任务")
+async def start_chat_job(payload: SkillKnowChatIn):
+    job = await skill_know_chat_job_service.start(payload.message, conversation_id=payload.conversation_id)
+    return Success(data={"job_id": job.id})
+
+
+@router.get("/jobs/{job_id}/stream", summary="监听对话任务")
+async def stream_chat_job(job_id: str):
+    async def generate():
+        async for item in skill_know_chat_job_service.events(job_id):
             yield sse_encode(item)
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -383,7 +383,7 @@ function handleInputKeydown(event) {
           </section>
 
           <div v-for="msg in messages" :key="msg.id" class="message-row" :class="msg.role">
-            <div class="message-avatar">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
+            <div v-if="msg.role === 'assistant'" class="message-avatar">AI</div>
             <article class="message-bubble">
               <template v-if="msg.role === 'assistant'">
                 <div v-if="msg.pending && !msg.content" class="thinking-state">
@@ -479,11 +479,9 @@ function handleInputKeydown(event) {
 .prompt-card { min-height: 58px; padding: 13px 15px; border-radius: 16px; border: 1px solid rgba(17,24,39,.10); background: #fff; color: #374151; text-align: left; cursor: pointer; line-height: 1.45; box-shadow: 0 12px 28px rgba(15,23,42,.05); transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .prompt-card:hover { transform: translateY(-2px); border-color: rgba(37,99,235,.26); box-shadow: 0 18px 36px rgba(15,23,42,.08); }
 .message-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; margin-bottom: 24px; }
-.message-row.user { grid-template-columns: minmax(0, 1fr) 34px; }
-.message-row.user .message-avatar { grid-column: 2; }
+.message-row.user { grid-template-columns: minmax(0, 1fr); }
 .message-row.user .message-bubble { grid-column: 1; grid-row: 1; justify-self: end; max-width: min(620px, 82%); background: #f4f4f4; border: 1px solid rgba(17,24,39,.08); border-radius: 22px; padding: 12px 16px; }
 .message-avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 999px; background: #111827; color: #fff; font-size: 12px; font-weight: 900; }
-.message-row.user .message-avatar { background: #2563eb; }
 .message-bubble { min-width: 0; color: var(--text); line-height: 1.72; word-break: break-word; }
 .user-content, .streaming-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdown-body :deep(p) { margin: 4px 0 10px; }
@@ -538,9 +536,9 @@ function handleInputKeydown(event) {
   .message-scroll { padding: 20px 14px 28px; }
   .composer-shell { padding: 10px 14px 14px; }
   .prompt-grid { grid-template-columns: 1fr; }
-  .message-row, .message-row.user { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
-  .message-row.user .message-avatar { grid-column: 1; }
-  .message-row.user .message-bubble { grid-column: 2; max-width: 100%; justify-self: stretch; }
+  .message-row { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+  .message-row.user { grid-template-columns: minmax(0, 1fr); }
+  .message-row.user .message-bubble { grid-column: 1; max-width: 100%; justify-self: stretch; }
   .message-avatar { width: 30px; height: 30px; }
 }
 </style>

@@ -70,6 +70,7 @@ async def update_user(
     await user_controller.clear_permission_cache(user.id)
     await user_controller.clear_admin_flag_cache(user.id)
     await user_controller.clear_user_basic_cache(user.id)
+    await user_controller.clear_auth_cache(user.id)
     return Success(msg="Updated Successfully")
 
 
@@ -81,6 +82,7 @@ async def delete_user(
     await user_controller.remove(id=user_id)
     await user_controller.clear_permission_cache(user_id)
     await user_controller.clear_user_basic_cache(user_id)
+    await user_controller.clear_auth_cache(user_id)
     return Success(msg="Deleted Successfully")
 
 

@@ -4,8 +4,7 @@
       <n-card rounded-10>
         <div flex items-center justify-between>
           <div flex items-center>
-            <img rounded-full width="60" :src="userStore.avatar" />
-            <div ml-10>
+            <div>
               <p text-20 font-semibold>
                 {{ $t('views.workbench.text_hello', { username: userStore.name }) }}
               </p>

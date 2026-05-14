@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from typing import List, Optional
 
 from fastapi.exceptions import HTTPException
@@ -18,6 +19,7 @@ from .system_setting import system_setting_controller
 
 class UserController(CRUDBase[User, UserCreate, UserUpdate]):
     USER_BASIC_CACHE_TTL_SECONDS = 600
+    USER_AUTH_CACHE_TTL_SECONDS = 600
     def __init__(self):
         super().__init__(model=User)
 
@@ -29,8 +31,6 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         try:
             cached = await execute_redis("get", cache_key)
             if cached:
-                import json
-
                 return json.loads(cached)
         except Exception as exc:
             logger.warning("[user.basic] cache_read_failed key={} error={}", cache_key, str(exc))
@@ -46,12 +46,42 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
             "role_names": [role.name for role in roles],
         }
         try:
-            import json
-
             await execute_redis("setex", cache_key, self.USER_BASIC_CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
         except Exception as exc:
             logger.warning("[user.basic] cache_write_failed key={} error={}", cache_key, str(exc))
         return data
+
+    async def get_auth_user(self, user_id: int) -> User | None:
+        cache_key = f"auth:user:{user_id}:v1"
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                data = json.loads(cached)
+                user = await self.model.filter(id=user_id).first()
+                if not user:
+                    await execute_redis("delete", cache_key)
+                    return None
+                return user
+        except Exception as exc:
+            logger.warning("[user.auth_cache] read_failed key={} error={}", cache_key, str(exc))
+
+        user = await self.model.filter(id=user_id).first()
+        if not user:
+            return None
+        data = {
+            "id": user.id,
+            "username": user.username,
+            "alias": user.alias,
+            "email": user.email,
+            "is_active": user.is_active,
+            "is_superuser": user.is_superuser,
+            "token_version": int(getattr(user, "token_version", 0) or 0),
+        }
+        try:
+            await execute_redis("setex", cache_key, self.USER_AUTH_CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[user.auth_cache] write_failed key={} error={}", cache_key, str(exc))
+        return user
 
     async def get_by_username(self, username: str) -> Optional[User]:
         return await self.model.filter(username=username).first()
@@ -122,6 +152,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         user_obj.password = get_password_hash(password=temp_password)
         user_obj.token_version = int(getattr(user_obj, "token_version", 0) or 0) + 1
         await user_obj.save()
+        await self.clear_auth_cache(user_obj.id)
         await mail_controller.send_admin_reset_password_notice(to_user=user_obj, temp_password=temp_password)
         logger.info("[user.reset_password] success user_id={} username={}", user_obj.id, user_obj.username)
         return temp_password
@@ -136,7 +167,12 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
 
     @staticmethod
     async def clear_permission_cache(user_id: int) -> None:
-        keys = [f"perm:menu:user:{user_id}:v1", f"perm:api:user:{user_id}:v1"]
+        keys = [
+            f"perm:menu:user:{user_id}:v1",
+            f"perm:api:user:{user_id}:v1",
+            f"perm:menu:user:{user_id}:v2",
+            f"perm:api:user:{user_id}:v2",
+        ]
         try:
             await execute_redis("delete", *keys)
         except Exception as exc:
@@ -152,9 +188,32 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
     @staticmethod
     async def clear_user_basic_cache(user_id: int) -> None:
         try:
-            await execute_redis("delete", f"user:basic:{user_id}")
+            await execute_redis("delete", f"user:basic:{user_id}", f"ticket:prefill:user:{user_id}:v1")
         except Exception as exc:
             logger.warning("[user.cache] clear_basic_failed user_id={} error={}", user_id, str(exc))
+
+    @staticmethod
+    async def clear_auth_cache(user_id: int) -> None:
+        try:
+            await execute_redis("delete", f"auth:user:{user_id}:v1")
+        except Exception as exc:
+            logger.warning("[user.cache] clear_auth_failed user_id={} error={}", user_id, str(exc))
+
+    @staticmethod
+    async def clear_all_permission_cache() -> None:
+        try:
+            keys: set[str] = set()
+            for pattern in ("perm:menu:user:*", "perm:api:user:*"):
+                cursor = 0
+                while True:
+                    cursor, batch = await execute_redis("scan", cursor=cursor, match=pattern, count=500)
+                    keys.update(batch or [])
+                    if int(cursor or 0) == 0:
+                        break
+            if keys:
+                await execute_redis("delete", *keys)
+        except Exception as exc:
+            logger.warning("[user.cache] clear_all_perm_failed error={}", str(exc))
 
 
 user_controller = UserController()

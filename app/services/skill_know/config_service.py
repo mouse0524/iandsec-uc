@@ -1,8 +1,13 @@
+import json
+
+from app.core.redis_client import execute_redis
 from app.log import logger
 from app.models.admin import SkillKnowSystemConfig
 
 
 class SkillKnowConfigService:
+    CACHE_KEY_ALL = "skill_know:config:all:v1"
+    CACHE_TTL_SECONDS = 600
     DEFAULTS = {
         "llm_base_url": "https://api.openai.com/v1",
         "llm_chat_provider": "openai",
@@ -35,6 +40,16 @@ class SkillKnowConfigService:
         return text[:4] + "****" + text[-4:]
 
     async def get(self, key: str, default=None):
+        if key not in self.SENSITIVE_KEYS:
+            try:
+                cached = await execute_redis("get", self.CACHE_KEY_ALL)
+                if cached:
+                    data = json.loads(cached)
+                    if key in data:
+                        return data[key]
+            except Exception as exc:
+                logger.warning("[skill_know.config.cache] read_failed key={} error={}", self.CACHE_KEY_ALL, str(exc))
+
         item = await SkillKnowSystemConfig.filter(key=key).first()
         if not item:
             return self.DEFAULTS.get(key, default)
@@ -71,14 +86,17 @@ class SkillKnowConfigService:
             item.description = description or item.description
             item.is_sensitive = key in self.SENSITIVE_KEYS
             await item.save()
+            await self.clear_cache()
             return item
-        return await SkillKnowSystemConfig.create(
+        item = await SkillKnowSystemConfig.create(
             key=key,
             value=store_value,
             group=group,
             description=description,
             is_sensitive=key in self.SENSITIVE_KEYS,
         )
+        await self.clear_cache()
+        return item
 
     async def llm_config(self, masked: bool = False) -> dict:
         keys = [
@@ -105,6 +123,12 @@ class SkillKnowConfigService:
             "markdown_optimize_timeout",
         ]
         data = {key: await self.get(key) for key in keys}
+        if not masked:
+            try:
+                cache_data = {key: value for key, value in data.items() if key not in self.SENSITIVE_KEYS}
+                await execute_redis("setex", self.CACHE_KEY_ALL, self.CACHE_TTL_SECONDS, json.dumps(cache_data, ensure_ascii=False))
+            except Exception as exc:
+                logger.warning("[skill_know.config.cache] write_failed key={} error={}", self.CACHE_KEY_ALL, str(exc))
         if masked:
             for item_key in ("llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"):
                 if data.get(item_key):
@@ -118,6 +142,12 @@ class SkillKnowConfigService:
         chat_ready = chat_provider == "ollama" or bool(await self.get("llm_chat_api_key", legacy_key))
         embedding_ready = embedding_provider == "ollama" or bool(await self.get("llm_embedding_api_key", legacy_key))
         return chat_ready and embedding_ready
+
+    async def clear_cache(self) -> None:
+        try:
+            await execute_redis("delete", self.CACHE_KEY_ALL)
+        except Exception as exc:
+            logger.warning("[skill_know.config.cache] clear_failed key={} error={}", self.CACHE_KEY_ALL, str(exc))
 
 
 skill_know_config_service = SkillKnowConfigService()

@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from app.core.ctx import CTX_USER_ID, CTX_USER_NAME
 from app.log import logger
+from app.controllers.user import user_controller
 from app.models import Role, User
 from app.settings import settings
 
@@ -25,7 +26,7 @@ class AuthControl:
                 options={"require": ["exp", "iat", "iss", "aud", "jti"]},
             )
             user_id = decode_data.get("user_id")
-            user = await User.filter(id=user_id).first()
+            user = await user_controller.get_auth_user(int(user_id))
             if not user:
                 raise HTTPException(status_code=401, detail="Authentication failed")
             if not user.is_active:
