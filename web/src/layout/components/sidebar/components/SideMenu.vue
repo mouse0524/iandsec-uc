@@ -78,6 +78,7 @@ function getMenuItem(route, basePath = '') {
     menuItem.children = visibleChildren
       .map((item) => getMenuItem(item, menuItem.path))
       .sort((a, b) => a.order - b.order)
+    if (route.redirect) menuItem.path = route.redirect
   }
   return menuItem
 }

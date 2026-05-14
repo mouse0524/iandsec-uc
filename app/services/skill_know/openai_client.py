@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
+from fastapi import HTTPException
 
 from app.log import logger
 from app.services.security import validate_external_service_url
@@ -25,9 +26,11 @@ class SkillKnowOpenAIClient:
             raise RuntimeError(f"{label}地址必须是有效的 HTTP/HTTPS URL")
         if parsed.username or parsed.password:
             raise RuntimeError(f"{label}地址不能包含认证信息")
-        host = parsed.hostname.lower().rstrip(".")
-        if host not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
-            raise RuntimeError(f"{label}仅允许本机 Ollama 地址")
+        if parsed.scheme == "https":
+            try:
+                return validate_external_service_url(raw, label=label)
+            except HTTPException as exc:
+                raise RuntimeError(str(exc.detail)) from exc
         return raw
 
     async def _config(self, override: dict | None = None) -> dict:

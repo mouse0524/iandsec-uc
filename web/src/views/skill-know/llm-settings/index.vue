@@ -15,7 +15,7 @@ const testResult = ref(null)
 const lastTestAt = ref('')
 const providerOptions = [
   { label: 'OpenAI 兼容', value: 'openai' },
-  { label: 'Ollama 本地', value: 'ollama' },
+  { label: 'Ollama', value: 'ollama' },
 ]
 const form = reactive({
   llm_api_key: '',
@@ -271,7 +271,7 @@ function applyProviderDefaults(type) {
                   <NFormItem v-if="form.llm_chat_provider !== 'ollama'" label="对话 API Key"><NInput v-model:value="form.llm_chat_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存对话 Key" /></NFormItem>
                   <NFormItem label="对话端点 URL"><NInput v-model:value="form.llm_chat_base_url" /></NFormItem>
                   <NFormItem label="Chat Model"><NInput v-model:value="form.llm_chat_model" /></NFormItem>
-                  <div v-if="form.llm_chat_provider === 'ollama'" class="muted">本地 Ollama 默认地址为 http://127.0.0.1:11434，对话模型需先在 Ollama 中 pull。</div>
+                  <div v-if="form.llm_chat_provider === 'ollama'" class="muted">Ollama 默认地址为 http://127.0.0.1:11434，也支持填写外部 Ollama HTTP/HTTPS 地址；对话模型需先在目标 Ollama 中 pull。</div>
                 </section>
                 <section class="endpoint-card">
                   <div class="endpoint-title">
@@ -282,7 +282,7 @@ function applyProviderDefaults(type) {
                   <NFormItem v-if="form.llm_embedding_provider !== 'ollama'" label="Embedding API Key"><NInput v-model:value="form.llm_embedding_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存 Embedding Key" /></NFormItem>
                   <NFormItem label="Embedding 端点 URL"><NInput v-model:value="form.llm_embedding_base_url" /></NFormItem>
                   <NFormItem label="Embedding Model"><NInput v-model:value="form.llm_embedding_model" /></NFormItem>
-                  <div v-if="form.llm_embedding_provider === 'ollama'" class="muted">推荐本地向量模型 nomic-embed-text，需先执行 ollama pull nomic-embed-text。</div>
+                  <div v-if="form.llm_embedding_provider === 'ollama'" class="muted">推荐向量模型 nomic-embed-text，需先在目标 Ollama 中 pull。</div>
                 </section>
               </NForm>
             </section>

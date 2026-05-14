@@ -100,6 +100,7 @@ class AuditLog(BaseModel, TimestampMixin):
     response_time = fields.IntField(default=0, description="响应时间(单位ms)", index=True)
     request_args = fields.JSONField(null=True, description="请求参数")
     response_body = fields.JSONField(null=True, description="返回数据")
+    is_archived = fields.BooleanField(default=False, description="是否归档", index=True)
 
 
 class Ticket(BaseModel, TimestampMixin):
@@ -184,6 +185,34 @@ class WebDavShareLink(BaseModel, TimestampMixin):
 
     class Meta:
         table = "webdav_share_link"
+
+
+class TerminalAuthReport(BaseModel, TimestampMixin):
+    company_name = fields.CharField(max_length=120, description="公司名称", index=True)
+    auth_expire_at = fields.DatetimeField(description="授权到期时间", index=True)
+    maintain_expire_at = fields.DatetimeField(description="维保到期时间", index=True)
+    terminal_stats = fields.JSONField(default=dict, description="终端数量统计")
+    client_versions = fields.JSONField(default=dict, description="客户端版本统计")
+    server_version = fields.CharField(max_length=120, null=True, description="服务器版本号", index=True)
+    reported_at = fields.DatetimeField(description="上报时间", index=True)
+    source_ip = fields.CharField(max_length=64, null=True, description="来源IP", index=True)
+    raw_payload = fields.JSONField(default=dict, description="原始上报数据")
+
+    class Meta:
+        table = "terminal_auth_report"
+
+
+class TerminalUpgradeConfig(BaseModel, TimestampMixin):
+    latest_version = fields.CharField(max_length=120, description="最新版本号", index=True)
+    webdav_path = fields.CharField(max_length=1000, description="WebDAV升级包路径")
+    enabled = fields.BooleanField(default=True, description="是否启用升级检测", index=True)
+    force_upgrade = fields.BooleanField(default=False, description="是否强制升级")
+    release_notes = fields.TextField(null=True, description="版本说明")
+    report_token = fields.CharField(max_length=255, null=True, description="第三方上报密钥")
+    download_expire_hours = fields.IntField(default=168, description="下载链接有效期小时")
+
+    class Meta:
+        table = "terminal_upgrade_config"
 
 
 class GlobalNotice(BaseModel, TimestampMixin):

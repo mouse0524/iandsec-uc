@@ -45,6 +45,13 @@ export default {
   deleteDept: (params = {}) => request.delete('/dept/delete', { params }),
   // auditlog
   getAuditLogList: (params = {}) => request.get('/auditlog/list', { params }),
+  archiveAuditLogs: (params = {}) => request.post('/auditlog/archive', null, { params }),
+  clearAuditLogs: (params = {}) => request.post('/auditlog/clear', null, { params }),
+  exportAuditLogs: (params = {}) =>
+    request.get('/auditlog/export', {
+      params,
+      responseType: 'blob',
+    }),
   // ticket
   uploadTicketAttachment: (file) => {
     const formData = new FormData()
@@ -111,6 +118,12 @@ export default {
   monitorRedis: () => request.get('/monitor/redis'),
   monitorClearRedis: (params = {}) => request.post('/monitor/redis/clear', null, { params }),
   monitorChroma: () => request.get('/monitor/chroma'),
+  // terminal
+  terminalAuthReports: (params = {}) => request.get('/terminal/auth/list', { params }),
+  terminalLatestAuthReport: (params = {}) => request.get('/terminal/auth/latest', { params }),
+  terminalUpgradeConfig: () => request.get('/terminal/upgrade/config'),
+  terminalSaveUpgradeConfig: (data = {}) => request.post('/terminal/upgrade/config', data),
+  terminalCheckUpgrade: (data = {}) => request.post('/public/terminal/upgrade/check', data, { noNeedToken: true }),
   // settings
   getSystemSettings: () => request.get('/settings/get'),
   updateSystemSettings: (data = {}) => request.post('/settings/update', data),

@@ -5,6 +5,7 @@ from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, AsyncGenerator
 
+import jwt
 from fastapi import FastAPI
 from fastapi.responses import Response
 from fastapi.routing import APIRoute
@@ -15,6 +16,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.core.ctx import CTX_USER_ID, CTX_USER_NAME
 from app.log import logger
 from app.models.admin import AuditLog, User
+from app.settings import settings
 
 from .bgtask import BgTasks
 
@@ -118,6 +120,26 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
 
         return self._mask_sensitive(args)
 
+    async def _read_request_body(self, request: Request) -> bytes:
+        content_type = (request.headers.get("content-type") or "").lower()
+        if "multipart/form-data" in content_type:
+            return b""
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_body_size:
+                    return b""
+            except (TypeError, ValueError):
+                pass
+
+        body = await request.body()
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive
+        return body
+
     async def get_response_body(self, request: Request, response: Response) -> Any:
         if request.method == "GET" and response.status_code < 400:
             return None
@@ -202,6 +224,31 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         self.route_meta_cache[cache_key] = (module, summary)
         return module, summary
 
+    async def _resolve_user_from_token(self, request: Request) -> tuple[int, str]:
+        token = request.headers.get("token") or ""
+        authorization = request.headers.get("authorization") or ""
+        if not token and authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        if not token:
+            return 0, ""
+        try:
+            decode_data = jwt.decode(
+                token,
+                settings.SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM],
+                issuer=settings.JWT_ISSUER,
+                audience=settings.JWT_AUDIENCE,
+                options={"require": ["exp", "iat", "iss", "aud", "jti"]},
+            )
+            user_id = int(decode_data.get("user_id") or 0)
+            if not user_id:
+                return 0, ""
+            user_obj = await User.filter(id=user_id).first()
+            return user_id, (user_obj.username if user_obj else "")
+        except Exception as exc:
+            logger.debug("[http.audit] resolve token user failed path={} error={}", request.url.path, repr(exc))
+            return 0, ""
+
     async def get_request_log(self, request: Request, response: Response) -> dict:
         """
         根据request和response对象获取对应的日志记录数据
@@ -219,6 +266,10 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
             if user_id and not username:
                 user_obj = await User.filter(id=user_id).first()
                 username = user_obj.username if user_obj else ""
+            if not user_id or not username:
+                token_user_id, token_username = await self._resolve_user_from_token(request)
+                user_id = user_id or token_user_id
+                username = username or token_username
             data["user_id"] = user_id
             data["username"] = username
         except LookupError:
@@ -227,8 +278,34 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         return data
 
     async def before_request(self, request: Request):
-        request_args = await self.get_request_args(request)
-        request.state.request_args = request_args
+        content_type = (request.headers.get("content-type") or "").lower()
+        content_length = request.headers.get("content-length")
+        body = await self._read_request_body(request)
+        request.state.raw_body = body
+        request_args = {}
+        for key, value in request.query_params.items():
+            request_args[key] = value
+        if request.method in ["POST", "PUT", "PATCH"]:
+            if body and "application/json" in content_type:
+                try:
+                    parsed = json.loads(body)
+                    if isinstance(parsed, dict):
+                        request_args.update(parsed)
+                    else:
+                        request_args["body"] = parsed
+                except (JSONDecodeError, UnicodeDecodeError):
+                    request_args["raw_body"] = body.decode("utf-8", errors="ignore")
+            elif body and "multipart/form-data" not in content_type:
+                request_args["raw_body"] = body.decode("utf-8", errors="ignore")
+            elif "multipart/form-data" in content_type:
+                request_args["body"] = "Multipart body skipped"
+            elif content_length:
+                try:
+                    if int(content_length) > self.max_body_size:
+                        request_args["body"] = "Request body too large to log"
+                except (TypeError, ValueError):
+                    pass
+        request.state.request_args = self._mask_sensitive(request_args)
 
     async def after_request(self, request: Request, response: Response, process_time: int):
         if request.method in self.methods:

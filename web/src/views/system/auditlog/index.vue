@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, ref } from 'vue'
-import { NInput, NSelect, NPopover } from 'naive-ui'
+import { h, onMounted, ref } from 'vue'
+import { NButton, NCheckbox, NInput, NPopconfirm, NPopover, NSelect, NSpace, NTag } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
 
 import CommonPage from '@/components/page/CommonPage.vue'
@@ -79,14 +79,50 @@ const methodOptions = [
   },
 ]
 
+function refreshTable() {
+  $table.value?.handleSearch()
+}
+
 function formatJSON(data) {
   try {
-    return typeof data === 'string' 
+    if (data == null || data === '') return '无数据'
+    return typeof data === 'string'
       ? JSON.stringify(JSON.parse(data), null, 2)
       : JSON.stringify(data, null, 2)
   } catch (e) {
     return data || '无数据'
   }
+}
+
+function triggerDownload(blob, filename) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+async function archiveLogs() {
+  const params = {}
+  if (queryItems.value.end_time) params.before_time = queryItems.value.end_time
+  const res = await api.archiveAuditLogs(params)
+  $message.success(`已归档 ${res?.data?.archived || 0} 条日志`)
+  refreshTable()
+}
+
+async function clearLogs() {
+  const res = await api.clearAuditLogs({ confirm: true })
+  $message.success(`已清空 ${res?.data?.cleared || 0} 条日志`)
+  refreshTable()
+}
+
+async function exportLogs() {
+  const res = await api.exportAuditLogs({ ...queryItems.value, include_archived: true })
+  const blob = res instanceof Blob ? res : new Blob([res], { type: 'application/zip' })
+  triggerDownload(blob, `audit_logs_${formatTimestamp(Date.now()).replace(/[-:\s]/g, '')}.zip`)
 }
 
 const columns = [
@@ -131,6 +167,20 @@ const columns = [
     align: 'center',
     width: 'auto',
     ellipsis: { tooltip: true },
+  },
+  {
+    title: '归档',
+    key: 'is_archived',
+    align: 'center',
+    width: 90,
+    render: (row) => {
+      const archived = Boolean(row.is_archived)
+      return h(
+        NTag,
+        { type: archived ? 'warning' : 'success', bordered: false },
+        { default: () => (archived ? '已归档' : '当前') }
+      )
+    },
   },
   {
     title: '请求体',
@@ -279,7 +329,31 @@ const columns = [
             @update:value="handleDateRangeChange"
           />
         </QueryBarItem>
+        <QueryBarItem label="归档日志" :label-width="70">
+          <NCheckbox v-model:checked="queryItems.include_archived">包含归档</NCheckbox>
+        </QueryBarItem>
+        <NSpace class="audit-actions" :size="8">
+          <NPopconfirm @positive-click="archiveLogs">
+            <template #trigger>
+              <NButton tertiary type="warning">归档日志</NButton>
+            </template>
+            将当前结束时间之前的未归档日志归档；未选择时间时归档全部未归档日志，确认继续？
+          </NPopconfirm>
+          <NButton tertiary type="primary" @click="exportLogs">导出ZIP</NButton>
+          <NPopconfirm @positive-click="clearLogs">
+            <template #trigger>
+              <NButton tertiary type="error">清空表</NButton>
+            </template>
+            该操作会删除全部审计日志且不可恢复，确认清空？
+          </NPopconfirm>
+        </NSpace>
       </template>
     </CrudTable>
   </CommonPage>
 </template>
+
+<style scoped>
+.audit-actions {
+  align-items: center;
+}
+</style>

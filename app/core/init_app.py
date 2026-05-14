@@ -50,6 +50,14 @@ def _monitor_api_paths() -> list[str]:
     ]
 
 
+def _terminal_api_paths() -> list[str]:
+    return [
+        "/api/v1/terminal/auth/list",
+        "/api/v1/terminal/auth/latest",
+        "/api/v1/terminal/upgrade/config",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -556,6 +564,74 @@ async def init_menus():
                 **child,
             )
 
+    terminal_parent = await Menu.filter(path="/terminal").first()
+    if not terminal_parent:
+        terminal_parent = await Menu.create(
+            menu_type=MenuType.CATALOG,
+            name="终端管理",
+            path="/terminal",
+            order=7,
+            parent_id=0,
+            icon="material-symbols:devices-outline",
+            is_hidden=False,
+            component="Layout",
+            keepalive=False,
+            redirect="/terminal/auth",
+        )
+    else:
+        terminal_parent.menu_type = MenuType.CATALOG
+        terminal_parent.name = "终端管理"
+        terminal_parent.order = 7
+        terminal_parent.parent_id = 0
+        terminal_parent.icon = "material-symbols:devices-outline"
+        terminal_parent.is_hidden = False
+        terminal_parent.component = "Layout"
+        terminal_parent.keepalive = False
+        terminal_parent.redirect = "/terminal/auth"
+        await terminal_parent.save()
+
+    terminal_children = [
+        {
+            "name": "授权校验",
+            "path": "auth",
+            "order": 1,
+            "icon": "material-symbols:verified-user-outline-rounded",
+            "component": "/terminal/auth",
+        },
+        {
+            "name": "在线升级",
+            "path": "upgrade",
+            "order": 2,
+            "icon": "material-symbols:system-update-alt-outline-rounded",
+            "component": "/terminal/upgrade",
+        },
+    ]
+    for child in terminal_children:
+        terminal_menu = await Menu.filter(
+            Q(component=child["component"]) | Q(path=child["path"], parent_id=terminal_parent.id)
+        ).first()
+        if terminal_menu:
+            terminal_menu.menu_type = MenuType.MENU
+            terminal_menu.name = child["name"]
+            terminal_menu.path = child["path"]
+            terminal_menu.order = child["order"]
+            terminal_menu.parent_id = terminal_parent.id
+            terminal_menu.icon = child["icon"]
+            terminal_menu.is_hidden = False
+            terminal_menu.component = child["component"]
+            terminal_menu.keepalive = False
+            terminal_menu.redirect = ""
+            await terminal_menu.save()
+        else:
+            await Menu.create(
+                menu_type=MenuType.MENU,
+                parent_id=terminal_parent.id,
+                is_hidden=False,
+                keepalive=False,
+                redirect="",
+                **child,
+            )
+
 
 
 async def init_apis():
@@ -578,6 +654,7 @@ async def ensure_security_columns():
     async with in_transaction() as conn:
         for sql, label in [
             ("ALTER TABLE `user` ADD COLUMN `token_version` INT NOT NULL DEFAULT 0", "user.token_version"),
+            ("ALTER TABLE `auditlog` ADD COLUMN `is_archived` BOOL NOT NULL DEFAULT 0", "auditlog.is_archived"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
             ("ALTER TABLE `sk_learning_candidate` ADD COLUMN `created_by` BIGINT NULL", "sk_learning_candidate.created_by"),
@@ -627,7 +704,9 @@ async def init_roles():
                 await admin_role.apis.add(*await Api.all())
                 await admin_role.menus.add(*await Menu.all())
                 await admin_role.apis.add(*await Api.filter(path__in=_monitor_api_paths()))
+                await admin_role.apis.add(*await Api.filter(path__in=_terminal_api_paths()))
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
+                await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -678,6 +757,7 @@ async def init_roles():
         ]
     )
     monitor_apis = await Api.filter(path__in=_monitor_api_paths())
+    terminal_apis = await Api.filter(path__in=_terminal_api_paths())
     notice_user_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/inbox",
@@ -695,6 +775,7 @@ async def init_roles():
     settings_menus = await Menu.filter(Q(component="/system/settings"))
     notice_menus = await Menu.filter(Q(component="/system/notice"))
     monitor_menus = await Menu.filter(Q(component="/system/monitor"))
+    terminal_menus = await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
     webdav_menus = await Menu.filter(
         Q(path="/outbound") | Q(component="/system/webdav") | Q(component="/system/webdav-share")
     )
@@ -724,10 +805,12 @@ async def init_roles():
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)
+    await role_map["管理员"].apis.add(*terminal_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*notice_apis)
     await role_map["管理员"].menus.add(*settings_menus)
     await role_map["管理员"].menus.add(*monitor_menus)
+    await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
 

@@ -36,7 +36,7 @@ async def reset_setup():
 async def providers():
     return Success(data={"providers": [
         {"id": "openai", "name": "OpenAI Compatible", "base_url": "https://api.openai.com/v1"},
-        {"id": "ollama", "name": "Ollama 本地模型", "base_url": "http://127.0.0.1:11434"},
+        {"id": "ollama", "name": "Ollama 模型", "base_url": "http://127.0.0.1:11434"},
     ]})
 
 

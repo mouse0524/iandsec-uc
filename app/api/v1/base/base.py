@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
+from tortoise.expressions import Q
 
 from app.log import logger
 from app.core.redis_client import execute_redis
@@ -14,8 +15,24 @@ from app.controllers.mail import mail_controller
 from app.controllers.system_setting import system_setting_controller
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
-from app.models.admin import Api, AuditLog, Menu, PartnerRegistration, Role, Ticket, User
-from app.models.enums import PartnerRegisterStatus, TicketStatus
+from app.models.admin import (
+    Api,
+    AuditLog,
+    Menu,
+    PartnerRegistration,
+    Role,
+    SkillKnowConversation,
+    SkillKnowDocument,
+    SkillKnowDocumentChunk,
+    SkillKnowLearningCandidate,
+    SkillKnowMessage,
+    SkillKnowVectorIndex,
+    TerminalAuthReport,
+    Ticket,
+    User,
+    WebDavShareLink,
+)
+from app.models.enums import PartnerRegisterStatus, SkillKnowDocumentStatus, SkillKnowLearningStatus, TicketStatus
 from app.schemas.captcha import CaptchaOut
 from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, SendVerifyCodeIn
 from app.schemas.base import Fail, Success
@@ -189,7 +206,7 @@ async def get_workbench_stats():
     roles = await user.roles
     role_names = [role.name for role in roles]
     is_global = user.is_superuser or "管理员" in role_names or "客服" in role_names
-    cache_key = "stats:workbench:global:v1" if is_global else f"stats:workbench:user:{user_id}:v1"
+    cache_key = "stats:workbench:global:v2" if is_global else f"stats:workbench:user:{user_id}:v2"
     try:
         cached = await execute_redis("get", cache_key)
         if cached:
@@ -217,25 +234,118 @@ async def get_workbench_stats():
     ticket_total = await ticket_query.count()
     ticket_pending_review = await ticket_query.filter(status=TicketStatus.PENDING_REVIEW).count()
     ticket_tech_processing = await ticket_query.filter(status=TicketStatus.TECH_PROCESSING).count()
+    ticket_done = await ticket_query.filter(status=TicketStatus.DONE).count()
+    ticket_rejected = await ticket_query.filter(status__in=[TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED]).count()
     ticket_today_created = await ticket_query.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
     ticket_today_done = await ticket_query.filter(
         status=TicketStatus.DONE,
         finished_at__gte=today_start,
         finished_at__lt=tomorrow_start,
     ).count()
+    ticket_active = ticket_pending_review + ticket_tech_processing
+    ticket_today_completion_rate = round(ticket_today_done * 100 / ticket_today_created, 1) if ticket_today_created else 0
     register_pending = await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING).count() if is_global else 0
+    register_approved = await PartnerRegistration.filter(status=PartnerRegisterStatus.APPROVED).count() if is_global else 0
+    register_rejected = await PartnerRegistration.filter(status=PartnerRegisterStatus.REJECTED).count() if is_global else 0
     user_total = await User.all().count() if is_global else 0
     auditlog_today = await AuditLog.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count() if is_global else 0
+    auditlog_failed_today = (
+        await AuditLog.filter(created_at__gte=today_start, created_at__lt=tomorrow_start, status__gte=400).count()
+        if is_global
+        else 0
+    )
+    auditlog_archived = await AuditLog.filter(is_archived=True).count() if is_global else 0
+
+    document_query = SkillKnowDocument.all() if is_global else SkillKnowDocument.filter(owner_id=user_id)
+    document_total = await document_query.count()
+    document_completed = await document_query.filter(status=SkillKnowDocumentStatus.COMPLETED).count()
+    document_processing = await document_query.filter(
+        status__in=[SkillKnowDocumentStatus.PENDING, SkillKnowDocumentStatus.PROCESSING]
+    ).count()
+    document_failed = await document_query.filter(status=SkillKnowDocumentStatus.FAILED).count()
+    document_today = await document_query.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
+    document_health_rate = round(document_completed * 100 / document_total, 1) if document_total else 100
+    chunk_total = await SkillKnowDocumentChunk.all().count() if is_global else 0
+    vector_total = await SkillKnowVectorIndex.all().count() if is_global else 0
+    conversation_today = (
+        await SkillKnowConversation.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
+        if is_global
+        else await SkillKnowConversation.filter(
+            owner_id=user_id, created_at__gte=today_start, created_at__lt=tomorrow_start
+        ).count()
+    )
+    message_today = await SkillKnowMessage.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count() if is_global else 0
+    learning_pending = await SkillKnowLearningCandidate.filter(status=SkillKnowLearningStatus.PENDING).count() if is_global else 0
+
+    share_active = (
+        await WebDavShareLink.filter(is_active=True, expire_time__gte=now).count()
+        if is_global
+        else await WebDavShareLink.filter(created_by=user_id, is_active=True, expire_time__gte=now).count()
+    )
+    share_expired = (
+        await WebDavShareLink.filter(Q(is_active=False) | Q(expire_time__lt=now)).count()
+        if is_global
+        else await WebDavShareLink.filter(Q(created_by=user_id), Q(is_active=False) | Q(expire_time__lt=now)).count()
+    )
+
+    terminal_company_count = 0
+    terminal_total = 0
+    terminal_auth_expiring = 0
+    terminal_maintain_expiring = 0
+    terminal_latest_reported_at = None
+    if is_global:
+        expire_limit = now + timedelta(days=30)
+        latest_reports = await TerminalAuthReport.all().order_by("-reported_at")
+        latest_by_company = {}
+        for report in latest_reports:
+            if report.company_name not in latest_by_company:
+                latest_by_company[report.company_name] = report
+        terminal_company_count = len(latest_by_company)
+        for report in latest_by_company.values():
+            stats_map = report.terminal_stats or {}
+            terminal_total += sum(int(value or 0) for value in stats_map.values())
+            if now <= report.auth_expire_at <= expire_limit:
+                terminal_auth_expiring += 1
+            if now <= report.maintain_expire_at <= expire_limit:
+                terminal_maintain_expiring += 1
+        if latest_reports:
+            terminal_latest_reported_at = latest_reports[0].reported_at.isoformat()
 
     data = {
         "ticket_total": ticket_total,
+        "ticket_active": ticket_active,
         "ticket_pending_review": ticket_pending_review,
         "ticket_tech_processing": ticket_tech_processing,
+        "ticket_done": ticket_done,
+        "ticket_rejected": ticket_rejected,
         "ticket_today_created": ticket_today_created,
         "ticket_today_done": ticket_today_done,
+        "ticket_today_completion_rate": ticket_today_completion_rate,
         "register_pending": register_pending,
+        "register_approved": register_approved,
+        "register_rejected": register_rejected,
         "user_total": user_total,
         "auditlog_today": auditlog_today,
+        "auditlog_failed_today": auditlog_failed_today,
+        "auditlog_archived": auditlog_archived,
+        "document_total": document_total,
+        "document_completed": document_completed,
+        "document_processing": document_processing,
+        "document_failed": document_failed,
+        "document_today": document_today,
+        "document_health_rate": document_health_rate,
+        "chunk_total": chunk_total,
+        "vector_total": vector_total,
+        "conversation_today": conversation_today,
+        "message_today": message_today,
+        "learning_pending": learning_pending,
+        "share_active": share_active,
+        "share_expired": share_expired,
+        "terminal_company_count": terminal_company_count,
+        "terminal_total": terminal_total,
+        "terminal_auth_expiring": terminal_auth_expiring,
+        "terminal_maintain_expiring": terminal_maintain_expiring,
+        "terminal_latest_reported_at": terminal_latest_reported_at,
     }
     try:
         await execute_redis("setex", cache_key, 60, json.dumps(data, ensure_ascii=False))
