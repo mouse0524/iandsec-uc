@@ -34,11 +34,26 @@ async def reset_setup():
 
 @router.get("/providers", summary="模型提供商")
 async def providers():
-    return Success(data={"providers": [{"id": "openai", "name": "OpenAI Compatible", "base_url": "https://api.openai.com/v1"}]})
+    return Success(data={"providers": [
+        {"id": "openai", "name": "OpenAI Compatible", "base_url": "https://api.openai.com/v1"},
+        {"id": "ollama", "name": "Ollama 本地模型", "base_url": "http://127.0.0.1:11434"},
+    ]})
 
 
 @router.get("/providers/{provider_id}/models", summary="提供商模型列表")
 async def provider_models(provider_id: str):
+    if provider_id == "ollama":
+        return Success(data={
+            "provider_id": provider_id,
+            "base_url": "http://127.0.0.1:11434",
+            "models": [
+                {"id": "llama3.1", "name": "llama3.1", "type": "chat"},
+                {"id": "qwen2.5", "name": "qwen2.5", "type": "chat"},
+                {"id": "deepseek-r1", "name": "deepseek-r1", "type": "chat"},
+                {"id": "nomic-embed-text", "name": "nomic-embed-text", "type": "embedding"},
+                {"id": "mxbai-embed-large", "name": "mxbai-embed-large", "type": "embedding"},
+            ],
+        })
     return Success(data={
         "provider_id": provider_id,
         "base_url": "https://api.openai.com/v1",

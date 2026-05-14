@@ -5,6 +5,8 @@ from app.models.admin import SkillKnowSystemConfig
 class SkillKnowConfigService:
     DEFAULTS = {
         "llm_base_url": "https://api.openai.com/v1",
+        "llm_chat_provider": "openai",
+        "llm_embedding_provider": "openai",
         "llm_chat_base_url": "https://api.openai.com/v1",
         "llm_embedding_base_url": "https://api.openai.com/v1",
         "llm_chat_model": "gpt-4o-mini",
@@ -21,11 +23,11 @@ class SkillKnowConfigService:
         "markdown_optimize_max_chars": 30000,
         "markdown_optimize_timeout": 45,
     }
-    SENSITIVE_KEYS = {"llm_api_key"}
+    SENSITIVE_KEYS = {"llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"}
 
     @staticmethod
     def _mask_value(key: str, value):
-        if key not in {"llm_api_key", "llm_api_key_test"}:
+        if key not in {"llm_api_key", "llm_chat_api_key", "llm_embedding_api_key", "llm_api_key_test"}:
             return value
         text = str(value or "")
         if len(text) <= 8:
@@ -81,7 +83,11 @@ class SkillKnowConfigService:
     async def llm_config(self, masked: bool = False) -> dict:
         keys = [
             "llm_api_key",
+            "llm_chat_api_key",
+            "llm_embedding_api_key",
             "llm_base_url",
+            "llm_chat_provider",
+            "llm_embedding_provider",
             "llm_chat_base_url",
             "llm_embedding_base_url",
             "llm_chat_model",
@@ -99,13 +105,19 @@ class SkillKnowConfigService:
             "markdown_optimize_timeout",
         ]
         data = {key: await self.get(key) for key in keys}
-        if masked and data.get("llm_api_key"):
-            key = str(data["llm_api_key"])
-            data["llm_api_key"] = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+        if masked:
+            for item_key in ("llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"):
+                if data.get(item_key):
+                    data[item_key] = self._mask_value(item_key, data[item_key])
         return data
 
     async def is_configured(self) -> bool:
-        return bool(await self.get("llm_api_key"))
+        legacy_key = await self.get("llm_api_key")
+        chat_provider = str(await self.get("llm_chat_provider", "openai") or "openai").lower()
+        embedding_provider = str(await self.get("llm_embedding_provider", "openai") or "openai").lower()
+        chat_ready = chat_provider == "ollama" or bool(await self.get("llm_chat_api_key", legacy_key))
+        embedding_ready = embedding_provider == "ollama" or bool(await self.get("llm_embedding_api_key", legacy_key))
+        return chat_ready and embedding_ready
 
 
 skill_know_config_service = SkillKnowConfigService()

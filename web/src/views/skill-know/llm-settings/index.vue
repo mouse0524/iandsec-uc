@@ -13,8 +13,16 @@ const health = ref(null)
 const state = ref(null)
 const testResult = ref(null)
 const lastTestAt = ref('')
+const providerOptions = [
+  { label: 'OpenAI 兼容', value: 'openai' },
+  { label: 'Ollama 本地', value: 'ollama' },
+]
 const form = reactive({
   llm_api_key: '',
+  llm_chat_api_key: '',
+  llm_embedding_api_key: '',
+  llm_chat_provider: 'openai',
+  llm_embedding_provider: 'openai',
   llm_chat_base_url: 'https://api.openai.com/v1',
   llm_embedding_base_url: 'https://api.openai.com/v1',
   llm_chat_model: 'gpt-4o-mini',
@@ -41,6 +49,8 @@ async function loadState() {
     const llm = stateRes.data?.llm || {}
     const fallbackBaseUrl = llm.llm_base_url || 'https://api.openai.com/v1'
     Object.assign(form, {
+      llm_chat_provider: llm.llm_chat_provider || form.llm_chat_provider,
+      llm_embedding_provider: llm.llm_embedding_provider || form.llm_embedding_provider,
       llm_chat_base_url: llm.llm_chat_base_url || fallbackBaseUrl || form.llm_chat_base_url,
       llm_embedding_base_url: llm.llm_embedding_base_url || fallbackBaseUrl || form.llm_embedding_base_url,
       llm_chat_model: llm.llm_chat_model || form.llm_chat_model,
@@ -63,6 +73,8 @@ async function loadState() {
 function buildPayload() {
   const payload = { ...form }
   if (!payload.llm_api_key?.trim()) delete payload.llm_api_key
+  if (!payload.llm_chat_api_key?.trim()) delete payload.llm_chat_api_key
+  if (!payload.llm_embedding_api_key?.trim()) delete payload.llm_embedding_api_key
   return payload
 }
 
@@ -99,9 +111,13 @@ async function save() {
   try {
     const payload = { ...form }
     if (!payload.llm_api_key?.trim()) delete payload.llm_api_key
+    if (!payload.llm_chat_api_key?.trim()) delete payload.llm_chat_api_key
+    if (!payload.llm_embedding_api_key?.trim()) delete payload.llm_embedding_api_key
     const res = await api.skillKnowCompleteSetup(payload)
     state.value = res.data
     form.llm_api_key = ''
+    form.llm_chat_api_key = ''
+    form.llm_embedding_api_key = ''
     $message.success('保存成功')
     await loadState()
   } finally {
@@ -160,14 +176,40 @@ function errorCategory(message) {
 }
 
 const effectiveSummary = computed(() => ({
+  chatProvider: form.llm_chat_provider === 'ollama' ? 'Ollama' : 'OpenAI 兼容',
   chatEndpoint: form.llm_chat_base_url,
   chatModel: form.llm_chat_model,
+  embeddingProvider: form.llm_embedding_provider === 'ollama' ? 'Ollama' : 'OpenAI 兼容',
   embeddingEndpoint: form.llm_embedding_base_url,
   embeddingModel: form.llm_embedding_model,
   timeout: state.value?.llm?.llm_timeout || 120,
   topK: form.retrieval_top_k,
   threshold: form.retrieval_score_threshold,
 }))
+
+const maskedChatKey = computed(() => state.value?.llm?.llm_chat_api_key || state.value?.llm?.llm_api_key || '')
+const maskedEmbeddingKey = computed(() => state.value?.llm?.llm_embedding_api_key || state.value?.llm?.llm_api_key || '')
+
+function applyProviderDefaults(type) {
+  if (type === 'chat' && form.llm_chat_provider === 'ollama') {
+    form.llm_chat_base_url = 'http://127.0.0.1:11434'
+    if (!form.llm_chat_model || form.llm_chat_model === 'gpt-4o-mini') form.llm_chat_model = 'llama3.1'
+    return
+  }
+  if (type === 'embedding' && form.llm_embedding_provider === 'ollama') {
+    form.llm_embedding_base_url = 'http://127.0.0.1:11434'
+    if (!form.llm_embedding_model || form.llm_embedding_model === 'text-embedding-3-small') form.llm_embedding_model = 'nomic-embed-text'
+    return
+  }
+  if (type === 'chat' && form.llm_chat_provider === 'openai') {
+    if (!form.llm_chat_base_url || form.llm_chat_base_url.includes('127.0.0.1:11434')) form.llm_chat_base_url = 'https://api.openai.com/v1'
+    if (!form.llm_chat_model || form.llm_chat_model === 'llama3.1') form.llm_chat_model = 'gpt-4o-mini'
+  }
+  if (type === 'embedding' && form.llm_embedding_provider === 'openai') {
+    if (!form.llm_embedding_base_url || form.llm_embedding_base_url.includes('127.0.0.1:11434')) form.llm_embedding_base_url = 'https://api.openai.com/v1'
+    if (!form.llm_embedding_model || form.llm_embedding_model === 'nomic-embed-text') form.llm_embedding_model = 'text-embedding-3-small'
+  }
+}
 </script>
 
 <template>
@@ -192,12 +234,12 @@ const effectiveSummary = computed(() => ({
             <div class="summary-card">
               <span>对话模型</span>
               <b>{{ effectiveSummary.chatModel }}</b>
-              <p>{{ effectiveSummary.chatEndpoint }}</p>
+              <p>{{ effectiveSummary.chatProvider }} · {{ effectiveSummary.chatEndpoint }}</p>
             </div>
             <div class="summary-card">
               <span>Embedding 模型</span>
               <b>{{ effectiveSummary.embeddingModel }}</b>
-              <p>{{ effectiveSummary.embeddingEndpoint }}</p>
+              <p>{{ effectiveSummary.embeddingProvider }} · {{ effectiveSummary.embeddingEndpoint }}</p>
             </div>
             <div class="summary-card">
               <span>Top K / 阈值</span>
@@ -216,18 +258,32 @@ const effectiveSummary = computed(() => ({
               <div class="panel-head">
                 <div>
                   <h3>模型配置</h3>
-                  <p>配置对话和向量模型端点，API Key 留空时不会覆盖已保存值。</p>
+                  <p>对话与 Embedding 分开配置，Key 留空时不会覆盖已保存值。</p>
                 </div>
               </div>
               <NForm label-placement="top" class="form-stack">
-                <NFormItem label="API Key"><NInput v-model:value="form.llm_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存 Key" /></NFormItem>
-                <div v-if="state?.llm?.llm_api_key" class="muted">已保存 Key（脱敏）：{{ state.llm.llm_api_key }}</div>
-                <div class="two-col">
-                  <NFormItem label="对话端点"><NInput v-model:value="form.llm_chat_base_url" /></NFormItem>
+                <section class="endpoint-card">
+                  <div class="endpoint-title">
+                    <b>对话模型</b>
+                    <span v-if="maskedChatKey">已保存 Key：{{ maskedChatKey }}</span>
+                  </div>
+                  <NFormItem label="提供商"><NSelect v-model:value="form.llm_chat_provider" :options="providerOptions" @update:value="applyProviderDefaults('chat')" /></NFormItem>
+                  <NFormItem v-if="form.llm_chat_provider !== 'ollama'" label="对话 API Key"><NInput v-model:value="form.llm_chat_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存对话 Key" /></NFormItem>
+                  <NFormItem label="对话端点 URL"><NInput v-model:value="form.llm_chat_base_url" /></NFormItem>
                   <NFormItem label="Chat Model"><NInput v-model:value="form.llm_chat_model" /></NFormItem>
-                  <NFormItem label="Embedding 端点"><NInput v-model:value="form.llm_embedding_base_url" /></NFormItem>
+                  <div v-if="form.llm_chat_provider === 'ollama'" class="muted">本地 Ollama 默认地址为 http://127.0.0.1:11434，对话模型需先在 Ollama 中 pull。</div>
+                </section>
+                <section class="endpoint-card">
+                  <div class="endpoint-title">
+                    <b>Embedding 模型</b>
+                    <span v-if="maskedEmbeddingKey">已保存 Key：{{ maskedEmbeddingKey }}</span>
+                  </div>
+                  <NFormItem label="提供商"><NSelect v-model:value="form.llm_embedding_provider" :options="providerOptions" @update:value="applyProviderDefaults('embedding')" /></NFormItem>
+                  <NFormItem v-if="form.llm_embedding_provider !== 'ollama'" label="Embedding API Key"><NInput v-model:value="form.llm_embedding_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存 Embedding Key" /></NFormItem>
+                  <NFormItem label="Embedding 端点 URL"><NInput v-model:value="form.llm_embedding_base_url" /></NFormItem>
                   <NFormItem label="Embedding Model"><NInput v-model:value="form.llm_embedding_model" /></NFormItem>
-                </div>
+                  <div v-if="form.llm_embedding_provider === 'ollama'" class="muted">推荐本地向量模型 nomic-embed-text，需先执行 ollama pull nomic-embed-text。</div>
+                </section>
               </NForm>
             </section>
 
@@ -390,7 +446,26 @@ h1 { margin-top: 6px; }
   background: #fbfbf8;
 }
 .form-stack {
+  display: grid;
+  gap: 14px;
   padding: 16px;
+}
+.endpoint-card {
+  padding: 14px;
+  border: 1px solid var(--ai-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .74);
+}
+.endpoint-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--ai-text);
+}
+.endpoint-title span {
+  color: var(--ai-muted);
+  font-size: 12px;
 }
 .two-col {
   display: grid;

@@ -14,9 +14,14 @@ class SkillKnowQuickSetupService:
         }
 
     async def checklist(self) -> list[dict]:
-        configured = await skill_know_config_service.is_configured()
+        legacy_key = await skill_know_config_service.get("llm_api_key")
+        chat_provider = str(await skill_know_config_service.get("llm_chat_provider", "openai") or "openai").lower()
+        embedding_provider = str(await skill_know_config_service.get("llm_embedding_provider", "openai") or "openai").lower()
+        chat_key_configured = chat_provider == "ollama" or bool(await skill_know_config_service.get("llm_chat_api_key", legacy_key))
+        embedding_key_configured = embedding_provider == "ollama" or bool(await skill_know_config_service.get("llm_embedding_api_key", legacy_key))
         return [
-            {"key": "api_key", "label": "OpenAI API Key", "done": configured},
+            {"key": "chat_api_key", "label": "对话 API Key", "done": chat_key_configured},
+            {"key": "embedding_api_key", "label": "Embedding API Key", "done": embedding_key_configured},
             {"key": "chat_model", "label": "Chat Model", "done": bool(await skill_know_config_service.get("llm_chat_model"))},
             {"key": "embedding_model", "label": "Embedding Model", "done": bool(await skill_know_config_service.get("llm_embedding_model"))},
             {"key": "vector_store", "label": "ChromaDB 向量库", "done": True},
@@ -24,23 +29,27 @@ class SkillKnowQuickSetupService:
         ]
 
     async def complete(self, data) -> dict:
-        key_preview = str(data.llm_api_key or "")
-        if len(key_preview) > 8:
-            key_preview = key_preview[:4] + "****" + key_preview[-4:]
-        else:
-            key_preview = "(empty)"
         logger.info(
-            "[skill_know.quick_setup.complete] api_key_type={} api_key_preview={} chat_base_url={} embedding_base_url={} chat_model={} embedding_model={}",
-            type(data.llm_api_key).__name__,
-            key_preview,
+            "[skill_know.quick_setup.complete] chat_provider={} embedding_provider={} chat_api_key_set={} embedding_api_key_set={} legacy_api_key_set={} chat_base_url={} embedding_base_url={} chat_model={} embedding_model={}",
+            data.llm_chat_provider,
+            data.llm_embedding_provider,
+            isinstance(data.llm_chat_api_key, str) and bool(data.llm_chat_api_key.strip()),
+            isinstance(data.llm_embedding_api_key, str) and bool(data.llm_embedding_api_key.strip()),
+            isinstance(data.llm_api_key, str) and bool(data.llm_api_key.strip()),
             data.llm_chat_base_url,
             data.llm_embedding_base_url,
             data.llm_chat_model,
             data.llm_embedding_model,
         )
-        # 空 key 不覆盖已有 key，防止“保存其他项时把 key 清空”
+        # 空 key 不覆盖已有 key，防止“保存其他项时把 key 清空”。旧 llm_api_key 仅作为迁移兜底。
         if isinstance(data.llm_api_key, str) and data.llm_api_key.strip():
             await skill_know_config_service.set("llm_api_key", data.llm_api_key.strip(), description="OpenAI API Key")
+        if isinstance(data.llm_chat_api_key, str) and data.llm_chat_api_key.strip():
+            await skill_know_config_service.set("llm_chat_api_key", data.llm_chat_api_key.strip(), description="Chat API Key")
+        if isinstance(data.llm_embedding_api_key, str) and data.llm_embedding_api_key.strip():
+            await skill_know_config_service.set("llm_embedding_api_key", data.llm_embedding_api_key.strip(), description="Embedding API Key")
+        await skill_know_config_service.set("llm_chat_provider", data.llm_chat_provider, description="Chat Provider")
+        await skill_know_config_service.set("llm_embedding_provider", data.llm_embedding_provider, description="Embedding Provider")
         await skill_know_config_service.set("llm_chat_base_url", data.llm_chat_base_url, description="Chat Base URL")
         await skill_know_config_service.set("llm_embedding_base_url", data.llm_embedding_base_url, description="Embedding Base URL")
         await skill_know_config_service.set("llm_chat_model", data.llm_chat_model, description="OpenAI Chat Model")
@@ -59,13 +68,18 @@ class SkillKnowQuickSetupService:
 
     async def test_connection(self, data) -> dict:
         payload = data.model_dump()
-        if not str(payload.get("llm_api_key") or "").strip():
-            payload.pop("llm_api_key", None)
+        for key in ("llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"):
+            if not str(payload.get(key) or "").strip():
+                payload.pop(key, None)
         return await skill_know_openai_client.test_connection(payload)
 
     async def reset(self) -> dict:
         for key in [
             "llm_api_key",
+            "llm_chat_api_key",
+            "llm_embedding_api_key",
+            "llm_chat_provider",
+            "llm_embedding_provider",
             "llm_chat_base_url",
             "llm_embedding_base_url",
             "llm_chat_model",
