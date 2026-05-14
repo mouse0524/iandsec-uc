@@ -7,6 +7,7 @@ from .auditlog import auditlog_router
 from .base import base_router
 from .depts import depts_router
 from .menus import menus_router
+from .monitor import monitor_router
 from .notices import notices_router
 from .partner import partner_router
 from .public_ticket import public_ticket_router
@@ -33,5 +34,6 @@ v1_router.include_router(depts_router, prefix="/dept", dependencies=[DependPermi
 v1_router.include_router(auditlog_router, prefix="/auditlog", dependencies=[DependPermission])
 v1_router.include_router(tickets_router, prefix="/ticket", dependencies=[DependPermission])
 v1_router.include_router(settings_router, prefix="/settings", dependencies=[DependPermission])
+v1_router.include_router(monitor_router, prefix="/monitor", dependencies=[DependPermission])
 v1_router.include_router(webdav_router, prefix="/webdav", dependencies=[DependPermission])
 v1_router.include_router(skill_know_router, prefix="/skill-know", dependencies=[DependPermission])

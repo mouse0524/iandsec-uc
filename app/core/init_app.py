@@ -39,6 +39,17 @@ def _default_basic_api_paths() -> list[str]:
     ]
 
 
+def _monitor_api_paths() -> list[str]:
+    return [
+        "/api/v1/monitor/overview",
+        "/api/v1/monitor/resources",
+        "/api/v1/monitor/mysql",
+        "/api/v1/monitor/redis",
+        "/api/v1/monitor/redis/clear",
+        "/api/v1/monitor/chroma",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -194,6 +205,17 @@ async def init_menus():
                 component="/system/notice",
                 keepalive=False,
             ),
+            Menu(
+                menu_type=MenuType.MENU,
+                name="系统监控",
+                path="monitor",
+                order=9,
+                parent_id=parent_menu.id,
+                icon="material-symbols:monitor-heart-outline-rounded",
+                is_hidden=False,
+                component="/system/monitor",
+                keepalive=False,
+            ),
         ]
         await Menu.bulk_create(children_menu)
         await Menu.create(
@@ -323,6 +345,35 @@ async def init_menus():
                 icon="material-symbols:notifications-active-outline-rounded",
                 is_hidden=False,
                 component="/system/notice",
+                keepalive=False,
+                redirect="",
+            )
+
+    monitor_menu = await Menu.filter(Q(component="/system/monitor") | Q(path="monitor")).first()
+    system_parent = await Menu.filter(path="/system").first()
+    if system_parent:
+        if monitor_menu:
+            monitor_menu.menu_type = MenuType.MENU
+            monitor_menu.name = "系统监控"
+            monitor_menu.path = "monitor"
+            monitor_menu.order = 9
+            monitor_menu.parent_id = system_parent.id
+            monitor_menu.icon = "material-symbols:monitor-heart-outline-rounded"
+            monitor_menu.is_hidden = False
+            monitor_menu.component = "/system/monitor"
+            monitor_menu.keepalive = False
+            monitor_menu.redirect = ""
+            await monitor_menu.save()
+        else:
+            await Menu.create(
+                menu_type=MenuType.MENU,
+                name="系统监控",
+                path="monitor",
+                order=9,
+                parent_id=system_parent.id,
+                icon="material-symbols:monitor-heart-outline-rounded",
+                is_hidden=False,
+                component="/system/monitor",
                 keepalive=False,
                 redirect="",
             )
@@ -575,6 +626,8 @@ async def init_roles():
             if admin_role:
                 await admin_role.apis.add(*await Api.all())
                 await admin_role.menus.add(*await Menu.all())
+                await admin_role.apis.add(*await Api.filter(path__in=_monitor_api_paths()))
+                await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -624,6 +677,7 @@ async def init_roles():
             "/api/v1/notice/read_all",
         ]
     )
+    monitor_apis = await Api.filter(path__in=_monitor_api_paths())
     notice_user_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/inbox",
@@ -640,6 +694,7 @@ async def init_roles():
     partner_review_menus = await Menu.filter(Q(path="/partner") | Q(component="/partner/review"))
     settings_menus = await Menu.filter(Q(component="/system/settings"))
     notice_menus = await Menu.filter(Q(component="/system/notice"))
+    monitor_menus = await Menu.filter(Q(component="/system/monitor"))
     webdav_menus = await Menu.filter(
         Q(path="/outbound") | Q(component="/system/webdav") | Q(component="/system/webdav-share")
     )
@@ -668,9 +723,11 @@ async def init_roles():
     await role_map["客服"].menus.add(*partner_review_menus)
 
     await role_map["管理员"].apis.add(*settings_apis)
+    await role_map["管理员"].apis.add(*monitor_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*notice_apis)
     await role_map["管理员"].menus.add(*settings_menus)
+    await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
 

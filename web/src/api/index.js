@@ -104,6 +104,13 @@ export default {
   getNoticeUnreadCount: () => request.get('/notice/unread_count'),
   readNotice: (data = {}) => request.post('/notice/read', data),
   readAllNotice: () => request.post('/notice/read_all'),
+  // monitor
+  monitorOverview: () => request.get('/monitor/overview'),
+  monitorResources: () => request.get('/monitor/resources'),
+  monitorMysql: () => request.get('/monitor/mysql'),
+  monitorRedis: () => request.get('/monitor/redis'),
+  monitorClearRedis: (params = {}) => request.post('/monitor/redis/clear', null, { params }),
+  monitorChroma: () => request.get('/monitor/chroma'),
   // settings
   getSystemSettings: () => request.get('/settings/get'),
   updateSystemSettings: (data = {}) => request.post('/settings/update', data),
@@ -151,6 +158,8 @@ export default {
   skillKnowMoveDocument: (data = {}) => request.post('/skill-know/documents/move', data),
   skillKnowSearchDocuments: (params = {}) => request.get('/skill-know/documents/search', { params }),
   skillKnowReindexDocument: (params = {}) => request.post('/skill-know/documents/reindex', null, { params }),
+  skillKnowRetryDocument: (params = {}) => request.post('/skill-know/documents/retry', null, { params }),
+  skillKnowRecoverStuckDocuments: (params = {}) => request.post('/skill-know/documents/recover-stuck', null, { params }),
   // skill know - chat/prompts/settings
   skillKnowChat: (data = {}) => request.post('/skill-know/chat', data),
   skillKnowConversations: (params = {}) => request.get('/skill-know/chat/conversations', { params }),
@@ -178,4 +187,5 @@ export default {
   skillKnowResetSetup: () => request.post('/skill-know/llm-settings/reset'),
   skillKnowHealth: () => request.get('/skill-know/health'),
   skillKnowHealthDetail: () => request.get('/skill-know/health/detail'),
+  skillKnowIndexDiagnose: (params = {}) => request.post('/skill-know/health/index-diagnose', null, { params }),
 }

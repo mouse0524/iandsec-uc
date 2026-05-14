@@ -20,6 +20,7 @@ class SkillKnowDocumentIndexService:
             overlap_chars=chunk_overlap,
         )
         indexed_count = 0
+        vector_count = 0
         for chunk in chunks:
             chunk_uri = f"{document.uri}#chunk-{chunk.index}"
             safe_heading = (chunk.heading or "")[:300] or None
@@ -36,6 +37,8 @@ class SkillKnowDocumentIndexService:
                 "file_type": document.file_type,
             }
             vector_id = await skill_know_chroma_store.upsert_document_chunk(chunk_uri=chunk_uri, text=chunk.content, metadata=metadata)
+            if vector_id:
+                vector_count += 1
             if not vector_id and await skill_know_config_service.is_configured():
                 logger.warning(
                     "[skill_know.index.chunk.vector_missing] document_id={} chunk_index={} heading={} title={} preview={}",
@@ -55,12 +58,13 @@ class SkillKnowDocumentIndexService:
                 content_hash=sha256_text(chunk.content),
                 token_count=chunk.token_count,
                 vector_id=vector_id or chunk_uri,
-                extra_metadata=metadata,
+                extra_metadata={**metadata, "vector_indexed": bool(vector_id)},
             )
             indexed_count += 1
         return {
             "chunk_count": indexed_count,
-            "index_status": "completed",
+            "vector_count": vector_count,
+            "index_status": "completed" if vector_count == indexed_count or not await skill_know_config_service.is_configured() else "partial",
             "chunk_preview": preview_text(chunks[0].content if chunks else "", 120),
         }
 

@@ -163,6 +163,42 @@ class SkillKnowChromaStore:
                 return None
         return None
 
+    async def diagnose(self, *, test_embedding: bool = False) -> dict[str, Any]:
+        config = await skill_know_config_service.llm_config(masked=True)
+        result: dict[str, Any] = {
+            "persist_dir": self.persist_dir,
+            "chromadb_available": self._is_chromadb_available(),
+            "embedding_configured": await skill_know_config_service.is_configured(),
+            "embedding_provider": config.get("llm_embedding_provider"),
+            "embedding_base_url": config.get("llm_embedding_base_url") or config.get("llm_base_url"),
+            "embedding_model": config.get("llm_embedding_model"),
+            "collections": {},
+        }
+        if result["chromadb_available"]:
+            try:
+                collection = self._document_collection()
+                result["collections"]["skill_know_documents"] = {
+                    "count": collection.count(),
+                }
+            except Exception as exc:
+                result["collections"]["skill_know_documents"] = {
+                    "error": str(exc),
+                }
+        if test_embedding:
+            try:
+                vectors = await skill_know_openai_client.embeddings(["health check"])
+                embedding = vectors[0] if vectors else []
+                result["embedding_test"] = {
+                    "success": bool(embedding),
+                    "dimension": len(embedding or []),
+                }
+            except Exception as exc:
+                result["embedding_test"] = {
+                    "success": False,
+                    "error": str(exc),
+                }
+        return result
+
     async def delete_document_chunks(self, chunk_uris: list[str]) -> None:
         if not chunk_uris:
             return

@@ -11,6 +11,9 @@ defineOptions({ name: '文档管理' })
 const loading = ref(false)
 const uploading = ref(false)
 const reindexing = ref(false)
+const retrying = ref(false)
+const recovering = ref(false)
+const diagnosing = ref(false)
 const saving = ref(false)
 const documents = ref([])
 const selected = ref(null)
@@ -39,6 +42,7 @@ let secureAssetActiveCount = 0
 let secureAssetObserver = null
 let secureAssetGeneration = 0
 const maxSecureAssetConcurrency = 3
+const indexDiagnosis = ref(null)
 
 const filteredDocuments = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -398,6 +402,45 @@ async function reindexDocument() {
   }
 }
 
+async function retryDocument() {
+  if (!selected.value) return
+  retrying.value = true
+  try {
+    const res = await api.skillKnowRetryDocument({ document_id: selected.value.id })
+    selected.value = res.data
+    $message.success(res.data?.status === 'processing' ? '已重新提交处理任务' : '已根据现有内容重建索引')
+    if (['processing', 'pending'].includes(res.data?.status)) startPolling(res.data.id)
+    await loadDocuments()
+  } finally {
+    retrying.value = false
+  }
+}
+
+async function recoverStuckDocuments() {
+  recovering.value = true
+  try {
+    const res = await api.skillKnowRecoverStuckDocuments({ older_than_minutes: 30 })
+    const data = res.data || {}
+    $message.success(`已检查 ${data.checked || 0} 个任务，恢复 ${data.recovered || 0} 个，标记失败 ${data.failed || 0} 个`)
+    await loadDocuments()
+  } finally {
+    recovering.value = false
+  }
+}
+
+async function diagnoseIndex(testEmbedding = false) {
+  diagnosing.value = true
+  try {
+    const res = await api.skillKnowIndexDiagnose({ test_embedding: testEmbedding })
+    indexDiagnosis.value = res.data
+    const count = res.data?.collections?.skill_know_documents?.count
+    const dimension = res.data?.embedding_test?.dimension
+    $message.success(`索引诊断完成${Number.isFinite(count) ? `，向量数 ${count}` : ''}${dimension ? `，维度 ${dimension}` : ''}`)
+  } finally {
+    diagnosing.value = false
+  }
+}
+
 function syncEditForm() {
   if (!selected.value) {
     editForm.value = null
@@ -562,6 +605,18 @@ watch(selected, syncEditForm, { immediate: true })
               <NButton type="primary" :loading="saving" @click="saveDocument(false)">保存修改</NButton>
               <NButton secondary type="primary" :loading="saving || reindexing" @click="saveDocument(true)">保存并重建索引</NButton>
               <NButton secondary :loading="reindexing" :disabled="selected.status !== 'completed'" @click="reindexDocument">重建索引</NButton>
+              <NButton v-if="selected.status === 'failed'" secondary type="warning" :loading="retrying" @click="retryDocument">重试处理</NButton>
+              <NButton secondary :loading="recovering" @click="recoverStuckDocuments">恢复卡住任务</NButton>
+              <NDropdown
+                trigger="click"
+                :options="[
+                  { label: '仅检查索引库', key: 'basic' },
+                  { label: '检查索引库和 Embedding', key: 'embedding' },
+                ]"
+                @select="(key) => diagnoseIndex(key === 'embedding')"
+              >
+                <NButton secondary :loading="diagnosing">索引诊断</NButton>
+              </NDropdown>
               <NButton secondary type="error" @click="deleteDocument">删除</NButton>
             </NSpace>
           </header>
@@ -570,7 +625,7 @@ watch(selected, syncEditForm, { immediate: true })
             <div class="metric-card"><span>状态</span><b>{{ statusText(selected.status) }}</b></div>
             <div class="metric-card"><span>原始类型</span><b>{{ selected.extra_metadata?.original_file_type || '-' }}</b></div>
             <div class="metric-card"><span>分类</span><b>{{ selected.category || '-' }}</b></div>
-            <div class="metric-card"><span>索引</span><b>{{ selected.extra_metadata?.index_status || '-' }}<template v-if="selected.extra_metadata?.chunk_count"> / {{ selected.extra_metadata.chunk_count }} 块</template></b></div>
+            <div class="metric-card"><span>索引</span><b>{{ selected.extra_metadata?.index_status || '-' }}<template v-if="selected.extra_metadata?.chunk_count"> / {{ selected.extra_metadata.chunk_count }} 块</template><template v-if="selected.extra_metadata?.vector_count !== undefined"> / {{ selected.extra_metadata.vector_count }} 向量</template></b></div>
           </section>
 
           <NAlert v-if="['processing', 'pending'].includes(selected.status)" type="info" class="notice-card">
@@ -581,6 +636,12 @@ watch(selected, syncEditForm, { immediate: true })
             已定位到智能对话引用片段，引用块 ID：{{ highlightedChunkId }}。
           </NAlert>
           <NAlert v-if="selected.error_message" type="error" class="notice-card">{{ selected.error_message }}</NAlert>
+          <NAlert v-if="indexDiagnosis" type="info" class="notice-card" :show-icon="false">
+            Chroma：{{ indexDiagnosis.chromadb_available ? '可用' : '不可用' }}；
+            向量数：{{ indexDiagnosis.collections?.skill_know_documents?.count ?? '-' }}；
+            Embedding：{{ indexDiagnosis.embedding_provider || '-' }} / {{ indexDiagnosis.embedding_model || '-' }}
+            <template v-if="indexDiagnosis.embedding_test">；测试：{{ indexDiagnosis.embedding_test.success ? '成功' : '失败' }}<template v-if="indexDiagnosis.embedding_test.dimension"> / {{ indexDiagnosis.embedding_test.dimension }} 维</template></template>
+          </NAlert>
 
           <section class="edit-panel">
             <div class="panel-head">

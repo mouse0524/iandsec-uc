@@ -112,3 +112,13 @@ async def search_documents(q: str = Query(...), limit: int = Query(20, ge=1, le=
 @router.post("/reindex", summary="重建文档索引")
 async def reindex_document(document_id: int = Query(...)):
     return Success(data=await skill_know_document_service.reindex(document_id))
+
+
+@router.post("/retry", summary="重试文档处理")
+async def retry_document(document_id: int = Query(...)):
+    return Success(data=await skill_know_document_service.retry(document_id))
+
+
+@router.post("/recover-stuck", summary="恢复卡住的文档处理任务")
+async def recover_stuck_documents(older_than_minutes: int | None = Query(None, ge=5, le=1440)):
+    return Success(data=await skill_know_document_service.recover_stuck(older_than_minutes=older_than_minutes))

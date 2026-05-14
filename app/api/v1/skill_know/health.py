@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.schemas.base import Success
 from app.services.skill_know.config_service import skill_know_config_service
+from app.services.skill_know.index_health_service import skill_know_index_health_service
 
 router = APIRouter()
 
@@ -13,11 +14,9 @@ async def health_check():
 
 @router.get("/detail", summary="Skill-Know详细健康检查")
 async def health_detail():
-    return Success(data={
-        "status": "healthy",
-        "components": {
-            "database": "ok",
-            "chroma": "configured",
-            "openai": "configured" if await skill_know_config_service.is_configured() else "missing_api_key",
-        },
-    })
+    return Success(data=await skill_know_index_health_service.detail())
+
+
+@router.post("/index-diagnose", summary="Skill-Know索引诊断")
+async def index_diagnose(test_embedding: bool = False):
+    return Success(data=await skill_know_index_health_service.diagnose(test_embedding=test_embedding))

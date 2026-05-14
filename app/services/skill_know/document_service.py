@@ -23,6 +23,7 @@ from app.log import logger
 from app.models.admin import SkillKnowDocument, SkillKnowDocumentChunk
 from app.models.enums import SkillKnowDocumentStatus
 from app.services.skill_know.content_analyzer import skill_know_content_analyzer
+from app.services.skill_know.config_service import skill_know_config_service
 from app.services.skill_know.document_index_service import skill_know_document_index_service
 from app.services.skill_know.document_parser import SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS, SUPPORTED_MARKDOWN_UPLOAD_MESSAGE, skill_know_document_parser
 from app.services.skill_know.markdown_optimizer import skill_know_markdown_optimizer
@@ -35,6 +36,8 @@ class SkillKnowDocumentService:
     CHUNK_SIZE = 2 * 1024 * 1024
     MAX_UPLOAD_SIZE = settings.SKILL_KNOW_MAX_UPLOAD_SIZE
     MAX_TOTAL_CHUNKS = max(512, (MAX_UPLOAD_SIZE + CHUNK_SIZE - 1) // CHUNK_SIZE)
+    PROCESSING_STUCK_MINUTES = 30
+    _process_semaphore = asyncio.Semaphore(2)
 
     def _upload_dir(self) -> str:
         path = os.path.join(settings.UPLOAD_DIR, "skill_know", datetime.now().strftime("%Y%m%d"))
@@ -731,9 +734,48 @@ class SkillKnowDocumentService:
 
     async def _set_progress(self, document: SkillKnowDocument, stage: str, progress: int, **extra) -> None:
         metadata = self._metadata(document)
-        metadata.update({"process_stage": stage, "process_progress": progress, **extra})
+        metadata.update({
+            "process_stage": stage,
+            "process_progress": progress,
+            "last_process_at": datetime.now().isoformat(timespec="seconds"),
+            **extra,
+        })
         document.extra_metadata = metadata
         await document.save()
+
+    def _task_context(self, *, temp_path: str, ext: str, doc_title: str, abs_path: str) -> dict:
+        return {
+            "source_temp_path": temp_path,
+            "source_ext": ext,
+            "source_title": doc_title,
+            "target_abs_path": abs_path,
+        }
+
+    async def _mark_retry_attempt(self, document: SkillKnowDocument, **context) -> None:
+        metadata = self._metadata(document)
+        metadata.update(context)
+        metadata["process_attempts"] = int(metadata.get("process_attempts") or 0) + 1
+        metadata["last_process_at"] = datetime.now().isoformat(timespec="seconds")
+        document.extra_metadata = metadata
+        await document.save()
+
+    async def _reindex_existing_content(self, document: SkillKnowDocument) -> dict:
+        if not document.content:
+            raise HTTPException(status_code=400, detail="文档内容为空，无法重建索引")
+        await self._set_progress(document, "indexing", 70)
+        index_result = await skill_know_document_index_service.rebuild(document)
+        metadata = dict(document.extra_metadata or {})
+        metadata.update(index_result)
+        metadata.update({
+            "process_stage": "completed",
+            "process_progress": 100,
+            "last_process_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        document.extra_metadata = metadata
+        document.status = SkillKnowDocumentStatus.COMPLETED
+        document.error_message = None
+        await document.save()
+        return await document_to_dict(document)
 
     async def upload(self, file: UploadFile, *, background_tasks: BackgroundTasks, title: str | None = None, folder_id: int | None = None) -> dict:
         filename = (file.filename or "").strip()
@@ -925,9 +967,14 @@ class SkillKnowDocumentService:
         return await document_to_dict(document)
 
     async def process_document(self, document_id: int, temp_path: str, ext: str, doc_title: str, abs_path: str) -> None:
+        async with self._process_semaphore:
+            await self._process_document_locked(document_id, temp_path, ext, doc_title, abs_path)
+
+    async def _process_document_locked(self, document_id: int, temp_path: str, ext: str, doc_title: str, abs_path: str) -> None:
         document = await SkillKnowDocument.filter(id=document_id).first()
         if not document:
             return
+        await self._mark_retry_attempt(document, **self._task_context(temp_path=temp_path, ext=ext, doc_title=doc_title, abs_path=abs_path))
         try:
             await self._set_progress(document, "converting", 20)
             asset_dir = self._asset_dir(document.uuid)
@@ -980,7 +1027,11 @@ class SkillKnowDocumentService:
             await document.save()
         except Exception as exc:
             metadata = dict(document.extra_metadata or {})
-            metadata.update({"process_stage": "failed", "process_progress": 100})
+            metadata.update({
+                "process_stage": "failed",
+                "process_progress": 100,
+                "last_process_at": datetime.now().isoformat(timespec="seconds"),
+            })
             document.extra_metadata = metadata
             document.status = SkillKnowDocumentStatus.FAILED
             document.error_message = str(exc)
@@ -1091,14 +1142,59 @@ class SkillKnowDocumentService:
         document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
-        if not document.content:
-            raise HTTPException(status_code=400, detail="文档内容为空，无法重建索引")
-        index_result = await skill_know_document_index_service.rebuild(document)
+        return await self._reindex_existing_content(document)
+
+    async def retry(self, document_id: int) -> dict:
+        document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
         metadata = dict(document.extra_metadata or {})
-        metadata.update(index_result)
-        document.extra_metadata = metadata
-        await document.save()
-        return await document_to_dict(document)
+        temp_path = str(metadata.get("source_temp_path") or "")
+        ext = str(metadata.get("source_ext") or metadata.get("original_file_type") or "").lower()
+        doc_title = str(metadata.get("source_title") or document.title or document.filename)
+        abs_path = str(metadata.get("target_abs_path") or document.file_path)
+        if temp_path and abs_path and ext and Path(temp_path).is_file():
+            document.status = SkillKnowDocumentStatus.PROCESSING
+            document.error_message = None
+            await document.save()
+            asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title, abs_path))
+            return await document_to_dict(document)
+        if document.content:
+            return await self._reindex_existing_content(document)
+        raise HTTPException(status_code=400, detail="原始上传文件已清理，且文档内容为空，无法自动重试，请重新上传文件")
+
+    async def recover_stuck(self, *, older_than_minutes: int | None = None) -> dict:
+        threshold = datetime.now() - timedelta(minutes=int(older_than_minutes or self.PROCESSING_STUCK_MINUTES))
+        rows = await SkillKnowDocument.filter(
+            owner_id=CTX_USER_ID.get(),
+            status__in=[SkillKnowDocumentStatus.PENDING, SkillKnowDocumentStatus.PROCESSING],
+        )
+        recovered = 0
+        failed = 0
+        for document in rows:
+            metadata = dict(document.extra_metadata or {})
+            raw_at = metadata.get("last_process_at")
+            try:
+                last_process_at = datetime.fromisoformat(raw_at) if raw_at else document.updated_at.replace(tzinfo=None)
+            except Exception:
+                last_process_at = document.updated_at.replace(tzinfo=None)
+            if last_process_at > threshold:
+                continue
+            if document.content:
+                await self._reindex_existing_content(document)
+                recovered += 1
+                continue
+            metadata.update({
+                "process_stage": "failed",
+                "process_progress": 100,
+                "last_process_at": datetime.now().isoformat(timespec="seconds"),
+            })
+            document.extra_metadata = metadata
+            document.status = SkillKnowDocumentStatus.FAILED
+            document.error_message = "处理任务长时间无进度，原始临时文件已不可用，请重新上传文件"
+            await document.save()
+            failed += 1
+        return {"checked": len(rows), "recovered": recovered, "failed": failed}
 
 
 skill_know_document_service = SkillKnowDocumentService()
