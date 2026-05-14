@@ -14,7 +14,6 @@ const form = ref({
   latest_version: '',
   webdav_path: '',
   enabled: true,
-  force_upgrade: false,
   release_notes: '',
   report_token: '',
   download_expire_hours: 168,
@@ -91,7 +90,7 @@ async function checkUpgrade() {
           <div>
             <div class="eyebrow">Terminal Upgrade</div>
             <h1>在线升级</h1>
-            <p>维护最新版本与 WebDAV 升级包路径，客户端检测到新版本后可获取签名下载链接。</p>
+            <p>维护最新版本与 WebDAV 升级包路径，终端请求检测接口后按返回结果自动下载升级包。</p>
           </div>
           <NTag :type="form.enabled ? 'success' : 'warning'" round>{{ form.enabled ? '已启用' : '已停用' }}</NTag>
         </header>
@@ -100,15 +99,12 @@ async function checkUpgrade() {
           <div class="config-panel">
             <div class="panel-head">
               <h3>升级配置</h3>
-              <p>路径填写 WebDAV 中升级包的完整文件路径，例如 /release/tdlp/6.0.9.zip。</p>
+              <p>只配置可检测的最新版本和升级包位置；是否下载由请求方根据检测接口返回结果自动处理。</p>
             </div>
             <NForm ref="formRef" :model="form" :rules="rules" label-placement="top">
               <div class="form-grid">
                 <NFormItem label="启用升级检测">
                   <NSwitch v-model:value="form.enabled" />
-                </NFormItem>
-                <NFormItem label="强制升级">
-                  <NSwitch v-model:value="form.force_upgrade" />
                 </NFormItem>
                 <NFormItem label="最新版本号" path="latest_version">
                   <NInput v-model:value="form.latest_version" placeholder="例如 6.0.9-20260101" />
@@ -143,7 +139,7 @@ async function checkUpgrade() {
           <div class="check-panel">
             <div class="panel-head">
               <h3>接口自测</h3>
-              <p>模拟客户端调用升级检测接口，确认版本比较和下载链接生成结果。</p>
+              <p>模拟第三方终端请求升级检测接口，确认是否返回可自动下载的签名链接。</p>
             </div>
             <NForm label-placement="top">
               <NFormItem label="当前版本号">

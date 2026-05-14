@@ -119,7 +119,26 @@
           </div>
         </div>
 
-        <div class="panel panel-wide">
+        <div class="panel">
+          <div class="panel-head compact">
+            <div>
+              <h2>运营风险</h2>
+              <p>待审核、临期、失败与待学习事项汇总</p>
+            </div>
+          </div>
+          <div class="risk-summary">
+            <span>待处理风险</span>
+            <strong>{{ riskTotal }}</strong>
+          </div>
+          <div class="risk-list">
+            <button v-for="item in riskItems" :key="item.key" type="button" @click="goByMetric(item.metric)">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel panel-full">
           <div class="panel-head">
             <div>
               <h2>审计与共享</h2>
@@ -230,6 +249,16 @@ const terminalItems = computed(() => [
   { key: 'auth', label: '授权临期', value: stats.value.terminal_auth_expiring, metric: 'terminal_total' },
   { key: 'maintain', label: '维保临期', value: stats.value.terminal_maintain_expiring, metric: 'terminal_total' },
 ])
+
+const riskItems = computed(() => [
+  { key: 'register', label: '注册待审', value: stats.value.register_pending, metric: 'register_pending' },
+  { key: 'documents', label: '文档失败', value: stats.value.document_failed, metric: 'document_failed' },
+  { key: 'terminal', label: '授权/维保临期', value: stats.value.terminal_auth_expiring + stats.value.terminal_maintain_expiring, metric: 'terminal_total' },
+  { key: 'audit', label: '失败请求', value: stats.value.auditlog_failed_today, metric: 'auditlog_today' },
+  { key: 'learning', label: '待学习候选', value: stats.value.learning_pending, metric: 'learning_pending' },
+])
+
+const riskTotal = computed(() => riskItems.value.reduce((total, item) => total + Number(item.value || 0), 0))
 
 const auditItems = computed(() => [
   { key: 'today', label: '今日请求', value: stats.value.auditlog_today, hint: '审计日志', metric: 'auditlog_today' },
@@ -361,7 +390,8 @@ function goByMetric(metric) {
 .metric-grid,
 .dashboard-grid,
 .mini-grid,
-.audit-grid {
+.audit-grid,
+.risk-list {
   display: grid;
   gap: 14px;
 }
@@ -374,7 +404,8 @@ function goByMetric(metric) {
 .metric-card,
 .audit-grid button,
 .alert-list button,
-.info-list button {
+.info-list button,
+.risk-list button {
   border: 1px solid #e3ebf4;
   background: #fff;
   text-align: left;
@@ -390,10 +421,12 @@ function goByMetric(metric) {
 .metric-card span,
 .metric-card small,
 .terminal-total span,
+.risk-summary span,
 .mini-grid span,
 .audit-grid small,
 .alert-list span,
 .info-list span,
+.risk-list span,
 .knowledge-score span {
   color: #64748b;
   font-size: 13px;
@@ -421,6 +454,10 @@ function goByMetric(metric) {
 
 .panel-wide {
   grid-column: span 2;
+}
+
+.panel-full {
+  grid-column: 1 / -1;
 }
 
 .panel-head {
@@ -477,7 +514,8 @@ function goByMetric(metric) {
 }
 
 .mini-grid div,
-.terminal-total {
+.terminal-total,
+.risk-summary {
   padding: 14px;
   border-radius: 8px;
   background: #f8fafc;
@@ -485,6 +523,7 @@ function goByMetric(metric) {
 
 .mini-grid strong,
 .terminal-total strong,
+.risk-summary strong,
 .knowledge-score strong {
   display: block;
   margin-top: 6px;
@@ -492,13 +531,15 @@ function goByMetric(metric) {
 }
 
 .alert-list,
-.info-list {
+.info-list,
+.risk-list {
   display: grid;
   gap: 10px;
 }
 
 .alert-list button,
-.info-list button {
+.info-list button,
+.risk-list button {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -508,7 +549,8 @@ function goByMetric(metric) {
 }
 
 .alert-list strong,
-.info-list strong {
+.info-list strong,
+.risk-list strong {
   font-size: 18px;
 }
 
@@ -534,12 +576,22 @@ function goByMetric(metric) {
   margin-bottom: 14px;
 }
 
+.risk-summary {
+  margin-bottom: 14px;
+  border-left: 3px solid #ef4444;
+}
+
 .terminal-total strong {
   font-size: 34px;
 }
 
+.risk-summary strong {
+  color: #b91c1c;
+  font-size: 34px;
+}
+
 .audit-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(132px, 1fr));
 }
 
 .audit-grid button {
@@ -556,13 +608,16 @@ function goByMetric(metric) {
 
 @media (max-width: 1280px) {
   .metric-grid,
-  .dashboard-grid,
-  .audit-grid {
+  .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .panel-wide {
     grid-column: span 2;
+  }
+
+  .audit-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -576,11 +631,13 @@ function goByMetric(metric) {
   .metric-grid,
   .dashboard-grid,
   .mini-grid,
-  .audit-grid {
+  .audit-grid,
+  .risk-list {
     grid-template-columns: 1fr;
   }
 
-  .panel-wide {
+  .panel-wide,
+  .panel-full {
     grid-column: span 1;
   }
 }

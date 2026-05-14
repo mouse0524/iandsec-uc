@@ -84,7 +84,6 @@ class TerminalService:
             "upgrade": upgrade,
             "currentVersion": current_version,
             "latestVersion": latest_version,
-            "forceUpgrade": row.force_upgrade,
             "releaseNotes": row.release_notes or "",
             "serverTime": datetime.now(timezone.utc).strftime(settings.DATETIME_FORMAT),
         }
@@ -153,7 +152,6 @@ class TerminalService:
             "latest_version": row.latest_version,
             "webdav_path": row.webdav_path,
             "enabled": row.enabled,
-            "force_upgrade": row.force_upgrade,
             "release_notes": row.release_notes or "",
             "download_expire_hours": row.download_expire_hours,
             "created_at": self._fmt_dt(row.created_at),

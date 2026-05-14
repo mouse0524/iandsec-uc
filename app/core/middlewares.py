@@ -132,18 +132,7 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
             except (TypeError, ValueError):
                 pass
 
-        body = await request.body()
-        body_sent = False
-
-        async def receive():
-            nonlocal body_sent
-            if body_sent:
-                return {"type": "http.disconnect"}
-            body_sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
-
-        request._receive = receive
-        return body
+        return await request.body()
 
     async def get_response_body(self, request: Request, response: Response) -> Any:
         if request.method == "GET" and response.status_code < 400:

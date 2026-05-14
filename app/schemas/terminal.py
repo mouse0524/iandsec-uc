@@ -33,7 +33,6 @@ class TerminalUpgradeConfigIn(BaseModel):
     latest_version: str = Field(..., min_length=1, max_length=120, description="最新版本号")
     webdav_path: str = Field(..., min_length=1, max_length=1000, description="WebDAV升级包路径")
     enabled: bool = Field(default=True, description="是否启用")
-    force_upgrade: bool = Field(default=False, description="是否强制升级")
     release_notes: str | None = Field(default=None, description="版本说明")
     report_token: str | None = Field(default=None, max_length=255, description="第三方上报密钥")
     download_expire_hours: int = Field(default=168, ge=1, le=8760, description="下载链接有效期小时")

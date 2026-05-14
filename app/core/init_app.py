@@ -602,7 +602,7 @@ async def init_menus():
             "name": "在线升级",
             "path": "upgrade",
             "order": 2,
-            "icon": "material-symbols:system-update-alt-outline-rounded",
+            "icon": "mdi:update",
             "component": "/terminal/upgrade",
         },
     ]
