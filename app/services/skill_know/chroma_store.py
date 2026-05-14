@@ -1,4 +1,6 @@
 import os
+import logging
+import contextlib
 from typing import Any
 
 from app.log import logger
@@ -11,25 +13,67 @@ from app.services.skill_know.openai_client import skill_know_openai_client
 class SkillKnowChromaStore:
     def __init__(self):
         self.persist_dir = os.path.join(settings.BASE_DIR, "storage", "skill_know", "chroma")
+        self._chromadb_available: bool | None = None
+        self._chroma_client = None
+        self._collections: dict[str, Any] = {}
 
     def _client(self):
+        os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+        logging.getLogger("chromadb.telemetry").disabled = True
+        logging.getLogger("chromadb.telemetry.product").disabled = True
+        logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
+
         import chromadb
+        from chromadb.config import Settings
 
         os.makedirs(self.persist_dir, exist_ok=True)
-        return chromadb.PersistentClient(path=self.persist_dir)
+        if self._chroma_client is None:
+            self._chroma_client = chromadb.PersistentClient(
+                path=self.persist_dir,
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    chroma_telemetry_impl="chromadb.telemetry.product.posthog.Posthog",
+                    chroma_product_telemetry_impl="chromadb.telemetry.product.posthog.Posthog",
+                ),
+            )
+        return self._chroma_client
+
+    def _is_chromadb_available(self) -> bool:
+        if self._chromadb_available is not None:
+            return self._chromadb_available
+        try:
+            import chromadb  # noqa: F401
+        except ModuleNotFoundError:
+            logger.warning("[skill_know.chroma.disabled] chromadb is not installed; falling back to database text search")
+            self._chromadb_available = False
+        else:
+            self._chromadb_available = True
+        return self._chromadb_available
 
     def _collection(self, level: int):
         name = "skill_know_l0" if level == 0 else "skill_know_l1"
-        return self._client().get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
+        if name not in self._collections:
+            self._collections[name] = self._client().get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
+        return self._collections[name]
 
     def _document_collection(self):
-        return self._client().get_or_create_collection(name="skill_know_documents", metadata={"hnsw:space": "cosine"})
+        name = "skill_know_documents"
+        if name not in self._collections:
+            self._collections[name] = self._client().get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
+        return self._collections[name]
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _quiet_chroma_output():
+        with open(os.devnull, "w") as devnull:
+            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                yield
 
     async def upsert(self, *, uri: str, level: int, text: str, metadata: dict[str, Any]) -> None:
         if not text:
             return
         vector_id = f"{uri}#L{level}"
-        if await skill_know_config_service.is_configured():
+        if await skill_know_config_service.is_configured() and self._is_chromadb_available():
             embeddings = await skill_know_openai_client.embeddings([text])
             embedding = embeddings[0] if embeddings else None
             if embedding:
@@ -49,15 +93,18 @@ class SkillKnowChromaStore:
             await SkillKnowVectorIndex.create(uri=uri, level=level, text=text, vector_id=vector_id, extra_metadata=metadata)
 
     async def delete(self, uri: str) -> None:
-        for level in [0, 1]:
-            try:
-                self._collection(level).delete(ids=[f"{uri}#L{level}"])
-            except Exception:
-                pass
+        if self._is_chromadb_available():
+            for level in [0, 1]:
+                try:
+                    collection = self._collection(level)
+                    with self._quiet_chroma_output():
+                        collection.delete(ids=[f"{uri}#L{level}"])
+                except Exception:
+                    pass
         await SkillKnowVectorIndex.filter(uri=uri).delete()
 
     async def search(self, query: str, *, level: int = 0, limit: int = 20) -> list[dict]:
-        if await skill_know_config_service.is_configured():
+        if await skill_know_config_service.is_configured() and self._is_chromadb_available():
             try:
                 embeddings = await skill_know_openai_client.embeddings([query])
                 embedding = embeddings[0] if embeddings else None
@@ -94,7 +141,7 @@ class SkillKnowChromaStore:
     async def upsert_document_chunk(self, *, chunk_uri: str, text: str, metadata: dict[str, Any]) -> str | None:
         if not text:
             return None
-        if await skill_know_config_service.is_configured():
+        if await skill_know_config_service.is_configured() and self._is_chromadb_available():
             try:
                 embeddings = await skill_know_openai_client.embeddings([text])
                 embedding = embeddings[0] if embeddings else None
@@ -119,13 +166,16 @@ class SkillKnowChromaStore:
     async def delete_document_chunks(self, chunk_uris: list[str]) -> None:
         if not chunk_uris:
             return
-        try:
-            self._document_collection().delete(ids=chunk_uris)
-        except Exception:
-            pass
+        if self._is_chromadb_available():
+            try:
+                collection = self._document_collection()
+                with self._quiet_chroma_output():
+                    collection.delete(ids=chunk_uris)
+            except Exception:
+                pass
 
     async def search_document_chunks(self, query: str, *, limit: int = 20) -> list[dict]:
-        if await skill_know_config_service.is_configured():
+        if await skill_know_config_service.is_configured() and self._is_chromadb_available():
             try:
                 embeddings = await skill_know_openai_client.embeddings([query])
                 embedding = embeddings[0] if embeddings else None
@@ -161,3 +211,4 @@ class SkillKnowChromaStore:
 
 
 skill_know_chroma_store = SkillKnowChromaStore()
+

@@ -16,6 +16,10 @@ class SkillKnowConfigService:
         "retrieval_max_context_chars": 128000,
         "chunk_size": 1400,
         "chunk_overlap": 150,
+        "markdown_optimize_enabled": True,
+        "markdown_optimize_prompt": "",
+        "markdown_optimize_max_chars": 30000,
+        "markdown_optimize_timeout": 45,
     }
     SENSITIVE_KEYS = {"llm_api_key"}
 
@@ -89,6 +93,10 @@ class SkillKnowConfigService:
             "retrieval_max_context_chars",
             "chunk_size",
             "chunk_overlap",
+            "markdown_optimize_enabled",
+            "markdown_optimize_prompt",
+            "markdown_optimize_max_chars",
+            "markdown_optimize_timeout",
         ]
         data = {key: await self.get(key) for key in keys}
         if masked and data.get("llm_api_key"):

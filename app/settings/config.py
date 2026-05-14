@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     EMAIL_VERIFY_TTL_SECONDS: int = 600
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "storage")
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024
+    SKILL_KNOW_MAX_UPLOAD_SIZE: int = int(os.getenv("SKILL_KNOW_MAX_UPLOAD_SIZE", str(1024 * 1024 * 1024)))
     ALLOWED_EXTENSIONS: typing.List[str] = [
         ".jpg",
         ".jpeg",

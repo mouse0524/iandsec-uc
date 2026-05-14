@@ -26,7 +26,7 @@ class SkillKnowRetriever:
                     break
 
         items.sort(key=lambda x: (-float(x.get("score") or 0), x.get("chunk_id") or 0))
-        return items[:top_k]
+        return await self._expand_with_neighbor_context(items[:top_k])
 
     async def text_search_document_chunks(self, query: str, *, limit: int = 20) -> list[dict]:
         rows = await SkillKnowDocumentChunk.filter(content__contains=query).limit(limit)
@@ -84,6 +84,49 @@ class SkillKnowRetriever:
             "matched_by": matched_by,
             "metadata": data,
         }
+
+    async def _expand_with_neighbor_context(self, items: list[dict]) -> list[dict]:
+        expanded: list[dict] = []
+        for item in items:
+            document_id = item.get("document_id")
+            chunk_index = (item.get("metadata") or {}).get("chunk_index")
+            if document_id is None or chunk_index is None:
+                expanded.append(item)
+                continue
+            try:
+                index = int(chunk_index)
+                rows = await SkillKnowDocumentChunk.filter(document_id=int(document_id), chunk_index__in=[index - 1, index + 1])
+            except Exception:
+                expanded.append(item)
+                continue
+            before = next((row for row in rows if row.chunk_index == index - 1), None)
+            after = next((row for row in rows if row.chunk_index == index + 1), None)
+            context_parts = []
+            if before:
+                context_parts.append(f"[上一片段]\n{before.content}")
+            context_parts.append(f"[命中片段]\n{item.get('content') or ''}")
+            if after:
+                context_parts.append(f"[下一片段]\n{after.content}")
+            metadata = dict(item.get("metadata") or {})
+            metadata.update(
+                {
+                    "context_expanded": bool(before or after),
+                    "neighbor_chunk_indexes": [
+                        row.chunk_index
+                        for row in (before, after)
+                        if row
+                    ],
+                }
+            )
+            expanded.append(
+                {
+                    **item,
+                    "content": "\n\n".join(context_parts),
+                    "abstract": preview_text(item.get("content") or "", 180),
+                    "metadata": metadata,
+                }
+            )
+        return expanded
 
 
 skill_know_retriever = SkillKnowRetriever()

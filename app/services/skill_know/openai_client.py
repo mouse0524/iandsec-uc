@@ -25,6 +25,7 @@ class SkillKnowOpenAIClient:
         *,
         tools: list[dict] | None = None,
         override: dict | None = None,
+        timeout: float | None = None,
     ) -> dict:
         config = await self._config(override)
         api_key = config.get("llm_api_key")
@@ -38,7 +39,8 @@ class SkillKnowOpenAIClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
+        request_timeout = float(timeout or config.get("llm_timeout") or 60)
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
             resp = await client.post(
                 f"{config['llm_chat_base_url']}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},

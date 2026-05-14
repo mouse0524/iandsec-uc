@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
 
@@ -7,8 +7,34 @@ defineOptions({ name: '提示词管理' })
 
 const loading = ref(false)
 const saving = ref(false)
+const syncing = ref(false)
 const prompts = ref([])
 const selected = ref(null)
+const activeCategory = ref('all')
+
+const categoryOptions = [
+  { label: '全部', value: 'all' },
+  { label: '对话', value: 'chat' },
+  { label: '系统', value: 'system' },
+  { label: '技能', value: 'skill' },
+  { label: '分类', value: 'classification' },
+  { label: '搜索', value: 'search' },
+]
+
+const categoryLabels = {
+  chat: '对话',
+  system: '系统',
+  skill: '技能',
+  classification: '分类',
+  search: '搜索',
+}
+
+const filteredPrompts = computed(() => {
+  if (activeCategory.value === 'all') return prompts.value
+  return prompts.value.filter((item) => item.category === activeCategory.value)
+})
+
+const skillPrompt = computed(() => prompts.value.find((item) => item.key === 'markdown.beautifier'))
 
 onMounted(loadPrompts)
 
@@ -17,9 +43,36 @@ async function loadPrompts() {
   try {
     const res = await api.skillKnowPrompts({ include_inactive: true })
     prompts.value = res.data?.items || []
+    if (!selected.value && skillPrompt.value) selected.value = skillPrompt.value
     if (!selected.value && prompts.value.length) selected.value = prompts.value[0]
+    if (selected.value) {
+      selected.value = prompts.value.find((item) => item.key === selected.value.key) || filteredPrompts.value[0] || prompts.value[0] || null
+    }
   } finally {
     loading.value = false
+  }
+}
+
+async function syncDefaultPrompts() {
+  syncing.value = true
+  try {
+    const res = await api.skillKnowSyncDefaultPrompts()
+    const created = res.data?.created || 0
+    const updated = res.data?.updated || 0
+    const deleted = res.data?.deleted || 0
+    const changes = [
+      created ? `新增 ${created}` : '',
+      updated ? `更新 ${updated}` : '',
+      deleted ? `删除 ${deleted}` : '',
+    ].filter(Boolean)
+    $message.success(changes.length ? `默认提示词已同步：${changes.join('，')}` : '默认提示词已是最新')
+    await loadPrompts()
+    if (skillPrompt.value) {
+      activeCategory.value = 'skill'
+      selected.value = skillPrompt.value
+    }
+  } finally {
+    syncing.value = false
   }
 }
 
@@ -56,10 +109,25 @@ async function resetPrompt() {
           <NTag size="small" round>{{ prompts.length }} 个模板</NTag>
         </div>
 
+        <div class="sidebar-tools">
+          <div class="category-tabs">
+            <button
+              v-for="item in categoryOptions"
+              :key="item.value"
+              type="button"
+              :class="{ active: activeCategory === item.value }"
+              @click="activeCategory = item.value"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <NButton size="small" secondary :loading="syncing" @click="syncDefaultPrompts">同步默认</NButton>
+        </div>
+
         <NSpin :show="loading">
           <div class="prompt-list">
             <button
-              v-for="item in prompts"
+              v-for="item in filteredPrompts"
               :key="item.key"
               class="prompt-item"
               :class="{ active: selected?.key === item.key }"
@@ -69,11 +137,11 @@ async function resetPrompt() {
               <span class="prompt-name">{{ item.name }}</span>
               <span class="prompt-desc">{{ item.description }}</span>
               <span class="prompt-meta">
-                <NTag size="small" round>{{ item.category }}</NTag>
+                <NTag size="small" round>{{ categoryLabels[item.category] || item.category }}</NTag>
                 <span :class="['status-dot', item.is_active ? 'online' : 'offline']" />
               </span>
             </button>
-            <NEmpty v-if="!prompts.length" description="暂无提示词" />
+            <NEmpty v-if="!filteredPrompts.length" description="暂无提示词" />
           </div>
         </NSpin>
       </aside>
@@ -150,6 +218,31 @@ async function resetPrompt() {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 16px;
+}
+.sidebar-tools {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.category-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.category-tabs button {
+  min-height: 30px;
+  border: 1px solid var(--ai-line);
+  border-radius: 8px;
+  color: var(--ai-muted);
+  background: rgba(255, 255, 255, .58);
+  font-size: 12px;
+  cursor: pointer;
+}
+.category-tabs button.active {
+  border-color: rgba(16, 163, 127, .35);
+  color: #0f766e;
+  background: rgba(16, 163, 127, .12);
+  font-weight: 700;
 }
 .eyebrow {
   color: #10a37f;

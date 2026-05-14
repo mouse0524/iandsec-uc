@@ -24,6 +24,10 @@ const form = reactive({
   retrieval_max_context_chars: 128000,
   chunk_size: 1400,
   chunk_overlap: 150,
+  markdown_optimize_enabled: true,
+  markdown_optimize_prompt: '',
+  markdown_optimize_max_chars: 30000,
+  markdown_optimize_timeout: 45,
 })
 
 onMounted(loadState)
@@ -46,6 +50,10 @@ async function loadState() {
       retrieval_max_context_chars: Number(llm.retrieval_max_context_chars || form.retrieval_max_context_chars),
       chunk_size: Number(llm.chunk_size || form.chunk_size),
       chunk_overlap: Number(llm.chunk_overlap || form.chunk_overlap),
+      markdown_optimize_enabled: llm.markdown_optimize_enabled !== false,
+      markdown_optimize_prompt: llm.markdown_optimize_prompt || form.markdown_optimize_prompt,
+      markdown_optimize_max_chars: Number(llm.markdown_optimize_max_chars || form.markdown_optimize_max_chars),
+      markdown_optimize_timeout: Number(llm.markdown_optimize_timeout || form.markdown_optimize_timeout),
     })
   } finally {
     loading.value = false
@@ -236,6 +244,17 @@ const effectiveSummary = computed(() => ({
                 <NFormItem label="最大上下文字符数"><NInputNumber v-model:value="form.retrieval_max_context_chars" :min="2000" :max="500000" :step="1000" /></NFormItem>
                 <NFormItem label="分块大小"><NInputNumber v-model:value="form.chunk_size" :min="300" :max="5000" :step="100" /></NFormItem>
                 <NFormItem label="分块重叠"><NInputNumber v-model:value="form.chunk_overlap" :min="0" :max="1000" :step="50" /></NFormItem>
+                <NFormItem label="分片前优化"><NSwitch v-model:value="form.markdown_optimize_enabled" /></NFormItem>
+                <NFormItem label="优化最大字符数"><NInputNumber v-model:value="form.markdown_optimize_max_chars" :min="1000" :max="200000" :step="1000" /></NFormItem>
+                <NFormItem label="优化超时秒数"><NInputNumber v-model:value="form.markdown_optimize_timeout" :min="5" :max="300" :step="5" /></NFormItem>
+                <NFormItem label="Markdown 优化提示词">
+                  <NInput
+                    v-model:value="form.markdown_optimize_prompt"
+                    type="textarea"
+                    placeholder="留空使用默认 markdown-beautifier 提示词"
+                    :autosize="{ minRows: 6, maxRows: 12 }"
+                  />
+                </NFormItem>
               </NForm>
             </section>
           </main>

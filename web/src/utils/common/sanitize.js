@@ -30,11 +30,11 @@ export function sanitizeHtml(input = '') {
           continue
         }
         if (name === 'src') {
-          const ok = /^data:image\//i.test(value) || /^https?:\/\//i.test(value) || value.startsWith('/')
+          const ok = /^data:image\//i.test(value) || /^blob:/i.test(value) || /^https?:\/\//i.test(value) || value.startsWith('/')
           if (!ok) child.removeAttribute(attr.name)
           continue
         }
-        if (!['alt', 'title', 'target', 'rel', 'class'].includes(name)) {
+        if (!['alt', 'title', 'target', 'rel', 'class', 'loading', 'decoding', 'data-secure-asset'].includes(name)) {
           child.removeAttribute(attr.name)
         }
       }

@@ -5,11 +5,14 @@ venv/
 .vscode
 .ruff_cache/
 .pytest_cache/
-migrations/
 storage/
 panda*/
 Skill-Know-main
 .env
+.trae/
+.uploads/
+
+
 
 db.sqlite3
 db.sqlite3-journal

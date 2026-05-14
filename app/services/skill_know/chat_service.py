@@ -146,11 +146,15 @@ class SkillKnowChatService:
         system_prompt = await self._prompt("system.chat", "你是 Skill-Know 知识库助手。")
         answer_prompt = await self._prompt("rag.answer", "请基于知识库片段回答用户问题。") if context else await self._prompt("rag.no_context", "当前知识库没有足够依据。")
         security_prompt = await self._prompt("security.expert", "遇到数据安全问题时必须说明风险、权限、审计和回滚建议。")
+        support_prompt = await self._prompt("support.troubleshooting", "处理产品问题时先确认现象，再给出排查步骤和需要补充的信息。")
+        escalation_prompt = await self._prompt("support.escalation", "当问题影响生产、安全或无法恢复时，提示升级处理并列出必要材料。")
 
         history_messages = await self._history_messages(conv.id)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "system", "content": security_prompt},
+            {"role": "system", "content": support_prompt},
+            {"role": "system", "content": escalation_prompt},
             {"role": "system", "content": answer_prompt},
             {"role": "system", "content": f"已检索到的 Markdown 知识库片段：\n{context}" if context else "当前没有检索到相关 Markdown 片段。"},
             *history_messages,

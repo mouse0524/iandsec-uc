@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
-import { sanitizeHtml } from '@/utils'
+import { getToken, sanitizeHtml } from '@/utils'
 
 defineOptions({ name: '文档管理' })
 
@@ -20,26 +20,131 @@ const chunkPreview = ref(null)
 const activeTab = ref('preview')
 const pollingTimers = new Map()
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
-const uploadProgress = ref(0)
+const apiBase = (import.meta.env.VITE_BASE_API || '/api/v1').replace(/\/$/, '')
 const uploadStage = ref('')
 const uploadResumeKeyPrefix = 'skill-know-upload:'
-const activeAbortControllers = ref([])
+const uploadRetryLimit = 2
 const editForm = ref(null)
 const route = useRoute()
 const highlightedChunkId = ref('')
 const chunkRefs = ref({})
+const chunkPage = ref(1)
+const chunkPageSize = ref(10)
+const chunkTotal = ref(0)
+const secureAssetUrls = ref({})
+const secureAssetObjectUrls = new Set()
+const secureAssetQueue = []
+const secureAssetQueued = new Set()
+let secureAssetActiveCount = 0
+let secureAssetObserver = null
+let secureAssetGeneration = 0
+const maxSecureAssetConcurrency = 3
 
 const filteredDocuments = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   if (!kw) return documents.value
   return documents.value.filter((item) => `${item.title} ${item.filename} ${item.content || ''}`.toLowerCase().includes(kw))
 })
+const completedDocumentCount = computed(() => documents.value.filter((item) => item.status === 'completed').length)
+const runningDocumentCount = computed(() => documents.value.filter((item) => ['pending', 'processing'].includes(item.status)).length)
+const failedDocumentCount = computed(() => documents.value.filter((item) => item.status === 'failed').length)
 
 onMounted(loadDocuments)
-onUnmounted(stopAllPolling)
+onUnmounted(() => {
+  stopAllPolling()
+  revokeSecureAssetUrls()
+  secureAssetObserver?.disconnect()
+})
 
-const renderedMarkdown = computed(() => md.render(selected.value?.content || ''))
-const renderMarkdown = (content) => sanitizeHtml(md.render(content || '') || '<p>-</p>')
+const normalizeDocumentAssetPath = (src) => {
+  const value = String(src || '').trim().replace(/^\/api\/v1/i, '')
+  const match = value.match(/^\/skill-know\/documents\/assets\/\d+\/[^?#]+/i)
+  return match ? match[0] : ''
+}
+const prepareSecureDocumentAssetUrls = (html) => {
+  return String(html || '').replace(/(<img\b[^>]*?\bsrc=["'])(\/(?:api\/v1\/)?skill-know\/documents\/assets\/[^"']+)(["'][^>]*>)/gi, (_, prefix, src, suffix) => {
+    const assetPath = normalizeDocumentAssetPath(src)
+    if (!assetPath) return `${prefix}${src}${suffix}`
+    const quote = suffix[0] || '"'
+    const rest = suffix.slice(1)
+    const lazyAttrs = rest.includes('loading=') ? '' : ' loading="lazy" decoding="async"'
+    return `${prefix}${secureAssetUrls.value[assetPath] || ''}${quote} data-secure-asset="${assetPath}"${lazyAttrs}${rest}`
+  })
+}
+const renderedMarkdown = computed(() => prepareSecureDocumentAssetUrls(md.render(selected.value?.content || '')))
+const renderMarkdown = (content) => sanitizeHtml(prepareSecureDocumentAssetUrls(md.render(content || '') || '<p>-</p>'))
+function revokeSecureAssetUrls() {
+  secureAssetGeneration += 1
+  secureAssetObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  secureAssetObjectUrls.clear()
+  secureAssetQueue.length = 0
+  secureAssetQueued.clear()
+  secureAssetUrls.value = {}
+  secureAssetObserver?.disconnect()
+}
+
+function initSecureAssetObserver() {
+  if (secureAssetObserver) return secureAssetObserver
+  secureAssetObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return
+      const path = entry.target?.dataset?.secureAsset
+      if (path) queueSecureAsset(path)
+      secureAssetObserver.unobserve(entry.target)
+    })
+  }, { rootMargin: '360px 0px' })
+  return secureAssetObserver
+}
+
+async function hydrateSecureAssetImages() {
+  await nextTick()
+  const observer = initSecureAssetObserver()
+  document.querySelectorAll('img[data-secure-asset]').forEach((img) => {
+    const path = img.dataset.secureAsset
+    if (!path || secureAssetUrls.value[path] || secureAssetQueued.has(path)) return
+    observer.observe(img)
+  })
+}
+
+watch(secureAssetUrls, hydrateSecureAssetImages, { flush: 'post' })
+watch([selected, highlightedChunkId, chunkPage], hydrateSecureAssetImages, { flush: 'post' })
+
+function queueSecureAsset(path) {
+  if (!path || secureAssetUrls.value[path] || secureAssetQueued.has(path)) return
+  secureAssetQueued.add(path)
+  secureAssetQueue.push(path)
+  drainSecureAssetQueue()
+}
+
+function drainSecureAssetQueue() {
+  while (secureAssetActiveCount < maxSecureAssetConcurrency && secureAssetQueue.length) {
+    const path = secureAssetQueue.shift()
+    const generation = secureAssetGeneration
+    secureAssetActiveCount += 1
+    fetchSecureDocumentAsset(path, generation).finally(() => {
+      secureAssetActiveCount -= 1
+      drainSecureAssetQueue()
+    })
+  }
+}
+
+async function fetchSecureDocumentAsset(path, generation) {
+  try {
+    const resp = await fetch(`${apiBase}${path}`, {
+      headers: { token: getToken() || '' },
+    })
+    if (!resp.ok) return
+    const blobUrl = URL.createObjectURL(await resp.blob())
+    if (generation !== secureAssetGeneration) {
+      URL.revokeObjectURL(blobUrl)
+      return
+    }
+    secureAssetObjectUrls.add(blobUrl)
+    secureAssetUrls.value = { ...secureAssetUrls.value, [path]: blobUrl }
+  } catch {
+    // 图片预览失败时保留占位，不影响文档正文阅读。
+  }
+}
 const highlightedChunk = computed(() => {
   if (!highlightedChunkId.value) return null
   return (selected.value?.chunks || []).find((chunk) => String(chunk.id) === String(highlightedChunkId.value)) || null
@@ -49,6 +154,7 @@ const renderedChunks = computed(() => (selected.value?.chunks || []).map((chunk)
   rendered: renderMarkdown(chunk.content),
   active: String(chunk.id) === String(highlightedChunkId.value),
 })))
+const chunkPageCount = computed(() => Math.max(1, Math.ceil((chunkTotal.value || 0) / chunkPageSize.value)))
 
 async function loadDocuments() {
   loading.value = true
@@ -106,11 +212,21 @@ watch(
 
 async function selectDocument(item, options = {}) {
   if (!item) return
+  if (selected.value?.id !== item.id) revokeSecureAssetUrls()
   selected.value = item
   if (['processing', 'pending'].includes(item.status)) startPolling(item.id)
   try {
-    const res = await api.skillKnowGetDocument({ document_id: item.id })
+    const params = {
+      document_id: item.id,
+      chunk_page: chunkPage.value,
+      chunk_page_size: chunkPageSize.value,
+    }
+    if (highlightedChunkId.value) params.chunk_id = highlightedChunkId.value
+    const res = await api.skillKnowGetDocument(params)
     selected.value = res.data
+    chunkPage.value = Number(res.data?.chunk_page || chunkPage.value || 1)
+    chunkPageSize.value = Number(res.data?.chunk_page_size || chunkPageSize.value || 10)
+    chunkTotal.value = Number(res.data?.chunk_total || res.data?.chunks?.length || 0)
     if (highlightedChunkId.value) await scrollToHighlightedChunk()
     if (['processing', 'pending'].includes(res.data?.status)) startPolling(item.id)
     else stopPolling(item.id)
@@ -119,15 +235,32 @@ async function selectDocument(item, options = {}) {
   }
 }
 
+async function changeChunkPage(page) {
+  chunkPage.value = page
+  highlightedChunkId.value = ''
+  await selectDocument(selected.value, { silent: true })
+}
+
+async function changeChunkPageSize(pageSize) {
+  chunkPageSize.value = pageSize
+  chunkPage.value = 1
+  highlightedChunkId.value = ''
+  await selectDocument(selected.value, { silent: true })
+}
+
 async function uploadFile(e) {
   const file = e.target.files?.[0]
   if (!file) return
+  if (uploading.value) {
+    $message.warning('已有文件正在上传，请稍候')
+    e.target.value = ''
+    return
+  }
   uploading.value = true
-  uploadProgress.value = 0
   uploadStage.value = '初始化上传任务'
   try {
     const chunkSize = 2 * 1024 * 1024
-    const concurrency = 3
+    const concurrency = 4
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize))
     const resumeKey = `${uploadResumeKeyPrefix}${file.name}:${file.size}:${totalChunks}`
     let uploadId = localStorage.getItem(resumeKey)
@@ -147,7 +280,6 @@ async function uploadFile(e) {
       try {
         const statusRes = await api.skillKnowChunkUploadStatus({ upload_id: uploadId, total_chunks: totalChunks })
         uploadedSet = new Set(statusRes.data?.uploaded_chunks || [])
-        uploadProgress.value = Math.min(95, statusRes.data?.progress || 0)
       } catch {
         localStorage.removeItem(resumeKey)
         const initRes = await api.skillKnowInitChunkUpload({
@@ -161,32 +293,43 @@ async function uploadFile(e) {
       }
     }
 
-    let uploadedChunks = 0
-    uploadStage.value = '上传文件分片'
-    uploadedChunks = uploadedSet.size
-    for (let batchStart = 0; batchStart < totalChunks; batchStart += concurrency) {
-      const tasks = []
-      for (let index = batchStart; index < Math.min(totalChunks, batchStart + concurrency); index += 1) {
-        if (uploadedSet.has(index)) continue
-        const start = index * chunkSize
-        const end = Math.min(file.size, start + chunkSize)
-        const blob = file.slice(start, end)
-        const formData = new FormData()
-        formData.append('upload_id', uploadId)
-        formData.append('chunk_index', String(index))
-        formData.append('total_chunks', String(totalChunks))
-        formData.append('file', blob, `${file.name}.part`)
-        const controller = new AbortController()
-        activeAbortControllers.value.push(controller)
-        tasks.push(
-          api.skillKnowUploadChunk(formData, controller.signal).finally(() => {
-            activeAbortControllers.value = activeAbortControllers.value.filter((item) => item !== controller)
-          }),
-        )
+    uploadStage.value = `上传文件分片 ${uploadedSet.size}/${totalChunks}`
+    const pendingIndexes = Array.from({ length: totalChunks }, (_, index) => index).filter((index) => !uploadedSet.has(index))
+    let cursor = 0
+    async function uploadChunk(index) {
+      const start = index * chunkSize
+      const end = Math.min(file.size, start + chunkSize)
+      const blob = file.slice(start, end)
+      const formData = new FormData()
+      formData.append('upload_id', uploadId)
+      formData.append('chunk_index', String(index))
+      formData.append('total_chunks', String(totalChunks))
+      formData.append('file', blob, `${file.name}.part`)
+      for (let attempt = 0; attempt <= uploadRetryLimit; attempt += 1) {
+        try {
+          await api.skillKnowUploadChunk(formData)
+          uploadedSet.add(index)
+          uploadStage.value = `上传文件分片 ${uploadedSet.size}/${totalChunks}`
+          return
+        } catch (error) {
+          if (attempt >= uploadRetryLimit) throw error
+          await new Promise((resolve) => window.setTimeout(resolve, 600 * (attempt + 1)))
+        }
       }
-      if (tasks.length) await Promise.all(tasks)
-      uploadedChunks += tasks.length
-      uploadProgress.value = Math.min(95, Math.round((uploadedChunks / totalChunks) * 100))
+    }
+    async function worker() {
+      while (cursor < pendingIndexes.length) {
+        const index = pendingIndexes[cursor]
+        cursor += 1
+        await uploadChunk(index)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, pendingIndexes.length) }, worker))
+
+    const finalStatus = await api.skillKnowChunkUploadStatus({ upload_id: uploadId, total_chunks: totalChunks })
+    const uploadedCount = Number(finalStatus.data?.uploaded_count || 0)
+    if (uploadedCount !== totalChunks) {
+      throw new Error(`分片上传未完成：${uploadedCount}/${totalChunks}`)
     }
 
     uploadStage.value = '提交合并任务'
@@ -197,7 +340,6 @@ async function uploadFile(e) {
       file_size: file.size,
       total_chunks: totalChunks,
     })
-    uploadProgress.value = 100
     uploadStage.value = '后台转换 Markdown'
     selected.value = res.data
     $message.success('已开始后台转换，请稍候')
@@ -205,30 +347,19 @@ async function uploadFile(e) {
     startPolling(res.data.id)
     await loadDocuments()
   } catch (error) {
-    if (error?.code === 'ERR_CANCELED' || error?.error?.code === 'ERR_CANCELED') {
-      $message.warning('上传已取消，可重新选择同一文件继续续传')
-    }
-    else {
-      throw error
-    }
+    $message.error(error.message || '上传失败，请重新选择同一文件续传')
   } finally {
     uploading.value = false
-    activeAbortControllers.value = []
-    uploadProgress.value = 0
     uploadStage.value = ''
     e.target.value = ''
   }
-}
-
-function cancelUpload() {
-  activeAbortControllers.value.forEach((controller) => controller.abort())
 }
 
 function startPolling(documentId) {
   if (!documentId || pollingTimers.has(documentId)) return
   const timer = window.setInterval(async () => {
     try {
-      const res = await api.skillKnowGetDocument({ document_id: documentId })
+      const res = await api.skillKnowGetDocument({ document_id: documentId, chunk_page: chunkPage.value, chunk_page_size: chunkPageSize.value })
       const doc = res.data
       documents.value = documents.value.map((item) => (item.id === doc.id ? { ...item, ...doc, content: undefined } : item))
       if (selected.value?.id === doc.id) selected.value = doc
@@ -356,27 +487,40 @@ watch(selected, syncEditForm, { immediate: true })
             <h2>知识文档</h2>
             <p>上传文件并转为 Markdown 分块入库，支持从智能对话引用回跳定位。</p>
           </div>
-          <NTag size="small" round>{{ documents.length }} 篇</NTag>
+          <NButton size="small" secondary :loading="loading" @click="loadDocuments">刷新</NButton>
         </div>
 
-        <input ref="fileInput" type="file" class="hidden" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.html,.htm,.csv,.json,.xml,.txt,.md,.markdown" @change="uploadFile" />
-        <div class="upload-card" @click="fileInput?.click()">
-          <div class="upload-mark">+</div>
-          <div>
-            <b>{{ uploading ? uploadStage : '上传知识文档' }}</b>
-            <p>PDF、Office、HTML、CSV、JSON、TXT、MD 均可转换入库。</p>
+        <div class="library-metrics">
+          <div class="library-metric">
+            <span>文档</span>
+            <b>{{ documents.length }}</b>
+          </div>
+          <div class="library-metric">
+            <span>已入库</span>
+            <b>{{ completedDocumentCount }}</b>
+          </div>
+          <div class="library-metric" :class="{ warning: runningDocumentCount }">
+            <span>处理中</span>
+            <b>{{ runningDocumentCount }}</b>
+          </div>
+          <div class="library-metric" :class="{ error: failedDocumentCount }">
+            <span>失败</span>
+            <b>{{ failedDocumentCount }}</b>
           </div>
         </div>
-        <div v-if="uploading" class="upload-progress">
-          <NProgress type="line" :percentage="uploadProgress" />
-          <NSpace justify="end" class="progress-actions">
-            <NButton size="tiny" secondary type="error" @click="cancelUpload">取消上传</NButton>
-          </NSpace>
-        </div>
 
+        <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.pptx,.docx,.pdf,.html,.json,.txt,.md" @change="uploadFile" />
+        <div class="upload-card" @click="fileInput?.click()">
+          <div class="upload-mark">
+            <icon-material-symbols:upload-file-outline-rounded text-24 />
+          </div>
+          <div>
+            <b>{{ uploading ? uploadStage : '上传知识文档' }}<span v-if="!uploading">点击选择</span></b>
+            <p>XLSX、PPTX、DOCX、PDF、HTML、JSON、TXT、MD 均可转换入库，最大 1G。</p>
+          </div>
+        </div>
         <div class="sidebar-actions">
-          <NInput v-model:value="keyword" clearable placeholder="搜索文档、文件名或内容" />
-          <NButton secondary :loading="loading" @click="loadDocuments">刷新</NButton>
+          <NInput v-model:value="keyword" class="document-search-input" clearable placeholder="搜索文档、文件名或内容" />
         </div>
 
         <NSpin :show="loading">
@@ -414,7 +558,7 @@ watch(selected, syncEditForm, { immediate: true })
               <h1>{{ selected.title }}</h1>
               <p>{{ selected.description || selected.filename }}</p>
             </div>
-            <NSpace>
+            <NSpace class="doc-actions">
               <NButton type="primary" :loading="saving" @click="saveDocument(false)">保存修改</NButton>
               <NButton secondary type="primary" :loading="saving || reindexing" @click="saveDocument(true)">保存并重建索引</NButton>
               <NButton secondary :loading="reindexing" :disabled="selected.status !== 'completed'" @click="reindexDocument">重建索引</NButton>
@@ -496,6 +640,17 @@ watch(selected, syncEditForm, { immediate: true })
                 </section>
                 <div v-if="!renderedChunks.length" v-html="renderMarkdown(editForm?.content)" />
               </div>
+              <div v-if="chunkTotal > chunkPageSize" class="chunk-pagination">
+                <NPagination
+                  :page="chunkPage"
+                  :page-size="chunkPageSize"
+                  :item-count="chunkTotal"
+                  :page-sizes="[10, 20, 50]"
+                  show-size-picker
+                  @update:page="changeChunkPage"
+                  @update:page-size="changeChunkPageSize"
+                />
+              </div>
             </div>
             <NInput v-else-if="editForm" v-model:value="editForm.content" class="source-editor" type="textarea" :autosize="{ minRows: 20, maxRows: 34 }" />
             <pre v-else>{{ selected.content || '-' }}</pre>
@@ -509,23 +664,155 @@ watch(selected, syncEditForm, { immediate: true })
 
 <style scoped>
 .hidden { display: none; }
-.doc-workspace { --ai-bg: #f7f7f4; --ai-sidebar: #f1f0ea; --ai-line: rgba(17, 24, 39, .10); --ai-text: #111827; --ai-muted: #6b7280; display: grid; grid-template-columns: 360px minmax(0, 1fr); height: calc(100vh - 96px); min-height: 560px; overflow: hidden; border: 1px solid var(--ai-line); border-radius: 20px; background: var(--ai-bg); box-shadow: 0 18px 50px rgba(15, 23, 42, .08); }
-.doc-sidebar { min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 14px; padding: 18px; border-right: 1px solid var(--ai-line); background: var(--ai-sidebar); }
-.sidebar-head, .doc-header, .panel-head, .preview-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.eyebrow { color: #10a37f; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.doc-workspace {
+  --ai-bg: #f7f7f4;
+  --ai-sidebar: #f1f0ea;
+  --ai-line: rgba(17, 24, 39, .10);
+  --ai-text: #111827;
+  --ai-muted: #6b7280;
+  --ai-accent: #10a37f;
+  --ai-primary: var(--primary-color, #f4511e);
+  display: grid;
+  grid-template-columns: 352px minmax(0, 1fr);
+  height: calc(100vh - 96px);
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid var(--ai-line);
+  border-radius: 18px;
+  background: var(--ai-bg);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, .08);
+}
+.doc-sidebar {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  border-right: 1px solid var(--ai-line);
+  background: linear-gradient(180deg, #f3f2ed 0%, var(--ai-sidebar) 100%);
+}
+.sidebar-head, .doc-header, .panel-head, .preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.eyebrow { color: var(--ai-accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3 { color: var(--ai-text); font-weight: 800; }
 .sidebar-head h2, .doc-header h1 { margin-top: 6px; }
 .sidebar-head p, .doc-header p, .panel-head p, .upload-card p, .item-desc { margin-top: 7px; color: var(--ai-muted); font-size: 13px; line-height: 1.6; }
-.upload-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; padding: 14px; border: 1px dashed rgba(17, 24, 39, .22); border-radius: 18px; background: rgba(255, 255, 255, .62); cursor: pointer; transition: .18s ease; }
-.upload-card:hover { border-color: rgba(16, 163, 127, .48); background: #fff; }
-.upload-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #111827; color: #fff; font-size: 24px; }
-.upload-progress { padding: 10px; border: 1px solid var(--ai-line); border-radius: 14px; background: #fff; }
-.sidebar-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.doc-list { display: grid; gap: 8px; min-height: 0; overflow: auto; padding-right: 4px; }
-.doc-list-item { display: grid; gap: 8px; width: 100%; padding: 13px; text-align: left; border: 1px solid transparent; border-radius: 14px; background: transparent; cursor: pointer; transition: .18s ease; }
-.doc-list-item:hover, .doc-list-item.active { border-color: rgba(17, 24, 39, .12); background: rgba(255, 255, 255, .76); box-shadow: 0 10px 24px rgba(15, 23, 42, .07); }
-.item-title { color: var(--ai-text); font-weight: 800; }
+.library-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.library-metric {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ai-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .68);
+}
+.library-metric span {
+  display: block;
+  color: var(--ai-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.library-metric b {
+  display: block;
+  margin-top: 5px;
+  color: var(--ai-text);
+  font-size: 20px;
+  line-height: 1;
+}
+.library-metric.warning b { color: #a16207; }
+.library-metric.error b { color: #b4234a; }
+.upload-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed rgba(17, 24, 39, .24);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .72);
+  cursor: pointer;
+  transition: .18s ease;
+}
+.upload-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(16, 163, 127, .48);
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, .07);
+}
+.upload-card b {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ai-text);
+}
+.upload-card b span {
+  color: var(--ai-accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+.upload-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #111827;
+  color: #fff;
+}
+.sidebar-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: center; min-height: 34px; }
+.document-search-input { min-width: 0; width: 100%; }
+.document-search-input :deep(.n-input-wrapper) { min-height: 34px; }
+.doc-sidebar :deep(.n-spin-container),
+.doc-sidebar :deep(.n-spin-content) {
+  min-height: 0;
+  height: 100%;
+}
+.doc-list { display: grid; align-content: start; gap: 8px; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 4px; }
+.doc-list-item {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 13px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  transition: .18s ease;
+}
+.doc-list-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: transparent;
+}
+.doc-list-item:hover, .doc-list-item.active {
+  border-color: rgba(17, 24, 39, .12);
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .07);
+}
+.doc-list-item.active::before { background: var(--ai-primary); }
+.item-title {
+  overflow: hidden;
+  color: var(--ai-text);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .item-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .doc-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .doc-status.success { color: #0f7a56; background: rgba(16, 163, 127, .12); }
@@ -533,8 +820,9 @@ h1, h2, h3 { color: var(--ai-text); font-weight: 800; }
 .doc-status.error { color: #b4234a; background: rgba(208, 48, 80, .12); }
 .doc-main { min-width: 0; min-height: 0; overflow: auto; padding: 24px max(26px, calc((100% - 1040px) / 2)); background: linear-gradient(180deg, #fff 0%, #fbfbf8 100%); }
 .doc-header { padding-bottom: 18px; border-bottom: 1px solid var(--ai-line); }
+.doc-actions { justify-content: flex-end; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.metric-card, .edit-panel, .preview-panel { border: 1px solid var(--ai-line); border-radius: 18px; background: rgba(255, 255, 255, .86); box-shadow: 0 12px 34px rgba(15, 23, 42, .06); }
+.metric-card, .edit-panel, .preview-panel { border: 1px solid var(--ai-line); border-radius: 16px; background: rgba(255, 255, 255, .86); box-shadow: 0 12px 34px rgba(15, 23, 42, .06); }
 .metric-card { padding: 16px; }
 .metric-card span { color: var(--ai-muted); font-size: 12px; }
 .metric-card b { display: block; margin-top: 8px; color: var(--ai-text); }
@@ -548,7 +836,23 @@ h1, h2, h3 { color: var(--ai-text); font-weight: 800; }
 .chunk-preview-title { margin-bottom: 8px; color: #1d4ed8; font-weight: 800; }
 .chunk-markdown { max-height: none; border-radius: 12px; padding: 12px; background: rgba(239, 246, 255, .76); }
 .markdown-preview { line-height: 1.75; word-break: break-word; }
+.markdown-preview :deep(img) {
+  display: block;
+  max-width: min(100%, 960px);
+  height: auto;
+  max-height: 70vh;
+  margin: 12px auto;
+  border: 1px solid rgba(17, 24, 39, .08);
+  border-radius: 10px;
+  background: #f6f7f8;
+  object-fit: contain;
+}
+.markdown-preview :deep(img[data-secure-asset][src=""]) {
+  width: min(100%, 520px);
+  min-height: 180px;
+}
 .chunked-preview { display: grid; gap: 12px; }
+.chunk-pagination { display: flex; justify-content: flex-end; padding-top: 2px; }
 .doc-chunk { border: 1px solid rgba(17, 24, 39, .10); border-radius: 16px; padding: 16px; background: #fff; transition: .18s ease; }
 .doc-chunk.active { border-color: rgba(37, 99, 235, .42); background: rgba(239, 246, 255, .92); box-shadow: 0 12px 28px rgba(37, 99, 235, .14); }
 .doc-chunk-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--ai-muted); font-size: 12px; font-weight: 800; }
@@ -562,5 +866,15 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 16px; line-height: 
 .markdown-preview :deep(table) { width: 100%; border-collapse: collapse; margin: 12px 0; }
 .markdown-preview :deep(th), .markdown-preview :deep(td) { border: 1px solid rgba(148, 163, 184, .35); padding: 8px; text-align: left; }
 .empty-state { margin-top: 20vh; }
-@media (max-width: 1100px) { .doc-workspace { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 96px); } .doc-sidebar { border-right: 0; border-bottom: 1px solid var(--ai-line); } .doc-header, .panel-head { flex-direction: column; } .metric-grid, .two-col { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .doc-workspace { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 96px); }
+  .doc-sidebar { border-right: 0; border-bottom: 1px solid var(--ai-line); }
+  .doc-header, .panel-head { flex-direction: column; }
+  .metric-grid, .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .library-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doc-main { padding: 18px; }
+  .doc-actions { justify-content: flex-start; }
+}
 </style>

@@ -71,6 +71,10 @@ class SkillKnowQuickSetupIn(BaseModel):
     retrieval_max_context_chars: int = Field(default=128000, ge=2000, le=500000)
     chunk_size: int = Field(default=1400, ge=300, le=5000)
     chunk_overlap: int = Field(default=150, ge=0, le=1000)
+    markdown_optimize_enabled: bool = True
+    markdown_optimize_prompt: str | None = None
+    markdown_optimize_max_chars: int = Field(default=30000, ge=1000, le=200000)
+    markdown_optimize_timeout: int = Field(default=45, ge=5, le=300)
 
 
 class SkillKnowTestConnectionIn(BaseModel):

@@ -127,9 +127,8 @@ export default {
   skillKnowDeleteFolder: (params = {}) => request.delete('/skill-know/folders/delete', { params }),
   // skill know - documents
   skillKnowInitChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/init', data, { timeout: 300000 }),
-  skillKnowUploadChunk: (formData, signal) => request.post('/skill-know/documents/upload/chunk', formData, {
-    signal,
-    timeout: 300000,
+  skillKnowUploadChunk: (formData) => request.post('/skill-know/documents/upload/chunk', formData, {
+    timeout: 90000,
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   skillKnowChunkUploadStatus: (params = {}) => request.get('/skill-know/documents/upload/status', { params, timeout: 300000 }),
@@ -169,6 +168,7 @@ export default {
   skillKnowGetPrompt: (params = {}) => request.get('/skill-know/prompts/get', { params }),
   skillKnowUpdatePrompt: (key, data = {}) => request.post(`/skill-know/prompts/update?key=${encodeURIComponent(key)}`, data),
   skillKnowResetPrompt: (key) => request.post(`/skill-know/prompts/reset?key=${encodeURIComponent(key)}`),
+  skillKnowSyncDefaultPrompts: () => request.post('/skill-know/prompts/sync-defaults'),
   skillKnowSetupState: () => request.get('/skill-know/llm-settings/state'),
   skillKnowSetupChecklist: () => request.get('/skill-know/llm-settings/checklist'),
   skillKnowProviders: () => request.get('/skill-know/llm-settings/providers'),

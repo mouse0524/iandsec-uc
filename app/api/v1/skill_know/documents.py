@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from app.core.ctx import CTX_USER_ID
 from app.models.enums import SkillKnowDocumentStatus
@@ -71,8 +72,19 @@ async def list_documents(
 
 
 @router.get("/get", summary="文档详情")
-async def get_document(document_id: int = Query(...)):
-    return Success(data=await skill_know_document_service.get(document_id))
+async def get_document(
+    document_id: int = Query(...),
+    chunk_page: int = Query(1, ge=1),
+    chunk_page_size: int = Query(10, ge=1, le=100),
+    chunk_id: int | None = Query(None),
+):
+    return Success(data=await skill_know_document_service.get(document_id, chunk_page=chunk_page, chunk_page_size=chunk_page_size, chunk_id=chunk_id))
+
+
+@router.get("/assets/{document_id}/{filename}", summary="获取文档图片资源")
+async def get_document_asset(document_id: int, filename: str):
+    path = await skill_know_document_service.get_asset(document_id, filename)
+    return FileResponse(path)
 
 
 @router.post("/update", summary="更新文档")

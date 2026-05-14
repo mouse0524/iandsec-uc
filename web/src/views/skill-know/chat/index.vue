@@ -1,8 +1,8 @@
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import CommonPage from '@/components/page/CommonPage.vue'
+import AppPage from '@/components/page/AppPage.vue'
 import api from '@/api'
 import { getToken, sanitizeHtml } from '@/utils'
 
@@ -16,10 +16,8 @@ const messages = ref([])
 const conversationId = ref(null)
 const currentConversation = ref(null)
 const scroller = ref(null)
-const progressSteps = ref([])
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
-const streamDebugEnabled = ref(false)
-const streamDebug = ref({ deltaCount: 0, firstTokenAt: '', firstChunkAt: '' })
+const apiBase = (import.meta.env.VITE_BASE_API || '/api/v1').replace(/\/$/, '')
 const sidebarCollapsed = ref(false)
 const stickToBottom = ref(true)
 const quickPrompts = [
@@ -29,10 +27,21 @@ const quickPrompts = [
   '产品授权异常时应该收集哪些信息？',
 ]
 const router = useRouter()
+const secureAssetUrls = ref({})
+const secureAssetObjectUrls = new Set()
+const secureAssetQueue = []
+const secureAssetQueued = new Set()
+let secureAssetActiveCount = 0
+let secureAssetObserver = null
+const maxSecureAssetConcurrency = 3
 
 onMounted(async () => {
   await loadConversations()
   if (conversations.value.length) await openConversation(conversations.value[0])
+})
+onUnmounted(() => {
+  revokeSecureAssetUrls()
+  secureAssetObserver?.disconnect()
 })
 
 async function loadConversations() {
@@ -60,8 +69,6 @@ function newConversation() {
   currentConversation.value = null
   messages.value = []
   input.value = ''
-  progressSteps.value = []
-  streamDebug.value = { deltaCount: 0, firstTokenAt: '', firstChunkAt: '' }
   stickToBottom.value = true
 }
 
@@ -73,12 +80,6 @@ async function send() {
 async function sendMessage(text) {
   if (!text || sending.value) return
   input.value = ''
-  streamDebug.value = { deltaCount: 0, firstTokenAt: '', firstChunkAt: '' }
-  progressSteps.value = [
-    { key: 'retrieve', label: '检索知识库', status: 'active' },
-    { key: 'reason', label: '整理上下文', status: 'pending' },
-    { key: 'answer', label: '生成回答', status: 'pending' },
-  ]
   const localUser = { id: `local-user-${Date.now()}`, role: 'user', content: text }
   const localAssistantLocalId = `local-assistant-${Date.now()}`
   const localAssistant = { id: localAssistantLocalId, role: 'assistant', content: '', pending: true, revealing: true, citationsCollapsed: true, streaming: true }
@@ -103,7 +104,6 @@ async function sendMessage(text) {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
-      if (!streamDebug.value.firstChunkAt) streamDebug.value.firstChunkAt = new Date().toLocaleTimeString()
       buffer += decoder.decode(value, { stream: true })
       const parts = buffer.split('\n\n')
       buffer = parts.pop() || ''
@@ -112,37 +112,12 @@ async function sendMessage(text) {
         const line = part.split('\n').find((i) => i.startsWith('data:'))
         if (!line) continue
         const item = JSON.parse(line.replace(/^data:\s*/, ''))
-        if (item.type === 'phase.changed') {
-          progressSteps.value = [
-            { key: 'retrieve', label: '检索知识库', status: 'active' },
-            { key: 'reason', label: '整理上下文', status: 'pending' },
-            { key: 'answer', label: '生成回答', status: 'pending' },
-          ]
-        } else if (item.type === 'search.results') {
-          progressSteps.value = [
-            { key: 'retrieve', label: '检索知识库', status: 'done' },
-            { key: 'reason', label: '整理上下文', status: 'active' },
-            { key: 'answer', label: '生成回答', status: 'pending' },
-          ]
-        } else if (item.type === 'llm.call.started') {
-          progressSteps.value = [
-            { key: 'retrieve', label: '检索知识库', status: 'done' },
-            { key: 'reason', label: '整理上下文', status: 'done' },
-            { key: 'answer', label: '生成回答', status: 'active' },
-          ]
-        } else if (item.type === 'assistant.delta') {
-          streamDebug.value.deltaCount += 1
-          if (!streamDebug.value.firstTokenAt) streamDebug.value.firstTokenAt = new Date().toLocaleTimeString()
+        if (item.type === 'assistant.delta') {
           rawAnswer += item.payload?.content || ''
           patchAssistant({ content: compactAssistantContent(rawAnswer), pending: true, revealing: false, streaming: true })
           await scrollToBottom()
         } else if (item.type === 'final') {
           const data = item.payload || {}
-          progressSteps.value = [
-            { key: 'retrieve', label: '检索知识库', status: 'done' },
-            { key: 'reason', label: '整理上下文', status: 'done' },
-            { key: 'answer', label: '生成回答', status: 'done' },
-          ]
           conversationId.value = data.conversation_id || conversationId.value
           rawAnswer = data.content || rawAnswer || '未返回内容'
           patchAssistant({
@@ -157,7 +132,6 @@ async function sendMessage(text) {
         } else if (item.type === 'error') {
           rawAnswer = item.payload?.message || '对话失败，请稍后重试'
           patchAssistant({ content: item.payload?.message || '对话失败，请稍后重试', revealing: false, streaming: false })
-          progressSteps.value = []
         }
       }
     }
@@ -166,7 +140,6 @@ async function sendMessage(text) {
     if (current) currentConversation.value = current
   } catch (error) {
     patchAssistant({ content: error.message || '对话失败，请稍后重试', pending: false, revealing: false, streaming: false })
-    progressSteps.value = []
   } finally {
     sending.value = false
     await scrollToBottom()
@@ -205,7 +178,10 @@ async function copyMessage(msg) {
 
 function continueAsk(msg) {
   input.value = '请基于上面的回答继续说明：'
-  nextTick(() => document.querySelector('.chat-composer textarea')?.focus())
+  nextTick(() => {
+    document.querySelector('.composer-shell')?.scrollIntoView({ block: 'end' })
+    document.querySelector('.chat-composer textarea')?.focus()
+  })
 }
 
 async function sendSuggestion(text) {
@@ -264,7 +240,93 @@ function conversationTitle(item) {
 }
 
 function renderMessage(content) {
-  return sanitizeHtml(md.render(sanitizeAssistantContent(content || '')))
+  const html = md.render(sanitizeAssistantContent(content || ''))
+  const normalized = prepareSecureDocumentAssetUrls(html)
+  return sanitizeHtml(normalized)
+}
+
+function normalizeDocumentAssetPath(src) {
+  const value = String(src || '').trim().replace(/^\/api\/v1/i, '')
+  const match = value.match(/^\/skill-know\/documents\/assets\/\d+\/[^?#]+/i)
+  return match ? match[0] : ''
+}
+
+function prepareSecureDocumentAssetUrls(html) {
+  return String(html || '').replace(/(<img\b[^>]*?\bsrc=["'])(\/(?:api\/v1\/)?skill-know\/documents\/assets\/[^"']+)(["'][^>]*>)/gi, (_, prefix, src, suffix) => {
+    const assetPath = normalizeDocumentAssetPath(src)
+    if (!assetPath) return `${prefix}${src}${suffix}`
+    const quote = suffix[0] || '"'
+    const rest = suffix.slice(1)
+    const lazyAttrs = rest.includes('loading=') ? '' : ' loading="lazy" decoding="async"'
+    return `${prefix}${secureAssetUrls.value[assetPath] || ''}${quote} data-secure-asset="${assetPath}"${lazyAttrs}${rest}`
+  })
+}
+
+function initSecureAssetObserver() {
+  if (secureAssetObserver) return secureAssetObserver
+  secureAssetObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return
+      const path = entry.target?.dataset?.secureAsset
+      if (path) queueSecureAsset(path)
+      secureAssetObserver.unobserve(entry.target)
+    })
+  }, { rootMargin: '360px 0px' })
+  return secureAssetObserver
+}
+
+async function hydrateSecureAssetImages() {
+  await nextTick()
+  const observer = initSecureAssetObserver()
+  document.querySelectorAll('img[data-secure-asset]').forEach((img) => {
+    const path = img.dataset.secureAsset
+    if (!path || secureAssetUrls.value[path] || secureAssetQueued.has(path)) return
+    observer.observe(img)
+  })
+}
+
+watch(secureAssetUrls, hydrateSecureAssetImages, { flush: 'post' })
+watch(messages, hydrateSecureAssetImages, { flush: 'post', deep: true })
+
+function queueSecureAsset(path) {
+  if (!path || secureAssetUrls.value[path] || secureAssetQueued.has(path)) return
+  secureAssetQueued.add(path)
+  secureAssetQueue.push(path)
+  drainSecureAssetQueue()
+}
+
+function drainSecureAssetQueue() {
+  while (secureAssetActiveCount < maxSecureAssetConcurrency && secureAssetQueue.length) {
+    const path = secureAssetQueue.shift()
+    secureAssetActiveCount += 1
+    fetchSecureDocumentAsset(path).finally(() => {
+      secureAssetActiveCount -= 1
+      drainSecureAssetQueue()
+    })
+  }
+}
+
+async function fetchSecureDocumentAsset(path) {
+  try {
+    const resp = await fetch(`${apiBase}${path}`, {
+      headers: { token: getToken() || '' },
+    })
+    if (!resp.ok) return
+    const blobUrl = URL.createObjectURL(await resp.blob())
+    secureAssetObjectUrls.add(blobUrl)
+    secureAssetUrls.value = { ...secureAssetUrls.value, [path]: blobUrl }
+  } catch {
+    // 引用图片预览失败不阻断回答正文展示。
+  }
+}
+
+function revokeSecureAssetUrls() {
+  secureAssetObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  secureAssetObjectUrls.clear()
+  secureAssetQueue.length = 0
+  secureAssetQueued.clear()
+  secureAssetActiveCount = 0
+  secureAssetUrls.value = {}
 }
 
 function handleInputKeydown(event) {
@@ -276,8 +338,9 @@ function handleInputKeydown(event) {
 </script>
 
 <template>
-  <CommonPage title="智能对话" :show-header="false" show-footer>
-    <div class="chatgpt-page" :class="{ collapsed: sidebarCollapsed }">
+  <AppPage :show-footer="false" class="chat-app-page">
+    <div class="chat-page-shell">
+      <div class="chatgpt-page" :class="{ collapsed: sidebarCollapsed }">
       <aside class="conversation-sidebar">
         <div class="sidebar-top">
           <button class="sidebar-icon-button" type="button" @click="sidebarCollapsed = !sidebarCollapsed">
@@ -305,35 +368,7 @@ function handleInputKeydown(event) {
       </aside>
 
       <section class="chat-main">
-        <header class="chat-header">
-          <div class="chat-title-block">
-            <button v-if="sidebarCollapsed" class="sidebar-toggle-floating" type="button" @click="sidebarCollapsed = false">会话</button>
-            <div>
-              <div class="chat-kicker">Skill-Know Assistant</div>
-              <h1>{{ currentConversation?.title || '智能对话' }}</h1>
-            </div>
-          </div>
-          <div class="header-actions">
-            <div v-if="progressSteps.length" class="progress-strip">
-              <div v-for="step in progressSteps" :key="step.key" class="progress-step" :class="step.status">
-                <span class="step-dot" />
-                <span>{{ step.label }}</span>
-              </div>
-            </div>
-            <div class="debug-toggle">
-              <span>调试</span>
-              <NSwitch v-model:value="streamDebugEnabled" size="small" />
-            </div>
-          </div>
-        </header>
-
-        <div v-if="streamDebugEnabled && (sending || streamDebug.deltaCount)" class="stream-debug-bar">
-          <NTag size="small" type="info">STREAM MODE</NTag>
-          <NTag size="small">delta: {{ streamDebug.deltaCount }}</NTag>
-          <NTag v-if="streamDebug.firstChunkAt" size="small">first chunk: {{ streamDebug.firstChunkAt }}</NTag>
-          <NTag v-if="streamDebug.firstTokenAt" size="small">first token: {{ streamDebug.firstTokenAt }}</NTag>
-        </div>
-
+        <button v-if="sidebarCollapsed" class="sidebar-toggle-floating" type="button" @click="sidebarCollapsed = false">会话</button>
         <div ref="scroller" class="message-scroll" :class="{ loading, empty: !messages.length }" @scroll="handleMessageScroll">
           <NSpin v-if="loading" class="message-loading" size="small" />
           <section v-if="!messages.length" class="welcome-panel">
@@ -409,40 +444,30 @@ function handleInputKeydown(event) {
           <div class="composer-hint">Enter 发送，Shift + Enter 换行。回答可能来自知识库检索结果，请结合引用来源核验。</div>
         </footer>
       </section>
+      </div>
     </div>
-  </CommonPage>
+  </AppPage>
 </template>
 
 <style scoped>
-.chatgpt-page { --chat-bg: #f7f7f4; --sidebar-bg: #f1f0ea; --line: rgba(17,24,39,.10); --muted: #6b7280; --text: #111827; display: grid; grid-template-columns: 280px minmax(0, 1fr); height: calc(100vh - 96px); min-height: 560px; overflow: hidden; border-radius: 20px; background: var(--chat-bg); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(15,23,42,.08); transition: grid-template-columns .2s ease; }
+.chat-page-shell { flex: 1; min-height: 0; height: 100%; display: flex; overflow: hidden; }
+.chat-app-page { box-sizing: border-box; min-height: 0; overflow: hidden; }
+.chatgpt-page { --chat-bg: #f7f7f4; --sidebar-bg: #f1f0ea; --line: rgba(17,24,39,.10); --muted: #6b7280; --text: #111827; flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; overflow: hidden; border-radius: 20px; background: var(--chat-bg); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(15,23,42,.08); transition: grid-template-columns .2s ease; }
 .chatgpt-page.collapsed { grid-template-columns: 0 minmax(0, 1fr); }
 .conversation-sidebar { min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sidebar-bg); border-right: 1px solid var(--line); }
 .sidebar-top { display: grid; grid-template-columns: 64px 1fr; gap: 8px; padding: 12px; }
 .sidebar-icon-button, .sidebar-toggle-floating { border: 1px solid rgba(17,24,39,.12); background: rgba(255,255,255,.72); color: #374151; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 700; }
 .sidebar-icon-button, .new-chat-button, .sidebar-toggle-floating { height: 34px; }
-.sidebar-toggle-floating { padding: 0 12px; }
+.sidebar-toggle-floating { position: absolute; top: 14px; left: 18px; z-index: 3; padding: 0 12px; }
 .new-chat-button { border-radius: 12px; font-weight: 800; }
-.conversation-list { padding: 4px 10px 14px; overflow: auto; }
+.conversation-list { min-height: 0; padding: 4px 10px 14px; overflow: auto; }
 .conversation-item { padding: 11px 12px; border-radius: 14px; cursor: pointer; border: 1px solid transparent; margin-bottom: 6px; color: #202123; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
 .conversation-item:hover { background: rgba(255,255,255,.72); transform: translateY(-1px); }
 .conversation-item.active { background: #fff; border-color: rgba(37,99,235,.20); box-shadow: 0 8px 24px rgba(15,23,42,.06); }
 .conversation-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-preview { color: var(--muted); font-size: 12px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #8a8f98; font-size: 11px; margin-top: 6px; }
-.chat-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #fff; }
-.chat-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 22px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.86); backdrop-filter: blur(18px); }
-.chat-title-block, .header-actions, .progress-strip, .progress-step, .debug-toggle { display: flex; align-items: center; }
-.chat-title-block { gap: 12px; min-width: 0; }
-.chat-kicker { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.chat-title-block h1 { margin: 2px 0 0; color: var(--text); font-size: 18px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.header-actions { justify-content: flex-end; gap: 12px; min-width: 0; }
-.progress-strip { gap: 8px; min-width: 0; overflow: hidden; }
-.progress-step { gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 12px; color: #9ca3af; background: #f3f4f6; white-space: nowrap; }
-.progress-step .step-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
-.progress-step.active { color: #2563eb; background: #eff6ff; }
-.progress-step.done { color: #16a34a; background: #ecfdf5; }
-.debug-toggle { gap: 7px; color: var(--muted); font-size: 12px; }
-.stream-debug-bar { display: flex; gap: 8px; padding: 8px 22px; border-bottom: 1px dashed rgba(148,163,184,.22); background: rgba(248,250,252,.86); }
+.chat-main { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: #fff; }
 .message-scroll { position: relative; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px max(28px, calc((100% - 860px) / 2)) 32px; overscroll-behavior: contain; background: linear-gradient(180deg, #fff 0%, #fbfbf8 100%); }
 .message-scroll.empty { display: grid; place-items: center; }
 .message-loading { position: sticky; top: 8px; left: 50%; z-index: 2; display: flex; justify-content: center; pointer-events: none; }
@@ -468,6 +493,21 @@ function handleInputKeydown(event) {
 .markdown-body :deep(code) { padding: 2px 5px; border-radius: 5px; background: #f4f4f5; }
 .markdown-body :deep(table) { width: 100%; border-collapse: collapse; margin: 12px 0; }
 .markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid rgba(148,163,184,.28); padding: 8px; text-align: left; }
+.markdown-body :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 56vh;
+  margin: 10px auto;
+  border: 1px solid rgba(17, 24, 39, .08);
+  border-radius: 10px;
+  background: #f6f7f8;
+  object-fit: contain;
+}
+.markdown-body :deep(img[data-secure-asset][src=""]) {
+  width: min(100%, 420px);
+  min-height: 160px;
+}
 .typing-cursor { display: inline-block; width: 7px; height: 1.1em; margin-left: 2px; vertical-align: -2px; background: #111827; animation: cursor-blink .9s steps(2, start) infinite; }
 .thinking-state { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .thinking-dot { width: 8px; height: 8px; border-radius: 999px; background: #111827; animation: pulse 1.2s infinite ease-in-out; }
@@ -483,7 +523,7 @@ function handleInputKeydown(event) {
 .citation-file { flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .message-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
 .rating-row, .rated-tag { margin-top: 10px; }
-.composer-shell { padding: 12px max(28px, calc((100% - 860px) / 2)) 16px; border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.82), #fff); }
+.composer-shell { min-height: 0; padding: 12px max(28px, calc((100% - 860px) / 2)) 16px; border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.82), #fff); }
 .chat-composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 8px; align-items: end; padding: 9px 10px 9px 16px; border: 1px solid rgba(17,24,39,.13); border-radius: 24px; background: #fff; box-shadow: 0 14px 42px rgba(15,23,42,.10); }
 .chat-composer :deep(.n-input) { --n-border: none !important; --n-border-hover: none !important; --n-border-focus: none !important; --n-box-shadow-focus: none !important; --n-color: transparent !important; }
 .chat-composer :deep(.n-input-wrapper) { min-height: 34px; padding: 0; background: transparent; }
@@ -493,11 +533,8 @@ function handleInputKeydown(event) {
 @keyframes pulse { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
 @keyframes cursor-blink { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
 @media (max-width: 900px) {
-  .chatgpt-page, .chatgpt-page.collapsed { grid-template-columns: 1fr; height: calc(100vh - 84px); min-height: 520px; }
+  .chatgpt-page, .chatgpt-page.collapsed { grid-template-columns: 1fr; height: 100%; min-height: 0; }
   .conversation-sidebar { display: none; }
-  .chat-header { padding: 12px 14px; align-items: flex-start; flex-direction: column; }
-  .header-actions { width: 100%; justify-content: space-between; }
-  .progress-strip { flex-wrap: wrap; }
   .message-scroll { padding: 20px 14px 28px; }
   .composer-shell { padding: 10px 14px 14px; }
   .prompt-grid { grid-template-columns: 1fr; }

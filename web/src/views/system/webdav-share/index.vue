@@ -1,6 +1,6 @@
 <script setup>
 import { h, nextTick, onMounted, ref } from 'vue'
-import { NButton, NPopconfirm, NSwitch, NTag } from 'naive-ui'
+import { NButton, NInput, NPopconfirm, NSwitch, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
@@ -36,7 +36,11 @@ const shareColumns = [
     width: 90,
     align: 'center',
     render(row) {
-      return h(NTag, { type: row.is_active ? 'success' : 'default', bordered: false }, { default: () => (row.is_active ? '生效' : '失效') })
+      const expired = row.is_expired || row.status === 'expired'
+      const active = row.is_active && !expired
+      const type = active ? 'success' : (expired ? 'warning' : 'default')
+      const text = active ? '生效' : (expired ? '过期' : '失效')
+      return h(NTag, { type, bordered: false }, { default: () => text })
     },
   },
   {
@@ -48,7 +52,7 @@ const shareColumns = [
       const origin = window.location.origin
       const apiUrl = row.download_url || ''
       const url = apiUrl ? `${origin}${apiUrl}` : ''
-      const disabled = !row.is_active
+      const disabled = !row.is_active || row.is_expired || row.status === 'expired'
       return h(
         NButton,
         {
@@ -103,10 +107,29 @@ async function deleteShare(id) {
       :get-data="getShareTableData"
     >
       <template #queryBar>
-        <QueryBarItem label="显示历史" :label-width="70">
-          <NSwitch v-model:value="shareQuery.include_history" />
-        </QueryBarItem>
+        <div class="share-query-item">
+          <QueryBarItem label="文件名" :label-width="60">
+            <NInput class="share-query-input" v-model:value="shareQuery.file_name" clearable placeholder="输入文件名" @keypress.enter="shareTable?.handleSearch()" />
+          </QueryBarItem>
+        </div>
+        <div class="share-query-item">
+          <QueryBarItem label="显示历史" :label-width="70">
+            <NSwitch v-model:value="shareQuery.include_history" />
+          </QueryBarItem>
+        </div>
       </template>
     </CrudTable>
   </CommonPage>
 </template>
+
+<style scoped>
+.share-query-item {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+}
+
+.share-query-input {
+  width: 220px;
+}
+</style>

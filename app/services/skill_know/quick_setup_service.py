@@ -50,6 +50,11 @@ class SkillKnowQuickSetupService:
         await skill_know_config_service.set("retrieval_max_context_chars", data.retrieval_max_context_chars, group="retrieval", description="最大上下文字符数")
         await skill_know_config_service.set("chunk_size", data.chunk_size, group="retrieval", description="Markdown 分块大小")
         await skill_know_config_service.set("chunk_overlap", data.chunk_overlap, group="retrieval", description="Markdown 分块重叠")
+        await skill_know_config_service.set("markdown_optimize_enabled", data.markdown_optimize_enabled, group="retrieval", description="Markdown 分片前优化开关")
+        if data.markdown_optimize_prompt is not None:
+            await skill_know_config_service.set("markdown_optimize_prompt", data.markdown_optimize_prompt, group="retrieval", description="Markdown 优化提示词")
+        await skill_know_config_service.set("markdown_optimize_max_chars", data.markdown_optimize_max_chars, group="retrieval", description="Markdown 优化最大字符数")
+        await skill_know_config_service.set("markdown_optimize_timeout", data.markdown_optimize_timeout, group="retrieval", description="Markdown 优化超时时间")
         return await self.state()
 
     async def test_connection(self, data) -> dict:
@@ -70,6 +75,10 @@ class SkillKnowQuickSetupService:
             "retrieval_max_context_chars",
             "chunk_size",
             "chunk_overlap",
+            "markdown_optimize_enabled",
+            "markdown_optimize_prompt",
+            "markdown_optimize_max_chars",
+            "markdown_optimize_timeout",
         ]:
             await skill_know_config_service.set(key, None)
         return await self.state()

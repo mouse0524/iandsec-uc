@@ -2,92 +2,122 @@
   <AppPage :show-footer="false" class="login-page-shell">
     <div class="login-wrap">
       <section class="brand-panel">
-        <div class="brand-head">
-          <icon-custom-logo text-42 color-primary />
+        <div class="brand-identity">
+          <div class="brand-logo-mark">
+            <icon-custom-logo text-42 />
+          </div>
           <div>
+            <p class="brand-eyebrow">用户服务中心</p>
             <h1>{{ appStore.siteTitle || $t('app_name') }}</h1>
-            <p>用户服务中心</p>
           </div>
         </div>
 
-        <div class="brand-summary">
-          <p>
-            统一受理问题工单、注册审核与技术支持。通过标准化流程提升响应效率，确保每个问题可追踪、可回溯、可闭环。
-          </p>
+        <div class="hero-copy">
+          <h2>AI驱动数据安全 · 让数据更安全</h2>
+          <p>面向客户、渠道商、客服与技术团队，集中完成工单受理、知识检索、外发共享和权限审计。</p>
         </div>
 
-        <div class="service-cards">
-          <div class="service-item">
-            <icon-mdi:file-document-check-outline text-20 color-primary />
-            <div>
-              <h4>工单全流程追踪</h4>
-              <p>提交、审核、处理、完成状态实时可见</p>
+        <div class="operations-board">
+          <div class="capability-grid">
+            <div class="capability-item">
+              <icon-mdi:file-document-check-outline text-22 />
+              <div>
+                <h4>工单中心</h4>
+                <p>问题提交、附件留痕、客服审核、技术处理全链路跟踪</p>
+              </div>
             </div>
-          </div>
-          <div class="service-item">
-            <icon-mdi:account-check-outline text-20 color-primary />
-            <div>
-              <h4>注册审核机制</h4>
-              <p>渠道商/用户注册分流审核，防止恶意注册</p>
+            <div class="capability-item">
+              <icon-carbon:machine-learning-model text-22 />
+              <div>
+                <h4>AI 知识库</h4>
+                <p>Markdown 文档检索、引用溯源、智能问答辅助排障</p>
+              </div>
             </div>
-          </div>
-          <div class="service-item">
-            <icon-mdi:headset text-20 color-primary />
-            <div>
-              <h4>紧急支持热线</h4>
-              <p>4001381063（审核与问题加急支持）</p>
+            <div class="capability-item">
+              <icon-material-symbols:cloud-sync-outline text-22 />
+              <div>
+                <h4>WebDAV 外发</h4>
+                <p>受控文件浏览、分享链接、到期管理和记录审计</p>
+              </div>
+            </div>
+            <div class="capability-item">
+              <icon-material-symbols:admin-panel-settings-outline-rounded text-22 />
+              <div>
+                <h4>权限与审计</h4>
+                <p>角色授权、动态菜单、接口权限和操作日志统一管理</p>
+              </div>
             </div>
           </div>
         </div>
 
+        <div class="support-strip">
+          <div>
+            <span>支持对象</span>
+            <strong>客户 · 渠道商 · 客服 · 技术</strong>
+          </div>
+          <div>
+            <span>紧急支持</span>
+            <strong>4001381063</strong>
+          </div>
+        </div>
       </section>
 
       <section class="auth-panel">
-        <h3>账号登录</h3>
-        <p class="auth-tip">请输入邮箱、密码和验证码登录系统</p>
+        <div class="auth-card">
+          <div class="auth-head">
+            <div>
+              <span class="auth-kicker">SECURE ACCESS</span>
+              <h3>账号登录</h3>
+              <p class="auth-tip">请输入邮箱、密码和验证码进入服务中心</p>
+            </div>
+            <icon-material-symbols:shield-lock-outline-rounded class="auth-head-icon" />
+          </div>
 
-        <div class="auth-form-item">
-          <n-input v-model:value="loginInfo.username" autofocus placeholder="请输入邮箱" :maxlength="50" />
-        </div>
-        <div class="auth-form-item">
-          <n-input
-            v-model:value="loginInfo.password"
-            type="password"
-            show-password-on="mousedown"
-            placeholder="请输入密码"
-            :maxlength="50"
-            @keypress.enter="handleLogin"
-          />
-        </div>
-        <div class="auth-form-item captcha-row">
-          <n-input
-            v-model:value="loginInfo.captcha_code"
-            placeholder="请输入登录验证码"
-            :maxlength="6"
-            @keypress.enter="handleLogin"
-          />
-          <img :src="loginCaptchaImage" alt="login-captcha" class="captcha-img" @click="fetchLoginCaptcha" />
-        </div>
+          <div class="auth-form-item">
+            <label>邮箱账号</label>
+            <n-input v-model:value="loginInfo.username" autofocus placeholder="请输入邮箱" :maxlength="50" />
+          </div>
+          <div class="auth-form-item">
+            <label>登录密码</label>
+            <n-input
+              v-model:value="loginInfo.password"
+              type="password"
+              show-password-on="mousedown"
+              placeholder="请输入密码"
+              :maxlength="50"
+              @keypress.enter="handleLogin"
+            />
+          </div>
+          <div class="auth-form-item">
+            <label>安全验证码</label>
+            <div class="captcha-row">
+              <n-input
+                v-model:value="loginInfo.captcha_code"
+                placeholder="请输入登录验证码"
+                :maxlength="6"
+                @keypress.enter="handleLogin"
+              />
+              <img :src="loginCaptchaImage" alt="login-captcha" class="captcha-img" @click="fetchLoginCaptcha" />
+            </div>
+          </div>
 
-        <n-button class="login-btn" type="primary" :loading="loading" @click="handleLogin">
-          {{ $t('views.login.text_login') }}
-        </n-button>
+          <n-button class="login-btn" type="primary" :loading="loading" @click="handleLogin">
+            {{ $t('views.login.text_login') }}
+          </n-button>
 
-        <div class="register-action" style="margin-top: 6px">
-          <n-button text type="primary" @click="openForgotPasswordModal">忘记密码</n-button>
-        </div>
+          <div class="auth-links">
+            <n-button text type="primary" @click="openForgotPasswordModal">忘记密码</n-button>
+            <n-button v-if="appStore.allowPartnerRegister" text type="primary" @click="showPartnerModal = true">注册账号</n-button>
+          </div>
 
-        <div class="agreement-row mt-10">
-          <n-checkbox v-model:checked="loginAgree">
-            <span>我已阅读并同意</span>
-            <n-button text type="primary" class="agreement-link" @click.stop="showUserAgreementModal = true">《用户服务协议》</n-button>
-            <span>与</span>
-            <n-button text type="primary" class="agreement-link" @click.stop="showPrivacyPolicyModal = true">《隐私政策》</n-button>
-          </n-checkbox>
-        </div>
-
-        <div class="register-action" v-if="appStore.allowPartnerRegister">
-          <n-button text type="primary" @click="showPartnerModal = true">注册账号</n-button>
+          <div class="agreement-row">
+            <n-checkbox v-model:checked="loginAgree">
+              <span>我已阅读并同意</span>
+              <n-button text type="primary" class="agreement-link" @click.stop="showUserAgreementModal = true">《用户服务协议》</n-button>
+              <span>与</span>
+              <n-button text type="primary" class="agreement-link" @click.stop="showPrivacyPolicyModal = true">《隐私政策》</n-button>
+            </n-checkbox>
+          </div>
         </div>
       </section>
     </div>
@@ -735,106 +765,252 @@ watch(showForgotPasswordModal, (v) => {
 .login-page-shell {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 12% 16%, rgba(244, 81, 30, 0.08), transparent 40%),
-    radial-gradient(circle at 92% 18%, rgba(244, 81, 30, 0.06), transparent 38%),
-    linear-gradient(180deg, #f7f8fb 0%, #f3f5f8 100%);
+    linear-gradient(180deg, rgba(244, 81, 30, 0.035), rgba(244, 81, 30, 0) 220px),
+    #f5f6fb;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 28px 16px;
+  padding: 24px;
   box-sizing: border-box;
+  color: #1f2937;
+  overflow: auto;
+  position: relative;
+}
+
+.login-page-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('@/assets/images/login_bg.webp') center / cover no-repeat;
+  opacity: 0.42;
+}
+
+.login-page-shell::after {
+  display: none;
 }
 
 .login-wrap {
+  position: relative;
+  z-index: 1;
   width: 100%;
-  max-width: 1160px;
+  max-width: 1120px;
+  min-height: auto;
   display: grid;
-  grid-template-columns: 1.25fr 0.75fr;
+  grid-template-columns: minmax(0, 1fr) 420px;
   gap: 18px;
+  align-items: stretch;
 }
 
 .brand-panel,
 .auth-panel {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
   background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(31, 41, 55, 0.06);
-  border-radius: 16px;
-  box-shadow: 0 12px 30px rgba(31, 41, 55, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(31, 41, 55, 0.07);
 }
 
 .brand-panel {
-  padding: 28px;
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
 }
 
-.brand-head {
+.brand-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--primary-color);
+}
+
+.brand-panel::after {
+  display: none;
+}
+
+.brand-identity {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
-.brand-head h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-  color: #1f2937;
-}
-
-.brand-head p {
-  margin: 4px 0 0;
-  color: #6b7280;
-}
-
-.brand-summary {
-  margin-top: 16px;
-  color: #374151;
-  line-height: 1.8;
-}
-
-.service-cards {
-  margin-top: 22px;
+.brand-logo-mark {
+  width: 54px;
+  height: 54px;
   display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--primary-color);
+  background: rgba(244, 81, 30, 0.08);
+  border: 1px solid rgba(244, 81, 30, 0.18);
+}
+
+.brand-eyebrow {
+  margin: 0 0 6px;
+  color: var(--primary-color);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand-identity h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 25px;
+  line-height: 1.2;
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  margin-top: 38px;
+  max-width: 600px;
+}
+
+.hero-copy h2 {
+  margin: 0;
+  color: #111827;
+  font-size: clamp(30px, 3.2vw, 40px);
+  line-height: 1.22;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.hero-copy p {
+  margin: 16px 0 0;
+  max-width: 520px;
+  color: #6b7280;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.operations-board {
+  position: relative;
+  z-index: 1;
+  margin-top: 28px;
+}
+
+.capability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.service-item {
+.capability-item {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f9fafb;
+  gap: 12px;
+  padding: 14px;
+  color: var(--primary-color);
+  border-radius: 8px;
   border: 1px solid #eef1f5;
+  background: #fafafa;
 }
 
-.service-item h4 {
+.capability-item h4 {
   margin: 0;
   font-size: 15px;
   color: #1f2937;
 }
 
-.service-item p {
+.capability-item p {
   margin: 4px 0 0;
-  font-size: 13px;
   color: #6b7280;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.support-strip {
+  position: relative;
+  z-index: 1;
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: 1fr 0.72fr;
+  gap: 12px;
+}
+
+.support-strip div {
+  border-left: 3px solid var(--primary-color);
+  padding-left: 12px;
+}
+
+.support-strip span {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.support-strip strong {
+  color: #1f2937;
+  font-size: 15px;
 }
 
 .auth-panel {
-  padding: 26px 24px;
+  display: flex;
+  align-items: stretch;
+  padding: 30px;
+}
+
+.auth-card {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: #0f172a;
+}
+
+.auth-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.auth-kicker {
+  color: var(--primary-color);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .auth-panel h3 {
   margin: 0;
-  font-size: 24px;
-  color: #1f2937;
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1.2;
 }
 
 .auth-tip {
-  margin: 8px 0 0;
-  color: #6b7280;
+  margin: 7px 0 0;
+  color: #64748b;
   font-size: 13px;
 }
 
+.auth-head-icon {
+  flex: none;
+  color: var(--primary-color);
+  font-size: 36px;
+}
+
 .auth-form-item {
-  margin-top: 16px;
+  margin-top: 15px;
+}
+
+.auth-form-item label {
+  display: block;
+  margin-bottom: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .captcha-row {
@@ -844,27 +1020,32 @@ watch(showForgotPasswordModal, (v) => {
 }
 
 .captcha-img {
-  width: 120px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  flex: none;
+  width: 122px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
   cursor: pointer;
   object-fit: cover;
 }
 
 .login-btn {
-  margin-top: 18px;
+  margin-top: 22px;
   width: 100%;
-  height: 44px;
+  height: 46px;
+  font-weight: 900;
 }
 
-.register-action {
-  margin-top: 10px;
-  text-align: center;
+.auth-links {
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .agreement-row {
-  color: #4b5563;
+  margin-top: 14px;
+  color: #475569;
   font-size: 13px;
 }
 
@@ -970,18 +1151,34 @@ watch(showForgotPasswordModal, (v) => {
 }
 
 @media (max-width: 980px) {
+  .login-page-shell {
+    padding: 16px;
+  }
+
   .login-wrap {
     grid-template-columns: 1fr;
+    min-height: auto;
   }
 
   .brand-panel {
-    order: 2;
-    padding: 18px;
+    padding: 24px;
   }
 
   .auth-panel {
-    order: 1;
-    padding: 24px 18px;
+    padding: 24px;
+  }
+
+  .operations-board,
+  .support-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-card {
+    min-height: auto;
   }
 }
 </style>

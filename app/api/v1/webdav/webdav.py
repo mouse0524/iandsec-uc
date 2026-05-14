@@ -47,6 +47,7 @@ async def list_webdav_shares(
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页数量"),
     include_history: bool = Query(False, description="是否包含历史记录(已失效/已过期)"),
+    file_name: str | None = Query(None, description="文件名模糊搜索"),
 ):
     user_id = CTX_USER_ID.get()
     user = await User.filter(id=user_id).first()
@@ -57,6 +58,7 @@ async def list_webdav_shares(
         page=page,
         page_size=page_size,
         include_history=include_history,
+        file_name=file_name,
     )
     user_ids = {item.created_by for item in rows}
     user_map: dict[int, str] = {}
@@ -66,11 +68,16 @@ async def list_webdav_shares(
     data = []
     for item in rows:
         item_dict = await item.to_dict()
-        item_dict["creator_name"] = user_map.get(item.created_by, "")
         sign_data = await webdav_controller.build_share_signature(code=str(item_dict.get("code") or ""))
         query = urlencode({"code": item_dict.get("code"), "ts": sign_data["ts"], "sig": sign_data["sig"]})
-        item_dict["download_url"] = f"/api/v1/public/webdav/share/download?{query}"
-        data.append(item_dict)
+        data.append(
+            webdav_controller._share_to_dict(
+                item,
+                creator_name=user_map.get(item.created_by, ""),
+                download_url=f"/api/v1/public/webdav/share/download?{query}",
+                data=item_dict,
+            )
+        )
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
 
 

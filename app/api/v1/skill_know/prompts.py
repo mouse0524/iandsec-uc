@@ -26,3 +26,8 @@ async def update_prompt(key: str, payload: SkillKnowPromptUpdate):
 @router.post("/reset", summary="重置提示词")
 async def reset_prompt(key: str):
     return Success(data=await skill_know_prompt_service.reset(key))
+
+
+@router.post("/sync-defaults", summary="同步默认提示词")
+async def sync_default_prompts():
+    return Success(data=await skill_know_prompt_service.sync_defaults())

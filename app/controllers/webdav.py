@@ -18,6 +18,7 @@ from app.log import logger
 from app.models.admin import WebDavShareLink
 from app.controllers.system_setting import system_setting_controller
 from app.services.security import validate_external_service_url
+from app.settings import settings
 
 
 class WebDavController:
@@ -155,6 +156,38 @@ class WebDavController:
         safe_path = quote(path, safe="/()[]-_.~")
         return f"{base}{safe_path}"
 
+    @classmethod
+    def _build_list_url(cls, base_url: str, path: str) -> str:
+        norm_path = cls._normalize_path(path)
+        return cls._build_url(base_url, norm_path)
+
+    def _is_share_expired(self, share: WebDavShareLink) -> bool:
+        return self._now_like(share.expire_time) > share.expire_time
+
+    def _share_to_dict(
+        self,
+        share: WebDavShareLink,
+        *,
+        creator_name: str = "",
+        download_url: str = "",
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if data is None:
+            data = {}
+            for field in ["id", "code", "file_path", "file_name", "expire_time", "is_active", "created_by"]:
+                value = getattr(share, field, None)
+                if isinstance(value, datetime):
+                    value = value.strftime(settings.DATETIME_FORMAT)
+                data[field] = value
+        expired = self._is_share_expired(share)
+        active = bool(getattr(share, "is_active", False)) and not expired
+        data["is_active"] = active
+        data["is_expired"] = expired
+        data["status"] = "active" if active else ("expired" if expired else "inactive")
+        data["creator_name"] = creator_name
+        data["download_url"] = download_url
+        return data
+
     @staticmethod
     def _list_cache_key(path: str) -> str:
         return f"webdav:list:{quote(path, safe='')}"
@@ -275,7 +308,7 @@ class WebDavController:
             return cached
 
         body = """<?xml version=\"1.0\" encoding=\"utf-8\" ?><d:propfind xmlns:d=\"DAV:\"><d:allprop/></d:propfind>"""
-        url = self._build_url(conf["webdav_base_url"], norm_path)
+        url = self._build_list_url(conf["webdav_base_url"], norm_path)
         try:
             async with self._client(conf, timeout=30.0) as client:
                 res = await client.request(
@@ -420,12 +453,17 @@ class WebDavController:
         page: int,
         page_size: int,
         include_history: bool = False,
+        file_name: str | None = None,
     ) -> tuple[int, list[WebDavShareLink]]:
         q = WebDavShareLink.all()
         if created_by is not None:
             q = q.filter(created_by=created_by)
+        keyword = (file_name or "").strip()
+        if keyword:
+            q = q.filter(file_name__icontains=keyword)
         if not include_history:
-            q = q.filter(is_active=True)
+            now = datetime.now(timezone.utc)
+            q = q.filter(is_active=True, expire_time__gt=now)
         q = q.order_by("-id")
         total = await q.count()
         rows = await q.offset((page - 1) * page_size).limit(page_size)
