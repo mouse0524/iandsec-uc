@@ -2,14 +2,12 @@ import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import httpx
 from docx import Document
 
 from app.services.skill_know.document_parser import SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS, skill_know_document_parser
 from app.services.skill_know.markdown_chunker import skill_know_markdown_chunker
-from app.services.skill_know.markdown_optimizer import skill_know_markdown_optimizer
 
 
 class SkillKnowMarkdownTestCase(unittest.TestCase):
@@ -66,46 +64,6 @@ class SkillKnowMarkdownTestCase(unittest.TestCase):
         self.assertIn("## 幻灯片 1", markdown)
         self.assertIn("数据安全方案", markdown)
         self.assertIn("AI 知识库辅助排障", markdown)
-
-    def test_markdown_optimizer_skips_oversize_without_truncating(self):
-        markdown = "A" * 120
-        with (
-            patch("app.services.skill_know.config_service.skill_know_config_service.get", AsyncMock(side_effect=self._optimizer_config)),
-            patch("app.services.skill_know.config_service.skill_know_config_service.is_configured", AsyncMock(return_value=True)),
-        ):
-            content, optimized = self._run(skill_know_markdown_optimizer.optimize("large.md", markdown))
-
-        self.assertEqual(content, markdown)
-        self.assertFalse(optimized)
-
-    def test_markdown_optimizer_keeps_original_on_timeout(self):
-        markdown = "# 标题\n\n正文"
-        with (
-            patch("app.services.skill_know.config_service.skill_know_config_service.get", AsyncMock(side_effect=self._optimizer_timeout_config)),
-            patch("app.services.skill_know.config_service.skill_know_config_service.is_configured", AsyncMock(return_value=True)),
-            patch("app.services.skill_know.markdown_optimizer.SkillKnowMarkdownOptimizer._prompt", AsyncMock(return_value="整理")),
-            patch("app.services.skill_know.openai_client.skill_know_openai_client.chat", AsyncMock(side_effect=httpx.ReadTimeout("timeout"))),
-        ):
-            content, optimized = self._run(skill_know_markdown_optimizer.optimize("timeout.md", markdown))
-
-        self.assertEqual(content, markdown)
-        self.assertFalse(optimized)
-
-    def _optimizer_config(self, key, default=None):
-        values = {
-            "markdown_optimize_enabled": True,
-            "markdown_optimize_max_chars": 100,
-            "markdown_optimize_timeout": 5,
-        }
-        return values.get(key, default)
-
-    def _optimizer_timeout_config(self, key, default=None):
-        values = {
-            "markdown_optimize_enabled": True,
-            "markdown_optimize_max_chars": 1000,
-            "markdown_optimize_timeout": 5,
-        }
-        return values.get(key, default)
 
     def _run(self, awaitable):
         import asyncio

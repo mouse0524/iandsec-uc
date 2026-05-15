@@ -55,22 +55,7 @@ class SkillKnowDocumentStatus(StrEnum):
     FAILED = "failed"
 
 
-class SkillKnowPromptCategory(StrEnum):
-    SYSTEM = "system"
-    CHAT = "chat"
-    SKILL = "skill"
-    CLASSIFICATION = "classification"
-    SEARCH = "search"
-
-
 class SkillKnowMessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
-
-
-class SkillKnowLearningStatus(StrEnum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    INDEXED = "indexed"

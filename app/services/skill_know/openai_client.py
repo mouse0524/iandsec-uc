@@ -3,11 +3,11 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
-from fastapi import HTTPException
 
 from app.log import logger
-from app.services.security import validate_external_service_url
+from app.services.security import _is_private_hostname
 from app.services.skill_know.config_service import skill_know_config_service
+from app.settings import settings
 
 
 class SkillKnowOpenAIClient:
@@ -17,7 +17,7 @@ class SkillKnowOpenAIClient:
         return provider if provider in {"openai", "ollama"} else "openai"
 
     @staticmethod
-    def _validate_ollama_url(url: str | None, *, label: str) -> str:
+    def _validate_model_base_url(url: str | None, *, label: str, allow_private: bool = False) -> str:
         from urllib.parse import urlparse
 
         raw = str(url or "").strip().rstrip("/")
@@ -26,12 +26,20 @@ class SkillKnowOpenAIClient:
             raise RuntimeError(f"{label}地址必须是有效的 HTTP/HTTPS URL")
         if parsed.username or parsed.password:
             raise RuntimeError(f"{label}地址不能包含认证信息")
-        if parsed.scheme == "https":
-            try:
-                return validate_external_service_url(raw, label=label)
-            except HTTPException as exc:
-                raise RuntimeError(str(exc.detail)) from exc
+        if not allow_private and _is_private_hostname(parsed.hostname):
+            raise RuntimeError(f"{label}地址不能指向内网或本机")
+        allowed_hosts = {item.lower() for item in settings.EXTERNAL_URL_ALLOWED_HOSTS}
+        if not allow_private and allowed_hosts and parsed.hostname.lower() not in allowed_hosts:
+            raise RuntimeError(f"{label}地址不在允许的域名列表中")
         return raw
+
+    @staticmethod
+    def _validate_ollama_url(url: str | None, *, label: str) -> str:
+        return SkillKnowOpenAIClient._validate_model_base_url(url, label=label, allow_private=True)
+
+    @staticmethod
+    def _validate_openai_compatible_url(url: str | None, *, label: str) -> str:
+        return SkillKnowOpenAIClient._validate_model_base_url(url, label=label)
 
     async def _config(self, override: dict | None = None) -> dict:
         data = await skill_know_config_service.llm_config()
@@ -39,18 +47,12 @@ class SkillKnowOpenAIClient:
             data.update({k: v for k, v in override.items() if v is not None})
         legacy_base = str(data.get("llm_base_url") or "https://api.openai.com/v1").rstrip("/")
         data["llm_chat_provider"] = self._provider(data.get("llm_chat_provider"))
-        data["llm_embedding_provider"] = self._provider(data.get("llm_embedding_provider"))
         if data["llm_chat_provider"] == "ollama":
             data["llm_chat_base_url"] = self._validate_ollama_url(data.get("llm_chat_base_url") or "http://127.0.0.1:11434", label="Ollama对话地址")
         else:
-            data["llm_chat_base_url"] = validate_external_service_url(str(data.get("llm_chat_base_url") or legacy_base), label="LLM对话地址")
-        if data["llm_embedding_provider"] == "ollama":
-            data["llm_embedding_base_url"] = self._validate_ollama_url(data.get("llm_embedding_base_url") or "http://127.0.0.1:11434", label="Ollama向量地址")
-        else:
-            data["llm_embedding_base_url"] = validate_external_service_url(str(data.get("llm_embedding_base_url") or legacy_base), label="LLM向量地址")
+            data["llm_chat_base_url"] = self._validate_openai_compatible_url(str(data.get("llm_chat_base_url") or legacy_base), label="LLM对话地址")
         legacy_key = data.get("llm_api_key")
         data["llm_chat_api_key"] = data.get("llm_chat_api_key") or legacy_key
-        data["llm_embedding_api_key"] = data.get("llm_embedding_api_key") or legacy_key
         return data
 
     @staticmethod
@@ -72,30 +74,6 @@ class SkillKnowOpenAIClient:
     def _ollama_to_openai_response(data: dict[str, Any]) -> dict[str, Any]:
         content = (data.get("message") or {}).get("content") or data.get("response") or ""
         return {"choices": [{"message": {"content": content}}], "raw": data}
-
-    @staticmethod
-    def _normalize_embeddings_payload(payload: Any) -> list[list[float]]:
-        raw = payload
-        if isinstance(raw, dict):
-            raw = raw.get("embeddings") or raw.get("data") or raw.get("embedding") or []
-        if not isinstance(raw, list):
-            return []
-        if not raw:
-            return []
-        if all(isinstance(item, (int, float)) for item in raw):
-            return [[float(item) for item in raw]]
-        vectors: list[list[float]] = []
-        for item in raw:
-            if isinstance(item, list):
-                vectors.append([float(value) for value in item if isinstance(value, (int, float))])
-                continue
-            if isinstance(item, dict):
-                embedding = item.get("embedding")
-                if isinstance(embedding, list):
-                    vectors.append([float(value) for value in embedding if isinstance(value, (int, float))])
-                    continue
-            vectors.append([])
-        return vectors
 
     async def chat(
         self,
@@ -218,9 +196,6 @@ class SkillKnowOpenAIClient:
                     except json.JSONDecodeError:
                         continue
 
-    async def embeddings(self, texts: list[str]) -> list[list[float]]:
-        return await self.embeddings_with_override(texts)
-
     async def test_chat_connection(self, override: dict) -> dict:
         try:
             result = await self.chat(
@@ -231,53 +206,8 @@ class SkillKnowOpenAIClient:
             return {"success": True, "message": content or "连接成功"}
         except Exception as exc:
             logger.warning("[skill_know.openai.test_chat] failed error={}", repr(exc))
-            return {"success": False, "message": "连接失败，请检查模型配置和网络"}
-
-    async def test_embedding_connection(self, override: dict) -> dict:
-        try:
-            vectors = await self.embeddings_with_override(["hello world"], override=override)
-            dimension = len(vectors[0]) if vectors and vectors[0] else 0
-            return {"success": True, "message": f"连接成功，向量维度 {dimension}", "dimension": dimension}
-        except Exception as exc:
-            logger.warning("[skill_know.openai.test_embedding] failed error={}", repr(exc))
-            return {"success": False, "message": "连接失败，请检查模型配置和网络"}
-
-    async def test_connection(self, override: dict) -> dict:
-        chat_result = await self.test_chat_connection(override)
-        embedding_result = await self.test_embedding_connection(override)
-        return {
-            "success": bool(chat_result.get("success") and embedding_result.get("success")),
-            "chat": chat_result,
-            "embedding": embedding_result,
-        }
-
-    async def embeddings_with_override(self, texts: list[str], *, override: dict | None = None) -> list[list[float]]:
-        if not texts:
-            return []
-        config = await self._config(override)
-        api_key = config.get("llm_embedding_api_key")
-        if config["llm_embedding_provider"] != "ollama" and not api_key:
-            raise RuntimeError("未配置 Embedding API Key")
-        if config["llm_embedding_provider"] == "ollama":
-            model = config.get("llm_embedding_model") or "nomic-embed-text"
-            async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
-                payload_input: str | list[str]
-                payload_input = texts[0] if len(texts) == 1 else texts
-                resp = await client.post(
-                    f"{config['llm_embedding_base_url']}/api/embed",
-                    headers=self._headers(),
-                    json={"model": model, "input": payload_input},
-                )
-                resp.raise_for_status()
-                return self._normalize_embeddings_payload(resp.json())
-        async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
-            resp = await client.post(
-                f"{config['llm_embedding_base_url']}/embeddings",
-                headers=self._headers(api_key),
-                json={"model": config.get("llm_embedding_model") or "text-embedding-3-small", "input": texts},
-            )
-            resp.raise_for_status()
-            return self._normalize_embeddings_payload(resp.json())
+            detail = getattr(exc, "detail", None) or str(exc) or "连接失败，请检查模型配置和网络"
+            return {"success": False, "message": detail}
 
 
 skill_know_openai_client = SkillKnowOpenAIClient()

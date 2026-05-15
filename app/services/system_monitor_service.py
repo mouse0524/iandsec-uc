@@ -6,14 +6,12 @@ import shutil
 import time
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 from tortoise import Tortoise
 
 from app.core.redis_client import execute_redis
-from app.services.skill_know.chroma_store import skill_know_chroma_store
 from app.settings import settings
 
 
@@ -66,7 +64,6 @@ class SystemMonitorService:
                 "system": await self.system_resources(),
                 "mysql": await self.mysql_status(),
                 "redis": await self.redis_status(),
-                "chroma": await self.chroma_status(),
             }
 
         return await self._cached("monitor:overview:v1", 5, load)
@@ -219,21 +216,6 @@ class SystemMonitorService:
             "db": settings.REDIS_DB,
             "patterns": list(self.REDIS_SAFE_CLEAR_PATTERNS),
         }
-
-    async def chroma_status(self) -> dict[str, Any]:
-        async def load():
-            return await self._chroma_status_uncached()
-
-        return await self._cached("monitor:chroma:v1", 10, load)
-
-    async def _chroma_status_uncached(self) -> dict[str, Any]:
-        data = await skill_know_chroma_store.diagnose()
-        persist_dir = Path(str(data.get("persist_dir") or ""))
-        if persist_dir.exists():
-            data["persist_size"] = sum(path.stat().st_size for path in persist_dir.rglob("*") if path.is_file())
-        else:
-            data["persist_size"] = 0
-        return data
 
 
 system_monitor_service = SystemMonitorService()

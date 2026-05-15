@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from app.models.admin import SkillKnowDocument, SkillKnowFolder, SkillKnowPrompt
+from app.models.admin import SkillKnowDocument, SkillKnowFolder
 
 
 def new_uuid() -> str:
@@ -47,5 +47,3 @@ async def document_to_dict(document: SkillKnowDocument, *, include_content: bool
     return data
 
 
-async def prompt_to_dict(prompt: SkillKnowPrompt) -> dict[str, Any]:
-    return await prompt.to_dict()

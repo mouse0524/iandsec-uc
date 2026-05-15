@@ -25,15 +25,13 @@ from app.models.admin import (
     SkillKnowConversation,
     SkillKnowDocument,
     SkillKnowDocumentChunk,
-    SkillKnowLearningCandidate,
     SkillKnowMessage,
-    SkillKnowVectorIndex,
     TerminalAuthReport,
     Ticket,
     User,
     WebDavShareLink,
 )
-from app.models.enums import PartnerRegisterStatus, SkillKnowDocumentStatus, SkillKnowLearningStatus, TicketStatus
+from app.models.enums import PartnerRegisterStatus, SkillKnowDocumentStatus, TicketStatus
 from app.schemas.captcha import CaptchaOut
 from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, SendVerifyCodeIn
 from app.schemas.base import Fail, Success
@@ -267,7 +265,6 @@ async def get_workbench_stats():
     document_today = await document_query.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
     document_health_rate = round(document_completed * 100 / document_total, 1) if document_total else 100
     chunk_total = await SkillKnowDocumentChunk.all().count() if is_global else 0
-    vector_total = await SkillKnowVectorIndex.all().count() if is_global else 0
     conversation_today = (
         await SkillKnowConversation.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
         if is_global
@@ -276,7 +273,6 @@ async def get_workbench_stats():
         ).count()
     )
     message_today = await SkillKnowMessage.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count() if is_global else 0
-    learning_pending = await SkillKnowLearningCandidate.filter(status=SkillKnowLearningStatus.PENDING).count() if is_global else 0
 
     share_active = (
         await WebDavShareLink.filter(is_active=True, expire_time__gte=now).count()
@@ -361,10 +357,8 @@ async def get_workbench_stats():
         "document_today": document_today,
         "document_health_rate": document_health_rate,
         "chunk_total": chunk_total,
-        "vector_total": vector_total,
         "conversation_today": conversation_today,
         "message_today": message_today,
-        "learning_pending": learning_pending,
         "share_active": share_active,
         "share_expired": share_expired,
         "terminal_company_count": terminal_company_count,

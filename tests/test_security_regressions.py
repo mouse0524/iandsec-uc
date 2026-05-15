@@ -7,6 +7,7 @@ from app.core.init_app import _default_basic_api_filter, _default_basic_api_path
 from app.controllers.ticket import TicketController
 from app.services.security import validate_external_service_url
 from app.services.skill_know.document_service import skill_know_document_service
+from app.services.skill_know.openai_client import SkillKnowOpenAIClient
 
 
 class SecurityRegressionTestCase(unittest.TestCase):
@@ -28,6 +29,16 @@ class SecurityRegressionTestCase(unittest.TestCase):
 
     def test_external_service_url_accepts_https_public_host(self):
         self.assertEqual(validate_external_service_url("https://api.openai.com/v1", label="LLM"), "https://api.openai.com/v1")
+
+    def test_openai_compatible_model_url_rejects_private_hosts(self):
+        with self.assertRaises(RuntimeError):
+            SkillKnowOpenAIClient._validate_openai_compatible_url("http://127.0.0.1:11434/v1", label="LLM对话地址")
+
+    def test_ollama_model_url_allows_private_hosts(self):
+        self.assertEqual(
+            SkillKnowOpenAIClient._validate_ollama_url("http://127.0.0.1:11434", label="Ollama对话地址"),
+            "http://127.0.0.1:11434",
+        )
 
     def test_verify_captcha_without_consume_keeps_value_for_submit(self):
         captcha_id = "test-captcha"

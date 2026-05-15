@@ -12,7 +12,6 @@ const monitor = ref({})
 const system = computed(() => monitor.value.system || {})
 const mysql = computed(() => monitor.value.mysql || {})
 const redis = computed(() => monitor.value.redis || {})
-const chroma = computed(() => monitor.value.chroma || {})
 
 onMounted(loadOverview)
 
@@ -82,7 +81,7 @@ async function clearRedis() {
           <div>
             <div class="eyebrow">Operations</div>
             <h1>系统监控</h1>
-            <p>集中查看系统资源、MySQL、Redis 缓存与 Chroma 向量库状态。</p>
+            <p>集中查看系统资源、MySQL 与 Redis 缓存状态。</p>
           </div>
           <NSpace>
             <NButton secondary :loading="loading" @click="loadOverview">刷新</NButton>
@@ -164,23 +163,6 @@ async function clearRedis() {
               <div><span>连接客户端</span><b>{{ redis.connected_clients ?? '-' }}</b></div>
               <div><span>命中率</span><b>{{ redis.hit_rate ?? 0 }}%</b></div>
               <div v-if="redis.error"><span>错误</span><b>{{ redis.error }}</b></div>
-            </div>
-          </div>
-
-          <div class="monitor-panel">
-            <div class="panel-head">
-              <div>
-                <h3>Chroma 向量库</h3>
-                <p>{{ chroma.embedding_provider || '-' }} / {{ chroma.embedding_model || '-' }}</p>
-              </div>
-              <NTag :type="chroma.chromadb_available ? 'success' : 'warning'" round>{{ chroma.chromadb_available ? 'available' : 'missing' }}</NTag>
-            </div>
-            <div class="info-list">
-              <div><span>文档向量数</span><b>{{ chroma.collections?.skill_know_documents?.count ?? '-' }}</b></div>
-              <div><span>存储目录</span><b>{{ chroma.persist_dir || '-' }}</b></div>
-              <div><span>存储大小</span><b>{{ formatBytes(chroma.persist_size) }}</b></div>
-              <div><span>Embedding端点</span><b>{{ chroma.embedding_base_url || '-' }}</b></div>
-              <div v-if="chroma.collections?.skill_know_documents?.error"><span>错误</span><b>{{ chroma.collections.skill_know_documents.error }}</b></div>
             </div>
           </div>
         </section>

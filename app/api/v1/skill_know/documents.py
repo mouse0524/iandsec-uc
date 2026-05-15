@@ -60,6 +60,7 @@ async def list_documents(
     folder_id: int | None = Query(None),
     category: str | None = Query(None),
     status: SkillKnowDocumentStatus | None = Query(None),
+    keyword: str | None = Query(None),
 ):
     total, rows = await skill_know_document_service.list(
         page=page,
@@ -67,6 +68,7 @@ async def list_documents(
         folder_id=folder_id,
         category=category,
         status=status,
+        keyword=keyword,
     )
     return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
 
@@ -103,15 +105,14 @@ async def move_document(payload: SkillKnowMoveIn):
     return Success(data=await skill_know_document_service.move(payload.target_id, payload.folder_id))
 
 
-@router.get("/search", summary="搜索文档")
-async def search_documents(q: str = Query(...), limit: int = Query(20, ge=1, le=100)):
-    rows = await skill_know_document_service.search(q, limit=limit)
-    return Success(data={"items": rows, "total": len(rows)})
-
-
 @router.post("/reindex", summary="重建文档索引")
 async def reindex_document(document_id: int = Query(...)):
     return Success(data=await skill_know_document_service.reindex(document_id))
+
+
+@router.post("/reindex-all", summary="重建全部文档阅读索引")
+async def reindex_all_documents():
+    return Success(data=await skill_know_document_service.reindex_all())
 
 
 @router.post("/retry", summary="重试文档处理")

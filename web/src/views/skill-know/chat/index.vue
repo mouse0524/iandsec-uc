@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import AppPage from '@/components/page/AppPage.vue'
@@ -20,6 +20,7 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const apiBase = (import.meta.env.VITE_BASE_API || '/api/v1').replace(/\/$/, '')
 const sidebarCollapsed = ref(false)
 const stickToBottom = ref(true)
+const conversationKeyword = ref('')
 const quickPrompts = [
   '如何排查终端无法连接平台的问题？',
   '数据安全网关常见部署注意事项有哪些？',
@@ -164,13 +165,6 @@ function compactAssistantContent(content, options = {}) {
   return options.trimEnd === false ? result.replace(/^\s+/, '') : result.trim()
 }
 
-async function rateMessage(msg, rating, isHelpful) {
-  if (!msg.id || String(msg.id).startsWith('local-')) return
-  await api.skillKnowFeedbackMessage({ message_id: msg.id, rating, is_helpful: isHelpful })
-  msg.rated = true
-  $message.success('评分已提交')
-}
-
 async function copyMessage(msg) {
   await navigator.clipboard.writeText(sanitizeAssistantContent(msg.content || ''))
   $message.success('已复制')
@@ -204,6 +198,14 @@ async function retryFromMessage(msg) {
   await sendMessage(userMessage.content)
 }
 
+async function feedbackMessage(msg, rating) {
+  if (!Number.isFinite(Number(msg.id))) return $message.warning('当前消息还未保存，暂不能反馈')
+  const reason = rating === 'down' ? 'answer_not_useful' : 'answer_useful'
+  const res = await api.skillKnowMessageFeedback({ message_id: Number(msg.id), rating, reason })
+  msg.extra_metadata = { ...(msg.extra_metadata || {}), feedback: res.data?.feedback }
+  messages.value = messages.value.map((item) => (item.id === msg.id ? { ...msg } : item))
+  $message.success(rating === 'up' ? '已标记有用' : '已标记无用')
+}
 async function deleteConversation(item) {
   if (!item?.id) return
   window.$dialog.warning({
@@ -237,6 +239,65 @@ function handleMessageScroll() {
 
 function conversationTitle(item) {
   return item?.title || `会话 ${item?.id || ''}`
+}
+
+const filteredConversations = computed(() => {
+  const keyword = conversationKeyword.value.trim().toLowerCase()
+  if (!keyword) return conversations.value
+  return conversations.value.filter((item) => {
+    const haystack = [conversationTitle(item), item.last_message_preview, item.updated_at, item.created_at]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+
+const groupedConversations = computed(() => {
+  const groups = []
+  const ensureGroup = (key, label) => {
+    let group = groups.find((item) => item.key === key)
+    if (!group) {
+      group = { key, label, items: [] }
+      groups.push(group)
+    }
+    return group
+  }
+  filteredConversations.value.forEach((item) => {
+    const key = conversationDayKey(item)
+    ensureGroup(key, conversationDayLabel(key)).items.push(item)
+  })
+  return groups
+})
+
+function conversationDayKey(item) {
+  const value = String(item?.updated_at || item?.created_at || '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : 'unknown'
+}
+
+function conversationDayLabel(key) {
+  if (key === 'unknown') return '未标记时间'
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  const fmt = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  if (key === fmt(today)) return '今天'
+  if (key === fmt(yesterday)) return '昨天'
+  return key
+}
+
+function conversationTime(item) {
+  const value = String(item?.updated_at || item?.created_at || '')
+  return value.length >= 16 ? value.slice(11, 16) : ''
+}
+
+function lastRoleLabel(item) {
+  return item?.last_message_role === 'user' ? '我' : 'AI'
 }
 
 function renderMessage(content) {
@@ -348,22 +409,40 @@ function handleInputKeydown(event) {
           </button>
           <NButton class="new-chat-button" type="primary" secondary @click="newConversation">新建对话</NButton>
         </div>
+        <div class="conversation-search">
+          <NInput
+            v-model:value="conversationKeyword"
+            size="small"
+            clearable
+            placeholder="搜索历史"
+          />
+        </div>
         <div class="conversation-list">
-          <div
-            v-for="item in conversations"
-            :key="item.id"
-            class="conversation-item"
-            :class="{ active: item.id === conversationId }"
-            @click="openConversation(item)"
-          >
-            <div class="conversation-title">{{ conversationTitle(item) }}</div>
-            <div v-if="item.last_message_preview" class="conversation-preview">{{ item.last_message_preview }}</div>
-            <div class="conversation-meta">
-              <span>{{ item.updated_at || item.created_at }}</span>
-              <NButton size="tiny" quaternary type="error" @click.stop="deleteConversation(item)">删除</NButton>
+          <template v-for="group in groupedConversations" :key="group.key">
+            <div class="conversation-group-label">{{ group.label }}</div>
+            <div
+              v-for="item in group.items"
+              :key="item.id"
+              class="conversation-item"
+              :class="{ active: item.id === conversationId }"
+              @click="openConversation(item)"
+            >
+              <div class="conversation-row-top">
+                <div class="conversation-title">{{ conversationTitle(item) }}</div>
+                <span class="conversation-time">{{ conversationTime(item) }}</span>
+              </div>
+              <div v-if="item.last_message_preview" class="conversation-preview">
+                <span class="conversation-role">{{ lastRoleLabel(item) }}</span>
+                <span>{{ item.last_message_preview }}</span>
+              </div>
+              <div class="conversation-meta">
+                <span>会话 #{{ item.id }}</span>
+                <button class="conversation-delete" type="button" title="删除会话" @click.stop="deleteConversation(item)">×</button>
+              </div>
             </div>
-          </div>
+          </template>
           <NEmpty v-if="!conversations.length" description="暂无历史会话" />
+          <NEmpty v-else-if="!filteredConversations.length" description="没有匹配的会话" />
         </div>
       </aside>
 
@@ -417,14 +496,11 @@ function handleInputKeydown(event) {
               </div>
               <div v-if="msg.role === 'assistant' && !msg.pending && !msg.streaming && !msg.revealing" class="message-actions">
                 <NButton size="small" secondary round @click="copyMessage(msg)">复制</NButton>
+                <NButton size="small" secondary round type="success" @click="feedbackMessage(msg, 'up')">有用</NButton>
+                <NButton size="small" secondary round type="warning" @click="feedbackMessage(msg, 'down')">无用</NButton>
                 <NButton size="small" secondary round type="primary" @click="continueAsk(msg)">继续追问</NButton>
                 <NButton size="small" secondary round @click="retryFromMessage(msg)">重新回答</NButton>
               </div>
-              <NSpace v-if="msg.role === 'assistant' && !msg.pending && !msg.streaming && !msg.revealing && !msg.rated" class="rating-row">
-                <NButton size="tiny" secondary type="success" @click="rateMessage(msg, 5, true)">有帮助</NButton>
-                <NButton size="tiny" secondary type="error" @click="rateMessage(msg, 1, false)">无帮助</NButton>
-              </NSpace>
-              <NTag v-if="msg.rated" size="small" type="success" class="rated-tag">已评分</NTag>
             </article>
           </div>
         </div>
@@ -452,21 +528,32 @@ function handleInputKeydown(event) {
 <style scoped>
 .chat-page-shell { flex: 1; min-height: 0; height: 100%; display: flex; overflow: hidden; }
 .chat-app-page { box-sizing: border-box; min-height: 0; overflow: hidden; }
-.chatgpt-page { --chat-bg: #f7f7f4; --sidebar-bg: #f1f0ea; --line: rgba(17,24,39,.10); --muted: #6b7280; --text: #111827; flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; overflow: hidden; border-radius: 20px; background: var(--chat-bg); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(15,23,42,.08); transition: grid-template-columns .2s ease; }
+.chatgpt-page { --chat-bg: #f7f7f4; --sidebar-bg: #f1f0ea; --line: rgba(17,24,39,.10); --muted: #6b7280; --text: #111827; flex: 1; min-height: 0; display: grid; grid-template-columns: 304px minmax(0, 1fr); height: 100%; overflow: hidden; border-radius: 20px; background: var(--chat-bg); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(15,23,42,.08); transition: grid-template-columns .2s ease; }
 .chatgpt-page.collapsed { grid-template-columns: 0 minmax(0, 1fr); }
-.conversation-sidebar { min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sidebar-bg); border-right: 1px solid var(--line); }
-.sidebar-top { display: grid; grid-template-columns: 64px 1fr; gap: 8px; padding: 12px; }
-.sidebar-icon-button, .sidebar-toggle-floating { border: 1px solid rgba(17,24,39,.12); background: rgba(255,255,255,.72); color: #374151; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 700; }
+.conversation-sidebar { min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: #f3f2ec; border-right: 1px solid var(--line); }
+.sidebar-top { display: grid; grid-template-columns: 64px 1fr; gap: 8px; padding: 12px 12px 8px; }
+.sidebar-icon-button, .sidebar-toggle-floating { border: 1px solid rgba(17,24,39,.12); background: rgba(255,255,255,.72); color: #374151; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 700; }
 .sidebar-icon-button, .new-chat-button, .sidebar-toggle-floating { height: 34px; }
 .sidebar-toggle-floating { position: absolute; top: 14px; left: 18px; z-index: 3; padding: 0 12px; }
-.new-chat-button { border-radius: 12px; font-weight: 800; }
-.conversation-list { min-height: 0; padding: 4px 10px 14px; overflow: auto; }
-.conversation-item { padding: 11px 12px; border-radius: 14px; cursor: pointer; border: 1px solid transparent; margin-bottom: 6px; color: #202123; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
-.conversation-item:hover { background: rgba(255,255,255,.72); transform: translateY(-1px); }
-.conversation-item.active { background: #fff; border-color: rgba(37,99,235,.20); box-shadow: 0 8px 24px rgba(15,23,42,.06); }
-.conversation-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-preview { color: var(--muted); font-size: 12px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #8a8f98; font-size: 11px; margin-top: 6px; }
+.new-chat-button { border-radius: 10px; font-weight: 800; }
+.conversation-search { padding: 0 12px 10px; }
+.conversation-search :deep(.n-input) { --n-border: 1px solid rgba(17,24,39,.10) !important; --n-border-hover: 1px solid rgba(37,99,235,.24) !important; --n-border-focus: 1px solid rgba(37,99,235,.38) !important; --n-border-radius: 10px !important; --n-color: rgba(255,255,255,.72) !important; }
+.conversation-list { min-height: 0; padding: 0 10px 14px; overflow: auto; }
+.conversation-group-label { position: sticky; top: 0; z-index: 1; padding: 10px 4px 6px; color: #8a8f98; font-size: 11px; font-weight: 900; letter-spacing: .04em; background: linear-gradient(180deg, #f3f2ec 70%, rgba(243,242,236,0)); }
+.conversation-item { position: relative; padding: 10px 10px 9px; border-radius: 12px; cursor: pointer; border: 1px solid transparent; margin-bottom: 6px; color: #202123; background: rgba(255,255,255,.46); transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+.conversation-item::before { content: ""; position: absolute; inset: 9px auto 9px 0; width: 3px; border-radius: 999px; background: transparent; }
+.conversation-item:hover { background: rgba(255,255,255,.82); transform: translateY(-1px); }
+.conversation-item.active { background: #fff; border-color: rgba(37,99,235,.22); box-shadow: 0 10px 26px rgba(15,23,42,.07); }
+.conversation-item.active::before { background: #2563eb; }
+.conversation-row-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.conversation-title { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
+.conversation-time { color: #9ca3af; font-size: 11px; font-variant-numeric: tabular-nums; }
+.conversation-preview { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-top: 6px; overflow: hidden; white-space: nowrap; }
+.conversation-preview span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.conversation-role { flex: none; min-width: 20px; height: 18px; display: inline-grid; place-items: center; border-radius: 6px; color: #475569; background: #eef2f7; font-size: 10px; font-weight: 900; }
+.conversation-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #a0a5ad; font-size: 11px; margin-top: 7px; }
+.conversation-delete { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; cursor: pointer; color: #9ca3af; background: transparent; font-size: 17px; line-height: 1; }
+.conversation-delete:hover { color: #dc2626; background: #fee2e2; }
 .chat-main { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: #fff; }
 .message-scroll { position: relative; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px max(28px, calc((100% - 860px) / 2)) 32px; overscroll-behavior: contain; background: linear-gradient(180deg, #fff 0%, #fbfbf8 100%); }
 .message-scroll.empty { display: grid; place-items: center; }

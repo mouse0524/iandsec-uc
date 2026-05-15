@@ -76,7 +76,6 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
             "api_key",
             "llm_api_key",
             "llm_chat_api_key",
-            "llm_embedding_api_key",
             "ai_kb_openai_api_key",
         }
 

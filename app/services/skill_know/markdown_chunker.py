@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.services.skill_know.document_text import normalize_document_text
+
 
 @dataclass
 class MarkdownChunk:
@@ -14,7 +16,7 @@ class MarkdownChunk:
 
 class SkillKnowMarkdownChunker:
     def chunk(self, markdown: str, *, target_chars: int = 1400, max_chars: int = 2200, overlap_chars: int = 150) -> list[MarkdownChunk]:
-        text = str(markdown or "").strip()
+        text = normalize_document_text(markdown)
         if not text:
             return []
         sections = self._sections(text)

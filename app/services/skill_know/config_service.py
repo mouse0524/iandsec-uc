@@ -11,51 +11,28 @@ class SkillKnowConfigService:
     DEFAULTS = {
         "llm_base_url": "https://api.openai.com/v1",
         "llm_chat_provider": "openai",
-        "llm_embedding_provider": "openai",
         "llm_chat_base_url": "https://api.openai.com/v1",
-        "llm_embedding_base_url": "https://api.openai.com/v1",
         "llm_chat_model": "gpt-4o-mini",
-        "llm_embedding_model": "text-embedding-3-small",
         "llm_temperature": 0.2,
         "llm_timeout": 120,
-        "retrieval_top_k": 8,
-        "retrieval_score_threshold": 0.25,
         "retrieval_max_context_chars": 128000,
-        "chunk_size": 1400,
-        "chunk_overlap": 150,
-        "markdown_optimize_enabled": True,
-        "markdown_optimize_prompt": "",
-        "markdown_optimize_max_chars": 30000,
-        "markdown_optimize_timeout": 45,
     }
-    SENSITIVE_KEYS = {"llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"}
+    SENSITIVE_KEYS = {"llm_api_key", "llm_chat_api_key"}
     LLM_KEYS = [
         "llm_api_key",
         "llm_chat_api_key",
-        "llm_embedding_api_key",
         "llm_base_url",
         "llm_chat_provider",
-        "llm_embedding_provider",
         "llm_chat_base_url",
-        "llm_embedding_base_url",
         "llm_chat_model",
-        "llm_embedding_model",
         "llm_temperature",
         "llm_timeout",
-        "retrieval_top_k",
-        "retrieval_score_threshold",
         "retrieval_max_context_chars",
-        "chunk_size",
-        "chunk_overlap",
-        "markdown_optimize_enabled",
-        "markdown_optimize_prompt",
-        "markdown_optimize_max_chars",
-        "markdown_optimize_timeout",
     ]
 
     @staticmethod
     def _mask_value(key: str, value):
-        if key not in {"llm_api_key", "llm_chat_api_key", "llm_embedding_api_key", "llm_api_key_test"}:
+        if key not in {"llm_api_key", "llm_chat_api_key", "llm_api_key_test"}:
             return value
         text = str(value or "")
         if len(text) <= 8:
@@ -147,7 +124,7 @@ class SkillKnowConfigService:
             except Exception as exc:
                 logger.warning("[skill_know.config.cache] write_failed key={} error={}", self.CACHE_KEY_ALL, str(exc))
         if masked:
-            for item_key in ("llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"):
+            for item_key in ("llm_api_key", "llm_chat_api_key"):
                 if data.get(item_key):
                     data[item_key] = self._mask_value(item_key, data[item_key])
         return data
@@ -156,10 +133,7 @@ class SkillKnowConfigService:
         config = await self.llm_config()
         legacy_key = config.get("llm_api_key")
         chat_provider = str(config.get("llm_chat_provider") or "openai").lower()
-        embedding_provider = str(config.get("llm_embedding_provider") or "openai").lower()
-        chat_ready = chat_provider == "ollama" or bool(config.get("llm_chat_api_key") or legacy_key)
-        embedding_ready = embedding_provider == "ollama" or bool(config.get("llm_embedding_api_key") or legacy_key)
-        return chat_ready and embedding_ready
+        return chat_provider == "ollama" or bool(config.get("llm_chat_api_key") or legacy_key)
 
     async def clear_cache(self) -> None:
         try:

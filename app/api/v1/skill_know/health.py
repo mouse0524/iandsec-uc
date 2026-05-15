@@ -15,8 +15,3 @@ async def health_check():
 @router.get("/detail", summary="Skill-Know详细健康检查")
 async def health_detail():
     return Success(data=await skill_know_index_health_service.detail())
-
-
-@router.post("/index-diagnose", summary="Skill-Know索引诊断")
-async def index_diagnose(test_embedding: bool = False):
-    return Success(data=await skill_know_index_health_service.diagnose(test_embedding=test_embedding))

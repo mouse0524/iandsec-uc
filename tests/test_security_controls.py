@@ -1,10 +1,7 @@
 import unittest
-from unittest.mock import patch
-
-from fastapi import HTTPException
 
 from app.core.middlewares import HttpAuditLogMiddleware
-from app.services.skill_know.search_service import skill_know_search_service
+from app.services.skill_know.openai_client import SkillKnowOpenAIClient
 
 
 class SecurityControlsTestCase(unittest.TestCase):
@@ -24,16 +21,25 @@ class SecurityControlsTestCase(unittest.TestCase):
         self.assertEqual(masked["nested"]["safe"], "value")
         self.assertEqual(masked["items"][0]["token"], "******")
 
-    def test_skill_know_sql_search_disabled_by_default(self):
-        async def run():
-            with patch("app.services.skill_know.search_service.settings.SKILL_KNOW_SQL_SEARCH_ENABLED", False):
-                await skill_know_search_service.sql("SELECT id FROM sk_skill LIMIT 1")
+    def test_openai_compatible_url_allows_public_http(self):
+        self.assertEqual(
+            SkillKnowOpenAIClient._validate_openai_compatible_url("http://api.openai.com/v1", label="LLM"),
+            "http://api.openai.com/v1",
+        )
 
-        import asyncio
+    def test_openai_compatible_url_rejects_private_http(self):
+        with self.assertRaises(RuntimeError):
+            SkillKnowOpenAIClient._validate_openai_compatible_url("http://192.168.2.127:11434/v1", label="LLM")
 
-        with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(run())
-        self.assertEqual(ctx.exception.status_code, 403)
+    def test_ollama_url_allows_http(self):
+        self.assertEqual(
+            SkillKnowOpenAIClient._validate_ollama_url("http://192.168.2.127:11434", label="Ollama"),
+            "http://192.168.2.127:11434",
+        )
+
+    def test_model_base_url_rejects_embedded_credentials(self):
+        with self.assertRaisesRegex(RuntimeError, "认证信息"):
+            SkillKnowOpenAIClient._validate_openai_compatible_url("http://user:pass@example.com/v1", label="LLM")
 
 
 if __name__ == "__main__":

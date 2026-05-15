@@ -46,7 +46,6 @@ def _monitor_api_paths() -> list[str]:
         "/api/v1/monitor/mysql",
         "/api/v1/monitor/redis",
         "/api/v1/monitor/redis/clear",
-        "/api/v1/monitor/chroma",
     ]
 
 
@@ -508,23 +507,16 @@ async def init_menus():
             "component": "/skill-know/documents",
         },
         {
-            "name": "提示词管理",
-            "path": "prompts",
-            "order": 3,
-            "icon": "material-symbols:format-quote-outline-rounded",
-            "component": "/skill-know/prompts",
-        },
-        {
             "name": "LLM设置",
             "path": "llm-settings",
-            "order": 4,
+            "order": 3,
             "icon": "material-symbols:tune-rounded",
             "component": "/skill-know/llm-settings",
         },
         {
-            "name": "对话管理（评分）",
+            "name": "对话历史",
             "path": "conversations",
-            "order": 5,
+            "order": 4,
             "icon": "material-symbols:rate-review-outline-rounded",
             "component": "/skill-know/conversations",
         },
@@ -536,6 +528,7 @@ async def init_menus():
         "/skill-know/quick-setup",
         "/skill-know/upload-tasks",
         "/skill-know/packs",
+        "/skill-know/prompts",
     ]
     await Menu.filter(parent_id=skill_know_parent.id, component__in=legacy_skill_know_components).delete()
     for child in skill_know_children:
@@ -657,7 +650,6 @@ async def ensure_security_columns():
             ("ALTER TABLE `auditlog` ADD COLUMN `is_archived` BOOL NOT NULL DEFAULT 0", "auditlog.is_archived"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
-            ("ALTER TABLE `sk_learning_candidate` ADD COLUMN `created_by` BIGINT NULL", "sk_learning_candidate.created_by"),
         ]:
             try:
                 await conn.execute_query(sql)

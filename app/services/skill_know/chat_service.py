@@ -1,45 +1,15 @@
 from __future__ import annotations
 
 import json
-import time
-from collections.abc import AsyncGenerator
-from datetime import datetime
 
-import httpx
 from fastapi import HTTPException
 from tortoise.functions import Max
 
 from app.core.ctx import CTX_USER_ID
-from app.log import logger
-from app.models.admin import SkillKnowConversation, SkillKnowLearningCandidate, SkillKnowMessage, SkillKnowMessageFeedback, SkillKnowPrompt, User
-from app.models.enums import SkillKnowLearningStatus, SkillKnowMessageRole
-from app.services.skill_know.config_service import skill_know_config_service
-from app.services.skill_know.openai_client import skill_know_openai_client
-from app.services.skill_know.prompt_service import skill_know_prompt_service
-from app.services.skill_know.retriever import skill_know_retriever
-from app.services.skill_know.utils import new_uuid, preview_text
-
-
-def event(event_type: str, payload: dict | None = None) -> dict:
-    return {"type": event_type, "payload": payload or {}, "ts": int(time.time() * 1000)}
-
-
-def _status_hint(status_code: int | str) -> str:
-    try:
-        code = int(status_code)
-    except Exception:
-        return "请检查网络与模型服务状态。"
-    if code == 401:
-        return "认证失败：请检查 API Key 是否正确且仍有效。"
-    if code == 403:
-        return "权限不足：请检查 Key 权限、模型访问范围或账号策略。"
-    if code == 404:
-        return "资源不存在：请检查 Base URL 与模型名是否正确。"
-    if code == 429:
-        return "请求过多：请稍后重试，或检查配额/速率限制。"
-    if 500 <= code < 600:
-        return "模型服务端异常：请稍后重试。"
-    return "请检查请求参数、模型配置与网络连通性。"
+from app.models.admin import SkillKnowConversation, SkillKnowMessage, User
+from app.models.enums import SkillKnowMessageRole
+from app.schemas.skill_know import SkillKnowMessageFeedbackIn
+from app.services.skill_know.utils import preview_text
 
 
 class SkillKnowChatService:
@@ -51,228 +21,6 @@ class SkillKnowChatService:
         user = await User.filter(id=user_id).first()
         return bool(user and user.is_superuser)
 
-    async def _conversation(self, conversation_id: int | None, message: str) -> SkillKnowConversation:
-        owner_id = CTX_USER_ID.get()
-        if conversation_id:
-            item = await SkillKnowConversation.filter(id=conversation_id, owner_id=owner_id).first()
-            if item:
-                return item
-        return await SkillKnowConversation.create(uuid=new_uuid(), title=message[:60], owner_id=owner_id)
-
-    async def _prompt(self, key: str, fallback: str) -> str:
-        prompt = await SkillKnowPrompt.filter(key=key, is_active=True).first()
-        return prompt.content if prompt else fallback
-
-    async def _prompts(self, mappings: list[tuple[str, str]]) -> dict[str, str]:
-        await skill_know_prompt_service.initialize_defaults()
-        rows = await SkillKnowPrompt.filter(key__in=[key for key, _ in mappings], is_active=True)
-        existing = {row.key: row.content for row in rows if row.content}
-        return {key: existing.get(key, fallback) for key, fallback in mappings}
-
-    def _render_context(self, items: list[dict], max_chars: int) -> str:
-        blocks = []
-        used = 0
-        for idx, item in enumerate(items, start=1):
-            content = str(item.get("content") or "")
-            if not content:
-                continue
-            block = "\n".join([
-                f"[引用 {idx}]",
-                f"标题：{item.get('title') or '-'}",
-                f"原文件：{item.get('filename') or '-'}",
-                f"章节：{item.get('heading') or '-'}",
-                f"匹配分：{item.get('score')}",
-                "```markdown",
-                content[:1200],
-                "```",
-            ])
-            if used + len(block) > max_chars:
-                break
-            blocks.append(block)
-            used += len(block)
-        return "\n\n".join(blocks)
-
-    def _citations(self, items: list[dict]) -> list[dict]:
-        return [
-            {
-                "document_id": item.get("document_id"),
-                "chunk_id": item.get("chunk_id"),
-                "chunk_uri": item.get("chunk_uri"),
-                "title": item.get("title"),
-                "filename": item.get("filename"),
-                "heading": item.get("heading"),
-                "score": item.get("score"),
-                "matched_by": item.get("matched_by"),
-            }
-            for item in items
-        ]
-
-    async def _history_messages(self, conversation_id: int, *, limit: int = 12) -> list[dict]:
-        rows = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("-id").limit(limit)
-        rows = list(reversed(rows))
-        history = []
-        for row in rows:
-            if row.role not in {SkillKnowMessageRole.USER, SkillKnowMessageRole.ASSISTANT}:
-                continue
-            history.append({"role": str(row.role), "content": row.content})
-        return history
-
-    @staticmethod
-    def _drop_current_user_message(history_messages: list[dict], message: str) -> list[dict]:
-        if not history_messages:
-            return history_messages
-        last = history_messages[-1]
-        if last.get("role") == SkillKnowMessageRole.USER and str(last.get("content") or "") == message:
-            return history_messages[:-1]
-        return history_messages
-
-    @staticmethod
-    def _current_user_message(message: str, context: str) -> dict:
-        if context:
-            content = "\n\n".join(
-                [
-                    "请优先基于以下 Markdown 知识库片段回答用户问题。",
-                    "如果片段不足以得出结论，请明确说明缺少哪些依据，不要脱离知识库编造。",
-                    "## Markdown 知识库片段",
-                    context,
-                    "## 用户问题",
-                    message,
-                ]
-            )
-        else:
-            content = "\n\n".join(
-                [
-                    "当前没有检索到相关 Markdown 知识库片段。",
-                    "请先说明知识库依据不足，再给出可执行的排查建议和需要补充的信息。",
-                    "## 用户问题",
-                    message,
-                ]
-            )
-        return {"role": "user", "content": content}
-
-    async def chat(self, message: str, conversation_id: int | None = None) -> dict:
-        content = ""
-        async for item in self.stream(message, conversation_id=conversation_id):
-            if item["type"] == "assistant.delta":
-                content += item["payload"].get("content", "")
-            if item["type"] == "final":
-                return item["payload"]
-        return {"content": content}
-
-    async def stream(self, message: str, conversation_id: int | None = None) -> AsyncGenerator[dict, None]:
-        start = time.perf_counter()
-        timeline: list[dict] = []
-        conv = await self._conversation(conversation_id, message)
-        user_event = event("user.message", {"content": message, "conversation_id": conv.id})
-        timeline.append(user_event)
-        yield user_event
-
-        user_msg = await SkillKnowMessage.create(uuid=new_uuid(), conversation_id=conv.id, role=SkillKnowMessageRole.USER, content=message)
-
-        phase = event("phase.changed", {"phase": "retrieving", "label": "检索 Markdown 文档片段"})
-        timeline.append(phase)
-        yield phase
-
-        retrieval_top_k = int(await skill_know_config_service.get("retrieval_top_k", 8) or 8)
-        context_items = await skill_know_retriever.retrieve_document_chunks(message, limit=min(retrieval_top_k, 6))
-        citations = self._citations(context_items)
-        search_event = event("search.results", {"query": message, "items": context_items, "citations": citations, "total": len(context_items)})
-        timeline.append(search_event)
-        yield search_event
-
-        max_context_chars = int(await skill_know_config_service.get("retrieval_max_context_chars", 128000) or 128000)
-        context = self._render_context(context_items, max_chars=max_context_chars)
-        system_prompt = await self._prompt("system.chat", "你是 Skill-Know 知识库助手。")
-        answer_prompt = await self._prompt("rag.answer", "请基于知识库片段回答用户问题。") if context else await self._prompt("rag.no_context", "当前知识库没有足够依据。")
-        security_prompt = await self._prompt("security.expert", "遇到数据安全问题时必须说明风险、权限、审计和回滚建议。")
-        support_prompt = await self._prompt("support.troubleshooting", "处理产品问题时先确认现象，再给出排查步骤和需要补充的信息。")
-        escalation_prompt = await self._prompt("support.escalation", "当问题影响生产、安全或无法恢复时，提示升级处理并列出必要材料。")
-
-        history_messages = self._drop_current_user_message(await self._history_messages(conv.id), message)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "system", "content": security_prompt},
-            {"role": "system", "content": support_prompt},
-            {"role": "system", "content": escalation_prompt},
-            {"role": "system", "content": answer_prompt},
-            *history_messages,
-            self._current_user_message(message, context),
-        ]
-
-        llm_start = event("llm.call.started", {"model": await skill_know_config_service.get("llm_chat_model"), "stream": True})
-        timeline.append(llm_start)
-        yield llm_start
-
-        answer = ""
-        try:
-            async for chunk in skill_know_openai_client.stream_chat(messages):
-                delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content") or ""
-                if not delta:
-                    continue
-                answer += delta
-                yield event("assistant.delta", {"content": delta})
-            done = event("llm.call.completed", {"length": len(answer)})
-            timeline.append(done)
-            yield done
-        except httpx.ConnectTimeout as exc:
-            logger.warning(
-                "[skill_know.chat.stream] connect timeout conv_id={} chat_base_url={} model={} error={}",
-                conv.id,
-                await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
-                await skill_know_config_service.get("llm_chat_model"),
-                str(exc),
-            )
-            answer = answer or "模型端点连接超时，请检查对话端点网络连通性或稍后重试"
-            yield event("assistant.delta", {"content": answer})
-            err = event("error", {"message": "模型端点连接超时，请检查对话端点网络连通性或稍后重试"})
-            timeline.append(err)
-            yield err
-        except httpx.ConnectError as exc:
-            logger.warning(
-                "[skill_know.chat.stream] network connect error conv_id={} chat_base_url={} model={} error={}",
-                conv.id,
-                await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
-                await skill_know_config_service.get("llm_chat_model"),
-                str(exc),
-            )
-            answer = answer or "网络连接失败，请检查网络设置"
-            yield event("assistant.delta", {"content": answer})
-            err = event("error", {"message": "网络连接失败，请检查网络设置"})
-            timeline.append(err)
-            yield err
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code if exc.response else "unknown"
-            hint = _status_hint(status_code)
-            answer = answer or f"API错误: {status_code}。{hint}"
-            yield event("assistant.delta", {"content": answer})
-            err = event("error", {"message": f"API错误: {status_code}", "hint": hint, "status_code": status_code})
-            timeline.append(err)
-            yield err
-        except Exception as exc:
-            logger.exception("[skill_know.chat.stream] unexpected error conv_id={} error={}", conv.id, str(exc))
-            answer = answer or "服务暂时不可用，请稍后重试"
-            yield event("assistant.delta", {"content": answer})
-            err = event("error", {"message": "服务暂时不可用，请稍后重试"})
-            timeline.append(err)
-            yield err
-
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        msg = await SkillKnowMessage.create(
-            uuid=new_uuid(),
-            conversation_id=conv.id,
-            role=SkillKnowMessageRole.ASSISTANT,
-            content=answer,
-            timeline=timeline,
-            latency_ms=latency_ms,
-            extra_metadata={
-                "citations": citations,
-                "user_message_id": user_msg.id,
-                "model": await skill_know_config_service.get("llm_chat_model"),
-            },
-        )
-        final = event("final", {"conversation_id": conv.id, "message_id": msg.id, "content": answer, "citations": citations, "latency_ms": latency_ms})
-        yield final
-
     async def list_conversations(self, page: int, page_size: int) -> tuple[int, list[dict]]:
         if await self._is_superuser():
             query = SkillKnowConversation.all()
@@ -281,9 +29,19 @@ class SkillKnowChatService:
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
         conversation_ids = [item.id for item in rows]
+        owner_ids = [item.owner_id for item in rows if item.owner_id]
+        owners = {}
+        if owner_ids:
+            owner_rows = await User.filter(id__in=sorted(set(owner_ids)))
+            owners = {item.id: item for item in owner_rows}
         last_messages = {}
         if conversation_ids:
-            latest_rows = await SkillKnowMessage.filter(conversation_id__in=conversation_ids).group_by("conversation_id").annotate(last_id=Max("id")).values("conversation_id", "last_id")
+            latest_rows = (
+                await SkillKnowMessage.filter(conversation_id__in=conversation_ids)
+                .group_by("conversation_id")
+                .annotate(last_id=Max("id"))
+                .values("conversation_id", "last_id")
+            )
             last_ids = [row["last_id"] for row in latest_rows if row.get("last_id")]
             if last_ids:
                 messages = await SkillKnowMessage.filter(id__in=last_ids)
@@ -291,6 +49,9 @@ class SkillKnowChatService:
         result = []
         for item in rows:
             data = await item.to_dict()
+            owner = owners.get(item.owner_id)
+            data["owner_name"] = (owner.alias or owner.username) if owner else "-"
+            data["owner_username"] = owner.username if owner else ""
             last_message = last_messages.get(item.id)
             if last_message:
                 data["last_message_preview"] = preview_text(last_message.content, 72)
@@ -307,6 +68,9 @@ class SkillKnowChatService:
         else:
             conv = await SkillKnowConversation.get(id=conversation_id, owner_id=CTX_USER_ID.get())
         data = await conv.to_dict()
+        owner = await User.filter(id=conv.owner_id).first() if conv.owner_id else None
+        data["owner_name"] = (owner.alias or owner.username) if owner else "-"
+        data["owner_username"] = owner.username if owner else ""
         messages = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("id")
         data["messages"] = [await item.to_dict() for item in messages]
         return data
@@ -315,139 +79,28 @@ class SkillKnowChatService:
         exists = await SkillKnowConversation.filter(id=conversation_id, owner_id=CTX_USER_ID.get()).exists()
         if not exists:
             raise HTTPException(status_code=404, detail="会话不存在")
-        await SkillKnowMessageFeedback.filter(conversation_id=conversation_id).delete()
         await SkillKnowMessage.filter(conversation_id=conversation_id).delete()
         await SkillKnowConversation.filter(id=conversation_id).delete()
 
-    async def messages(self, conversation_id: int) -> list[dict]:
-        exists = await SkillKnowConversation.filter(id=conversation_id, owner_id=CTX_USER_ID.get()).exists()
-        if not exists:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        rows = await SkillKnowMessage.filter(conversation_id=conversation_id).order_by("id")
-        return [await item.to_dict() for item in rows]
-
-    async def feedback(self, data) -> dict:
-        msg = await SkillKnowMessage.get(id=data.message_id)
-        exists = await SkillKnowConversation.filter(id=msg.conversation_id, owner_id=CTX_USER_ID.get()).exists()
-        if not exists:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        user_id = None
-        try:
-            user_id = CTX_USER_ID.get()
-        except Exception:
-            pass
-        feedback = await SkillKnowMessageFeedback.create(
-            message_id=msg.id,
-            conversation_id=msg.conversation_id,
-            rating=data.rating,
-            is_helpful=data.is_helpful,
-            reason=data.reason,
-            correct_answer=data.correct_answer,
-            created_by=user_id,
-        )
-        if data.is_helpful is False or (data.rating is not None and data.rating <= 2) or data.correct_answer:
-            question = ""
-            user_message_id = (msg.extra_metadata or {}).get("user_message_id")
-            if user_message_id:
-                user_msg = await SkillKnowMessage.filter(id=user_message_id).first()
-                question = user_msg.content if user_msg else ""
-            await SkillKnowLearningCandidate.create(
-                question=question or "请根据对话记录补充问题",
-                assistant_answer=msg.content,
-                feedback_reason=data.reason,
-                correct_answer=data.correct_answer,
-                source_conversation_id=msg.conversation_id,
-                source_message_id=msg.id,
-                status=SkillKnowLearningStatus.PENDING,
-                candidate_markdown=self._candidate_markdown(question, msg.content, data.reason, data.correct_answer),
-                extra_metadata={"feedback_id": feedback.id},
-            )
-        return await feedback.to_dict()
-
-    async def feedback_list(self, page: int, page_size: int, low_score_only: bool = False) -> tuple[int, list[dict]]:
-        if await self._is_superuser():
-            query = SkillKnowMessageFeedback.all()
-        else:
-            query = SkillKnowMessageFeedback.filter(created_by=CTX_USER_ID.get())
-        if low_score_only:
-            query = query.filter(rating__lte=2)
-        total = await query.count()
-        rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
-        return total, [await item.to_dict() for item in rows]
-
-    async def list_learning_candidates(self, page: int, page_size: int, status: SkillKnowLearningStatus | None = None) -> tuple[int, list[dict]]:
-        if await self._is_superuser():
-            query = SkillKnowLearningCandidate.all()
-        else:
-            query = SkillKnowLearningCandidate.filter(created_by=CTX_USER_ID.get())
-        if status:
-            query = query.filter(status=status)
-        total = await query.count()
-        rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
-        return total, [await item.to_dict() for item in rows]
-
-    async def create_learning_candidate(self, data) -> dict:
-        item = await SkillKnowLearningCandidate.create(
-            question=data.question,
-            assistant_answer=data.assistant_answer,
-            feedback_reason=data.feedback_reason,
-            correct_answer=data.correct_answer,
-            candidate_markdown=data.candidate_markdown or self._candidate_markdown(data.question, data.assistant_answer, data.feedback_reason, data.correct_answer),
-            created_by=CTX_USER_ID.get(),
-        )
-        return await item.to_dict()
-
-    async def approve_learning_candidate(self, data) -> dict:
-        item = await SkillKnowLearningCandidate.get(id=data.candidate_id, created_by=CTX_USER_ID.get())
-        item.status = SkillKnowLearningStatus.APPROVED
-        if data.candidate_markdown is not None:
-            item.candidate_markdown = data.candidate_markdown
-        item.reviewed_at = datetime.now()
-        try:
-            item.reviewed_by = CTX_USER_ID.get()
-        except Exception:
-            pass
-        await item.save()
-        return await item.to_dict()
-
-    async def reject_learning_candidate(self, data) -> dict:
-        item = await SkillKnowLearningCandidate.get(id=data.candidate_id, created_by=CTX_USER_ID.get())
-        item.status = SkillKnowLearningStatus.REJECTED
-        item.reviewed_at = datetime.now()
-        try:
-            item.reviewed_by = CTX_USER_ID.get()
-        except Exception:
-            pass
-        await item.save()
-        return await item.to_dict()
-
-    def _candidate_markdown(self, question: str | None, answer: str | None, reason: str | None, correct_answer: str | None) -> str:
-        return "\n".join([
-            "# 待补充知识",
-            "",
-            "## 问题场景",
-            question or "待管理员确认",
-            "",
-            "## 已知现象",
-            reason or "来自对话评分反馈，需管理员补充现象。",
-            "",
-            "## 建议解决方案",
-            correct_answer or answer or "待管理员确认。",
-            "",
-            "## 风险提示",
-            "如涉及数据安全、权限、审计或敏感信息，需安全复核后再入库。",
-            "",
-            "## 待确认事项",
-            "- 产品版本、部署环境、错误日志、影响范围是否完整。",
-            "- 解决方案是否已经验证。",
-            "",
-            "## 来源",
-            "对话评分反馈。",
-        ])
-
-    async def stats(self, conversation_id: int) -> dict:
-        messages = await SkillKnowMessage.filter(conversation_id=conversation_id)
-        return {"conversation_id": conversation_id, "stats": {"total_turns": len(messages)}, "has_summary": False}
+    async def feedback(self, payload: SkillKnowMessageFeedbackIn) -> dict:
+        query = SkillKnowMessage.filter(id=payload.message_id, role=SkillKnowMessageRole.ASSISTANT)
+        if not await self._is_superuser():
+            conversations = await SkillKnowConversation.filter(owner_id=CTX_USER_ID.get()).values_list("id", flat=True)
+            query = query.filter(conversation_id__in=list(conversations))
+        message = await query.first()
+        if not message:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        metadata = dict(message.extra_metadata or {})
+        feedback = {
+            "rating": payload.rating,
+            "reason": payload.reason or "",
+            "note": payload.note or "",
+            "user_id": CTX_USER_ID.get(),
+        }
+        metadata["feedback"] = feedback
+        message.extra_metadata = metadata
+        await message.save(update_fields=["extra_metadata", "updated_at"])
+        return {"message_id": message.id, "feedback": feedback}
 
 
 def sse_encode(data: dict) -> str:

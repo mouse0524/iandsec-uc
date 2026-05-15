@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from app.core.ctx import CTX_USER_ID
 from app.log import logger
-from app.services.skill_know.chat_service import event, skill_know_chat_service
+from app.services.skill_know.reader_agent.agent_service import reader_event, skill_know_reader_agent_service
 
 
 @dataclass
@@ -35,16 +35,17 @@ class SkillKnowChatJobService:
         self._jobs: dict[str, SkillKnowChatJob] = {}
         self._lock = asyncio.Lock()
 
-    async def start(self, message: str, conversation_id: int | None = None) -> SkillKnowChatJob:
-        job = SkillKnowChatJob(id=uuid4().hex, owner_id=CTX_USER_ID.get(), message=message, conversation_id=conversation_id)
+    async def stream_started_job(self, message: str, conversation_id: int | None = None):
+        job = SkillKnowChatJob(
+            id=uuid4().hex,
+            owner_id=CTX_USER_ID.get(),
+            message=message,
+            conversation_id=conversation_id,
+        )
         async with self._lock:
             self._cleanup_locked()
             self._jobs[job.id] = job
         job.task = asyncio.create_task(self._run(job))
-        return job
-
-    async def stream_started_job(self, message: str, conversation_id: int | None = None):
-        job = await self.start(message, conversation_id)
         async for item in self.events(job.id):
             yield item
 
@@ -73,17 +74,17 @@ class SkillKnowChatJobService:
 
     async def _run(self, job: SkillKnowChatJob) -> None:
         try:
-            async for item in skill_know_chat_service.stream(job.message, conversation_id=job.conversation_id):
+            async for item in skill_know_reader_agent_service.stream(job.message, conversation_id=job.conversation_id):
                 await self._publish(job, item)
         except Exception as exc:
             logger.exception("[skill_know.chat_job.failed] job_id={} error={}", job.id, str(exc))
             job.error = str(exc)
-            await self._publish(job, event("error", {"message": "对话生成失败，请稍后重试"}), terminal=True)
+            await self._publish(job, reader_event("error", {"message": "对话生成失败，请稍后重试"}), terminal=True)
         finally:
             job.done = True
             job.completed_at = time.monotonic()
             for queue in list(job.subscribers):
-                await queue.put(event("job.completed", {"job_id": job.id, "error": job.error}))
+                await queue.put(reader_event("job.completed", {"job_id": job.id, "error": job.error}))
             async with self._lock:
                 self._cleanup_locked()
 

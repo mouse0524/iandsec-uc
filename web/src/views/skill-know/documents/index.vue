@@ -1,26 +1,29 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
+import { NButton, NProgress, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
+import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import api from '@/api'
 import { getToken, sanitizeHtml } from '@/utils'
 
 defineOptions({ name: '文档管理' })
 
 const loading = ref(false)
+const detailLoading = ref(false)
 const uploading = ref(false)
 const reindexing = ref(false)
 const retrying = ref(false)
 const recovering = ref(false)
-const diagnosing = ref(false)
 const saving = ref(false)
+const detailVisible = ref(false)
 const documents = ref([])
 const selected = ref(null)
 const keyword = ref('')
 const fileInput = ref(null)
 const chunkPreview = ref(null)
-const activeTab = ref('preview')
+const activeTab = ref('editor')
 const pollingTimers = new Map()
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const apiBase = (import.meta.env.VITE_BASE_API || '/api/v1').replace(/\/$/, '')
@@ -34,6 +37,9 @@ const chunkRefs = ref({})
 const chunkPage = ref(1)
 const chunkPageSize = ref(10)
 const chunkTotal = ref(0)
+const documentPage = ref(1)
+const documentPageSize = ref(12)
+const documentTotal = ref(0)
 const secureAssetUrls = ref({})
 const secureAssetObjectUrls = new Set()
 const secureAssetQueue = []
@@ -42,16 +48,115 @@ let secureAssetActiveCount = 0
 let secureAssetObserver = null
 let secureAssetGeneration = 0
 const maxSecureAssetConcurrency = 3
-const indexDiagnosis = ref(null)
 
-const filteredDocuments = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return documents.value
-  return documents.value.filter((item) => `${item.title} ${item.filename} ${item.content || ''}`.toLowerCase().includes(kw))
+const completedDocumentCount = computed(
+  () => documents.value.filter((item) => item.status === 'completed').length,
+)
+const runningDocumentCount = computed(
+  () => documents.value.filter((item) => ['pending', 'processing'].includes(item.status)).length,
+)
+const failedDocumentCount = computed(
+  () => documents.value.filter((item) => item.status === 'failed').length,
+)
+const highlightedChunk = computed(() => {
+  if (!highlightedChunkId.value) return null
+  return (
+    (selected.value?.chunks || []).find(
+      (chunk) => String(chunk.id) === String(highlightedChunkId.value),
+    ) || null
+  )
 })
-const completedDocumentCount = computed(() => documents.value.filter((item) => item.status === 'completed').length)
-const runningDocumentCount = computed(() => documents.value.filter((item) => ['pending', 'processing'].includes(item.status)).length)
-const failedDocumentCount = computed(() => documents.value.filter((item) => item.status === 'failed').length)
+const renderedChunks = computed(() =>
+  (selected.value?.chunks || []).map((chunk) => ({
+    ...chunk,
+    rendered: renderDocumentContent(chunk.content),
+    active: String(chunk.id) === String(highlightedChunkId.value),
+  })),
+)
+
+const documentColumns = [
+  {
+    title: '文档名称',
+    key: 'title',
+    minWidth: 260,
+    ellipsis: { tooltip: true },
+    render: (row) => row.title || row.filename || `文档 ${row.id}`,
+  },
+  {
+    title: '文件名',
+    key: 'filename',
+    minWidth: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => row.filename || '-',
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 120,
+    render: (row) => statusTag(row.status),
+  },
+  {
+    title: '处理进度',
+    key: 'progress',
+    width: 150,
+    render: (row) =>
+      ['processing', 'pending'].includes(row.status)
+        ? h(NProgress, {
+            type: 'line',
+            percentage: row.extra_metadata?.process_progress || 5,
+            showIndicator: false,
+          })
+        : '-',
+  },
+  {
+    title: '类型',
+    key: 'type',
+    width: 110,
+    render: (row) => row.extra_metadata?.original_file_type?.toUpperCase?.() || '-',
+  },
+  {
+    title: '大小',
+    key: 'file_size',
+    width: 110,
+    render: (row) => formatSize(row.file_size),
+  },
+  {
+    title: '索引',
+    key: 'index',
+    width: 130,
+    render: (row) => {
+      const count = row.extra_metadata?.chunk_count || row.extra_metadata?.section_count
+      return count ? `${count} 片段` : row.extra_metadata?.index_status || '-'
+    },
+  },
+  {
+    title: '更新时间',
+    key: 'updated_at',
+    width: 180,
+    render: (row) => row.updated_at || row.created_at || '-',
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 110,
+    fixed: 'right',
+    render: (row) =>
+      h(
+        NButton,
+        { size: 'small', type: 'primary', secondary: true, onClick: () => selectDocument(row) },
+        { default: () => '详情' },
+      ),
+  },
+]
+
+const documentPagination = computed(() => ({
+  page: documentPage.value,
+  pageSize: documentPageSize.value,
+  itemCount: documentTotal.value,
+  pageSizes: [10, 12, 20, 50],
+  showSizePicker: true,
+  prefix: ({ itemCount }) => `共 ${itemCount} 条`,
+}))
 
 onMounted(loadDocuments)
 onUnmounted(() => {
@@ -65,18 +170,48 @@ const normalizeDocumentAssetPath = (src) => {
   const match = value.match(/^\/skill-know\/documents\/assets\/\d+\/[^?#]+/i)
   return match ? match[0] : ''
 }
-const prepareSecureDocumentAssetUrls = (html) => {
-  return String(html || '').replace(/(<img\b[^>]*?\bsrc=["'])(\/(?:api\/v1\/)?skill-know\/documents\/assets\/[^"']+)(["'][^>]*>)/gi, (_, prefix, src, suffix) => {
-    const assetPath = normalizeDocumentAssetPath(src)
-    if (!assetPath) return `${prefix}${src}${suffix}`
-    const quote = suffix[0] || '"'
-    const rest = suffix.slice(1)
-    const lazyAttrs = rest.includes('loading=') ? '' : ' loading="lazy" decoding="async"'
-    return `${prefix}${secureAssetUrls.value[assetPath] || ''}${quote} data-secure-asset="${assetPath}"${lazyAttrs}${rest}`
-  })
+
+const prepareSecureDocumentAssetUrls = (html) =>
+  String(html || '').replace(
+    /(<img\b[^>]*?\bsrc=["'])(\/(?:api\/v1\/)?skill-know\/documents\/assets\/[^"']+)(["'][^>]*>)/gi,
+    (_, prefix, src, suffix) => {
+      const assetPath = normalizeDocumentAssetPath(src)
+      if (!assetPath) return `${prefix}${src}${suffix}`
+      const quote = suffix[0] || '"'
+      const rest = suffix.slice(1)
+      const lazyAttrs = rest.includes('loading=') ? '' : ' loading="lazy" decoding="async"'
+      return `${prefix}${secureAssetUrls.value[assetPath] || ''}${quote} data-secure-asset="${assetPath}"${lazyAttrs}${rest}`
+    },
+  )
+
+const isHtmlContent = (content) =>
+  /<\/?(?:p|div|br|h[1-6]|ul|ol|li|table|thead|tbody|tr|th|td|blockquote|pre|img)\b/i.test(
+    String(content || ''),
+  )
+const toEditorHtml = (content) => {
+  const value = String(content || '').trim()
+  if (!value) return ''
+  const html = isHtmlContent(value) ? value : md.render(value)
+  return sanitizeHtml(prepareSecureDocumentAssetUrls(html))
 }
-const renderedMarkdown = computed(() => prepareSecureDocumentAssetUrls(md.render(selected.value?.content || '')))
-const renderMarkdown = (content) => sanitizeHtml(prepareSecureDocumentAssetUrls(md.render(content || '') || '<p>-</p>'))
+const renderDocumentContent = (content) =>
+  sanitizeHtml(
+    prepareSecureDocumentAssetUrls(isHtmlContent(content) ? content : md.render(content || '') || '<p>-</p>'),
+  )
+
+const restoreSecureAssetUrlsForSave = (html) => {
+  const temp = document.createElement('div')
+  temp.innerHTML = sanitizeHtml(String(html || ''))
+  temp.querySelectorAll('img[data-secure-asset]').forEach((img) => {
+    const assetPath = img.getAttribute('data-secure-asset') || ''
+    if (assetPath) img.setAttribute('src', assetPath)
+    img.removeAttribute('data-secure-asset')
+    img.removeAttribute('loading')
+    img.removeAttribute('decoding')
+  })
+  return sanitizeHtml(temp.innerHTML)
+}
+
 function revokeSecureAssetUrls() {
   secureAssetGeneration += 1
   secureAssetObjectUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -89,14 +224,17 @@ function revokeSecureAssetUrls() {
 
 function initSecureAssetObserver() {
   if (secureAssetObserver) return secureAssetObserver
-  secureAssetObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return
-      const path = entry.target?.dataset?.secureAsset
-      if (path) queueSecureAsset(path)
-      secureAssetObserver.unobserve(entry.target)
-    })
-  }, { rootMargin: '360px 0px' })
+  secureAssetObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        const path = entry.target?.dataset?.secureAsset
+        if (path) queueSecureAsset(path)
+        secureAssetObserver.unobserve(entry.target)
+      })
+    },
+    { rootMargin: '360px 0px' },
+  )
   return secureAssetObserver
 }
 
@@ -111,7 +249,7 @@ async function hydrateSecureAssetImages() {
 }
 
 watch(secureAssetUrls, hydrateSecureAssetImages, { flush: 'post' })
-watch([selected, highlightedChunkId, chunkPage], hydrateSecureAssetImages, { flush: 'post' })
+watch([selected, highlightedChunkId, chunkPage, detailVisible], hydrateSecureAssetImages, { flush: 'post' })
 
 function queueSecureAsset(path) {
   if (!path || secureAssetUrls.value[path] || secureAssetQueued.has(path)) return
@@ -146,42 +284,51 @@ async function fetchSecureDocumentAsset(path, generation) {
     secureAssetObjectUrls.add(blobUrl)
     secureAssetUrls.value = { ...secureAssetUrls.value, [path]: blobUrl }
   } catch {
-    // 图片预览失败时保留占位，不影响文档正文阅读。
+    // 图片预览失败不阻断正文展示。
   }
 }
-const highlightedChunk = computed(() => {
-  if (!highlightedChunkId.value) return null
-  return (selected.value?.chunks || []).find((chunk) => String(chunk.id) === String(highlightedChunkId.value)) || null
-})
-const renderedChunks = computed(() => (selected.value?.chunks || []).map((chunk) => ({
-  ...chunk,
-  rendered: renderMarkdown(chunk.content),
-  active: String(chunk.id) === String(highlightedChunkId.value),
-})))
-const chunkPageCount = computed(() => Math.max(1, Math.ceil((chunkTotal.value || 0) / chunkPageSize.value)))
 
-async function loadDocuments() {
+async function loadDocuments(page = documentPage.value, pageSize = documentPageSize.value) {
   loading.value = true
   try {
-    const res = await api.skillKnowDocuments({ page: 1, page_size: 100 })
+    const params = { page, page_size: pageSize }
+    const kw = keyword.value.trim()
+    if (kw) params.keyword = kw
+    const res = await api.skillKnowDocuments(params)
     documents.value = res.data || []
+    documentTotal.value = Number(res.total || 0)
+    documentPage.value = Number(res.page || page)
+    documentPageSize.value = Number(res.page_size || pageSize)
+
     const queryDocumentId = Number(route.query.document_id || 0)
-    const queryDocument = queryDocumentId ? documents.value.find((item) => item.id === queryDocumentId) : null
-    if (queryDocument) {
+    if (queryDocumentId && !detailVisible.value) {
       highlightedChunkId.value = String(route.query.chunk_id || '')
-      activeTab.value = 'preview'
-      await selectDocument(queryDocument)
+      activeTab.value = 'reader'
+      await selectDocument({ id: queryDocumentId, title: '文档详情' })
       await scrollToHighlightedChunk()
-    }
-    else if (!selected.value && documents.value.length) await selectDocument(documents.value[0])
-    else if (selected.value) {
-      const current = documents.value.find((item) => item.id === selected.value.id) || documents.value[0] || null
-      if (current) await selectDocument(current, { silent: true })
-      else selected.value = null
+    } else if (selected.value?.id) {
+      const current = documents.value.find((item) => item.id === selected.value.id)
+      if (current) selected.value = { ...selected.value, ...current }
     }
   } finally {
     loading.value = false
   }
+}
+
+function handleTablePageChange(page) {
+  documentPage.value = page
+  loadDocuments(page, documentPageSize.value)
+}
+
+function handleTablePageSizeChange(pageSize) {
+  documentPageSize.value = pageSize
+  documentPage.value = 1
+  loadDocuments(1, pageSize)
+}
+
+function handleSearch() {
+  documentPage.value = 1
+  loadDocuments(1, documentPageSize.value)
 }
 
 async function scrollToHighlightedChunk() {
@@ -200,7 +347,13 @@ watch(
   () => route.query.document_id,
   async () => {
     if (route.path !== '/skill-know/documents') return
-    await loadDocuments()
+    highlightedChunkId.value = String(route.query.chunk_id || '')
+    if (route.query.document_id) {
+      activeTab.value = 'reader'
+      await selectDocument({ id: Number(route.query.document_id), title: '文档详情' })
+    } else {
+      await loadDocuments()
+    }
   },
 )
 
@@ -209,16 +362,22 @@ watch(
   async (chunkId) => {
     highlightedChunkId.value = String(chunkId || '')
     if (route.path !== '/skill-know/documents' || !highlightedChunkId.value) return
-    activeTab.value = 'preview'
+    activeTab.value = 'reader'
     await scrollToHighlightedChunk()
   },
 )
 
 async function selectDocument(item, options = {}) {
   if (!item) return
-  if (selected.value?.id !== item.id) revokeSecureAssetUrls()
-  selected.value = item
+  if (selected.value?.id !== item.id) {
+    revokeSecureAssetUrls()
+    chunkPage.value = 1
+    chunkRefs.value = {}
+  }
+  selected.value = { ...item, chunks: selected.value?.id === item.id ? selected.value?.chunks || [] : [] }
+  detailVisible.value = true
   if (['processing', 'pending'].includes(item.status)) startPolling(item.id)
+  detailLoading.value = true
   try {
     const params = {
       document_id: item.id,
@@ -236,6 +395,8 @@ async function selectDocument(item, options = {}) {
     else stopPolling(item.id)
   } catch (error) {
     if (!options.silent) $message.error(error.message || '获取文档详情失败')
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -298,7 +459,9 @@ async function uploadFile(e) {
     }
 
     uploadStage.value = `上传文件分片 ${uploadedSet.size}/${totalChunks}`
-    const pendingIndexes = Array.from({ length: totalChunks }, (_, index) => index).filter((index) => !uploadedSet.has(index))
+    const pendingIndexes = Array.from({ length: totalChunks }, (_, index) => index).filter(
+      (index) => !uploadedSet.has(index),
+    )
     let cursor = 0
     async function uploadChunk(index) {
       const start = index * chunkSize
@@ -344,12 +507,14 @@ async function uploadFile(e) {
       file_size: file.size,
       total_chunks: totalChunks,
     })
-    uploadStage.value = '后台转换 Markdown'
+    uploadStage.value = '后台解析文档'
     selected.value = res.data
+    detailVisible.value = true
     $message.success('已开始后台转换，请稍候')
     localStorage.removeItem(resumeKey)
     startPolling(res.data.id)
-    await loadDocuments()
+    await loadDocuments(1, documentPageSize.value)
+    await selectDocument(res.data, { silent: true })
   } catch (error) {
     $message.error(error.message || '上传失败，请重新选择同一文件续传')
   } finally {
@@ -363,15 +528,21 @@ function startPolling(documentId) {
   if (!documentId || pollingTimers.has(documentId)) return
   const timer = window.setInterval(async () => {
     try {
-      const res = await api.skillKnowGetDocument({ document_id: documentId, chunk_page: chunkPage.value, chunk_page_size: chunkPageSize.value })
+      const res = await api.skillKnowGetDocument({
+        document_id: documentId,
+        chunk_page: chunkPage.value,
+        chunk_page_size: chunkPageSize.value,
+      })
       const doc = res.data
-      documents.value = documents.value.map((item) => (item.id === doc.id ? { ...item, ...doc, content: undefined } : item))
+      documents.value = documents.value.map((item) =>
+        item.id === doc.id ? { ...item, ...doc, content: undefined, chunks: undefined } : item,
+      )
       if (selected.value?.id === doc.id) selected.value = doc
       if (!['processing', 'pending'].includes(doc.status)) {
         stopPolling(documentId)
         await loadDocuments()
       }
-    } catch (error) {
+    } catch {
       stopPolling(documentId)
     }
   }, 2000)
@@ -395,7 +566,8 @@ async function reindexDocument() {
   try {
     const res = await api.skillKnowReindexDocument({ document_id: selected.value.id })
     selected.value = res.data
-    $message.success('索引已重建')
+    $message.success('已开始后台重建索引')
+    if (res.data?.id) startPolling(res.data.id)
     await loadDocuments()
   } finally {
     reindexing.value = false
@@ -428,19 +600,6 @@ async function recoverStuckDocuments() {
   }
 }
 
-async function diagnoseIndex(testEmbedding = false) {
-  diagnosing.value = true
-  try {
-    const res = await api.skillKnowIndexDiagnose({ test_embedding: testEmbedding })
-    indexDiagnosis.value = res.data
-    const count = res.data?.collections?.skill_know_documents?.count
-    const dimension = res.data?.embedding_test?.dimension
-    $message.success(`索引诊断完成${Number.isFinite(count) ? `，向量数 ${count}` : ''}${dimension ? `，维度 ${dimension}` : ''}`)
-  } finally {
-    diagnosing.value = false
-  }
-}
-
 function syncEditForm() {
   if (!selected.value) {
     editForm.value = null
@@ -451,7 +610,7 @@ function syncEditForm() {
     description: selected.value.description || '',
     abstract: selected.value.abstract || '',
     overview: selected.value.overview || '',
-    content: selected.value.content || '',
+    content: toEditorHtml(selected.value.content || ''),
     category: selected.value.category || '',
   }
 }
@@ -466,7 +625,7 @@ async function saveDocument(reindexAfterSave = false) {
       description: editForm.value.description,
       abstract: editForm.value.abstract,
       overview: editForm.value.overview,
-      content: editForm.value.content,
+      content: restoreSecureAssetUrlsForSave(editForm.value.content),
       category: editForm.value.category,
     })
     selected.value = res.data
@@ -475,9 +634,9 @@ async function saveDocument(reindexAfterSave = false) {
       const reindexed = await api.skillKnowReindexDocument({ document_id: selected.value.id })
       selected.value = reindexed.data
       syncEditForm()
-      $message.success('已保存并重建索引')
-    }
-    else {
+      $message.success('已保存，索引将在后台重建')
+      if (reindexed.data?.id) startPolling(reindexed.data.id)
+    } else {
       $message.success('保存成功')
     }
     await loadDocuments()
@@ -490,12 +649,13 @@ async function deleteDocument() {
   if (!selected.value) return
   window.$dialog.warning({
     title: '确认删除',
-    content: `确定删除文档「${selected.value.title}」吗？Markdown 与向量索引都会删除。`,
+    content: `确定删除文档「${selected.value.title}」吗？文档内容与阅读索引都会删除。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
       await api.skillKnowDeleteDocument({ document_id: selected.value.id })
       selected.value = null
+      detailVisible.value = false
       await loadDocuments()
     },
   })
@@ -505,437 +665,494 @@ function statusText(status) {
   return { pending: '待处理', processing: '处理中', completed: '已完成', failed: '失败' }[status] || status
 }
 
+function statusTag(status) {
+  const type = status === 'completed' ? 'success' : status === 'failed' ? 'error' : 'warning'
+  return h(NTag, { size: 'small', type, bordered: false }, { default: () => statusText(status) })
+}
+
 function stageText(stage) {
   return {
     uploaded: '已上传，等待处理',
-    converting: '转换 Markdown 中',
+    converting: '解析文档内容中',
     analyzing: '分析内容中',
-    indexing: '分块并写入向量库中',
+    indexing: '构建章节与行号阅读索引中',
     completed: '处理完成',
     failed: '处理失败',
   }[stage] || stage || '-'
 }
 
-watch(selected, syncEditForm, { immediate: true })
+function formatSize(size) {
+  const value = Number(size || 0)
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${Math.max(1, value / 1024).toFixed(1)} KB`
+}
 
+watch(selected, syncEditForm, { immediate: true })
 </script>
 
 <template>
   <CommonPage title="文档管理" :show-header="false" show-footer>
     <div class="doc-workspace">
-      <aside class="doc-sidebar">
-        <div class="sidebar-head">
-          <div>
-            <div class="eyebrow">Knowledge Library</div>
-            <h2>知识文档</h2>
-            <p>上传文件并转为 Markdown 分块入库，支持从智能对话引用回跳定位。</p>
-          </div>
-          <NButton size="small" secondary :loading="loading" @click="loadDocuments">刷新</NButton>
+      <header class="doc-table-header">
+        <div>
+          <div class="eyebrow">Knowledge Library</div>
+          <h1>知识文档</h1>
+          <p>上传文件后解析正文、图片和表格，构建章节与行号阅读索引；点击“详情”查看和编辑文档。</p>
+        </div>
+        <NSpace>
+          <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.pptx,.docx,.pdf,.html,.json,.txt,.md" @change="uploadFile" />
+          <NButton type="primary" :loading="uploading" @click="fileInput?.click()">
+            {{ uploading ? uploadStage : '上传文档' }}
+          </NButton>
+          <NButton secondary :loading="recovering" @click="recoverStuckDocuments">恢复卡住任务</NButton>
+          <NButton secondary :loading="loading" @click="loadDocuments()">刷新</NButton>
+        </NSpace>
+      </header>
+
+      <section class="library-metrics">
+        <div class="library-metric">
+          <span>文档总数</span>
+          <b>{{ documentTotal }}</b>
+        </div>
+        <div class="library-metric">
+          <span>本页已入库</span>
+          <b>{{ completedDocumentCount }}</b>
+        </div>
+        <div class="library-metric" :class="{ warning: runningDocumentCount }">
+          <span>本页处理中</span>
+          <b>{{ runningDocumentCount }}</b>
+        </div>
+        <div class="library-metric" :class="{ error: failedDocumentCount }">
+          <span>本页失败</span>
+          <b>{{ failedDocumentCount }}</b>
+        </div>
+      </section>
+
+      <section class="table-panel">
+        <div class="table-toolbar">
+          <NInput
+            v-model:value="keyword"
+            clearable
+            placeholder="搜索文档名称、文件名、描述或分类"
+            @keyup.enter="handleSearch"
+            @clear="handleSearch"
+          />
+          <NButton type="primary" secondary @click="handleSearch">搜索</NButton>
         </div>
 
-        <div class="library-metrics">
-          <div class="library-metric">
-            <span>文档</span>
-            <b>{{ documents.length }}</b>
-          </div>
-          <div class="library-metric">
-            <span>已入库</span>
-            <b>{{ completedDocumentCount }}</b>
-          </div>
-          <div class="library-metric" :class="{ warning: runningDocumentCount }">
-            <span>处理中</span>
-            <b>{{ runningDocumentCount }}</b>
-          </div>
-          <div class="library-metric" :class="{ error: failedDocumentCount }">
-            <span>失败</span>
-            <b>{{ failedDocumentCount }}</b>
-          </div>
-        </div>
-
-        <input ref="fileInput" type="file" class="hidden" accept=".xlsx,.pptx,.docx,.pdf,.html,.json,.txt,.md" @change="uploadFile" />
-        <div class="upload-card" @click="fileInput?.click()">
-          <div class="upload-mark">
-            <icon-material-symbols:upload-file-outline-rounded text-24 />
-          </div>
-          <div>
-            <b>{{ uploading ? uploadStage : '上传知识文档' }}<span v-if="!uploading">点击选择</span></b>
-            <p>XLSX、PPTX、DOCX、PDF、HTML、JSON、TXT、MD 均可转换入库，最大 1G。</p>
-          </div>
-        </div>
-        <div class="sidebar-actions">
-          <NInput v-model:value="keyword" class="document-search-input" clearable placeholder="搜索文档、文件名或内容" />
-        </div>
-
-        <NSpin :show="loading">
-          <div class="doc-list">
-            <button
-              v-for="item in filteredDocuments"
-              :key="item.id"
-              class="doc-list-item"
-              :class="{ active: selected?.id === item.id }"
-              type="button"
-              @click="selectDocument(item)"
-            >
-              <span class="item-title">{{ item.title }}</span>
-              <span class="item-desc">
-                Markdown
-                <span v-if="item.extra_metadata?.original_file_type"> · {{ item.extra_metadata.original_file_type.toUpperCase() }}</span>
-                · {{ Math.max(1, item.file_size / 1024).toFixed(1) }} KB
-              </span>
-              <span class="item-tags">
-                <span class="doc-status" :class="item.status === 'completed' ? 'success' : item.status === 'failed' ? 'error' : 'warning'">{{ statusText(item.status) }}</span>
-                <NTag v-if="item.extra_metadata?.chunk_count" size="small" round>{{ item.extra_metadata.chunk_count }} 块</NTag>
-              </span>
-              <NProgress v-if="['processing', 'pending'].includes(item.status)" type="line" :percentage="item.extra_metadata?.process_progress || 5" :show-indicator="false" />
-            </button>
-            <NEmpty v-if="!filteredDocuments.length" description="暂无文档" />
-          </div>
-        </NSpin>
-      </aside>
-
-      <section class="doc-main">
-        <template v-if="selected">
-          <header class="doc-header">
-            <div>
-              <div class="eyebrow">{{ selected.category || 'Document' }}</div>
-              <h1>{{ selected.title }}</h1>
-              <p>{{ selected.description || selected.filename }}</p>
-            </div>
-            <NSpace class="doc-actions">
-              <NButton type="primary" :loading="saving" @click="saveDocument(false)">保存修改</NButton>
-              <NButton secondary type="primary" :loading="saving || reindexing" @click="saveDocument(true)">保存并重建索引</NButton>
-              <NButton secondary :loading="reindexing" :disabled="selected.status !== 'completed'" @click="reindexDocument">重建索引</NButton>
-              <NButton v-if="selected.status === 'failed'" secondary type="warning" :loading="retrying" @click="retryDocument">重试处理</NButton>
-              <NButton secondary :loading="recovering" @click="recoverStuckDocuments">恢复卡住任务</NButton>
-              <NDropdown
-                trigger="click"
-                :options="[
-                  { label: '仅检查索引库', key: 'basic' },
-                  { label: '检查索引库和 Embedding', key: 'embedding' },
-                ]"
-                @select="(key) => diagnoseIndex(key === 'embedding')"
-              >
-                <NButton secondary :loading="diagnosing">索引诊断</NButton>
-              </NDropdown>
-              <NButton secondary type="error" @click="deleteDocument">删除</NButton>
-            </NSpace>
-          </header>
-
-          <section class="metric-grid">
-            <div class="metric-card"><span>状态</span><b>{{ statusText(selected.status) }}</b></div>
-            <div class="metric-card"><span>原始类型</span><b>{{ selected.extra_metadata?.original_file_type || '-' }}</b></div>
-            <div class="metric-card"><span>分类</span><b>{{ selected.category || '-' }}</b></div>
-            <div class="metric-card"><span>索引</span><b>{{ selected.extra_metadata?.index_status || '-' }}<template v-if="selected.extra_metadata?.chunk_count"> / {{ selected.extra_metadata.chunk_count }} 块</template><template v-if="selected.extra_metadata?.vector_count !== undefined"> / {{ selected.extra_metadata.vector_count }} 向量</template></b></div>
-          </section>
-
-          <NAlert v-if="['processing', 'pending'].includes(selected.status)" type="info" class="notice-card">
-            {{ stageText(selected.extra_metadata?.process_stage) }}，进度 {{ selected.extra_metadata?.process_progress || 5 }}%
-            <NProgress type="line" :percentage="selected.extra_metadata?.process_progress || 5" />
-          </NAlert>
-          <NAlert v-if="highlightedChunkId" type="success" class="notice-card citation-highlight" :show-icon="false">
-            已定位到智能对话引用片段，引用块 ID：{{ highlightedChunkId }}。
-          </NAlert>
-          <NAlert v-if="selected.error_message" type="error" class="notice-card">{{ selected.error_message }}</NAlert>
-          <NAlert v-if="indexDiagnosis" type="info" class="notice-card" :show-icon="false">
-            Chroma：{{ indexDiagnosis.chromadb_available ? '可用' : '不可用' }}；
-            向量数：{{ indexDiagnosis.collections?.skill_know_documents?.count ?? '-' }}；
-            Embedding：{{ indexDiagnosis.embedding_provider || '-' }} / {{ indexDiagnosis.embedding_model || '-' }}
-            <template v-if="indexDiagnosis.embedding_test">；测试：{{ indexDiagnosis.embedding_test.success ? '成功' : '失败' }}<template v-if="indexDiagnosis.embedding_test.dimension"> / {{ indexDiagnosis.embedding_test.dimension }} 维</template></template>
-          </NAlert>
-
-          <section class="edit-panel">
-            <div class="panel-head">
-              <div>
-                <h3>文档信息</h3>
-                <p>调整标题、分类、摘要和概览，保存后可选择同步重建索引。</p>
-              </div>
-            </div>
-            <NForm v-if="editForm" label-placement="top" class="doc-form">
-              <div class="two-col">
-                <NFormItem label="标题"><NInput v-model:value="editForm.title" /></NFormItem>
-                <NFormItem label="分类"><NInput v-model:value="editForm.category" /></NFormItem>
-              </div>
-              <NFormItem label="描述"><NInput v-model:value="editForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></NFormItem>
-              <NFormItem label="摘要"><NInput v-model:value="editForm.abstract" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" /></NFormItem>
-              <NFormItem label="概览"><NInput v-model:value="editForm.overview" type="textarea" :autosize="{ minRows: 5, maxRows: 10 }" /></NFormItem>
-            </NForm>
-          </section>
-
-          <section class="preview-panel">
-            <div class="panel-head preview-head">
-              <div>
-                <h3>Markdown 文档</h3>
-                <p>按索引分块展示，引用片段会自动高亮。</p>
-              </div>
-              <NButtonGroup size="small">
-                <NButton :type="activeTab === 'preview' ? 'primary' : 'default'" @click="activeTab = 'preview'">预览</NButton>
-                <NButton :type="activeTab === 'source' ? 'primary' : 'default'" @click="activeTab = 'source'">源码</NButton>
-              </NButtonGroup>
-            </div>
-
-            <div v-if="activeTab === 'preview'" class="preview-stack">
-              <div v-if="highlightedChunk" ref="chunkPreview">
-                <NAlert type="info" class="chunk-preview" :show-icon="false">
-                  <div class="chunk-preview-title">引用片段 #{{ highlightedChunk.chunk_index + 1 }} <span v-if="highlightedChunk.heading">· {{ highlightedChunk.heading }}</span></div>
-                  <div class="markdown-preview chunk-markdown" v-html="renderMarkdown(highlightedChunk.content)" />
-                </NAlert>
-              </div>
-              <div v-else-if="highlightedChunkId" ref="chunkPreview">
-                <NAlert type="warning" class="chunk-preview" :show-icon="false">
-                  未找到引用块 {{ highlightedChunkId }}，可能文档已重新索引。下方显示完整文档。
-                </NAlert>
-              </div>
-              <div class="chunked-preview markdown-preview">
-                <section
-                  v-for="chunk in renderedChunks"
-                  :key="chunk.id"
-                  :ref="(el) => setChunkRef(chunk.id, el)"
-                  class="doc-chunk"
-                  :class="{ active: chunk.active }"
-                >
-                  <div class="doc-chunk-meta">
-                    <span>片段 #{{ chunk.chunk_index + 1 }}</span>
-                    <span v-if="chunk.heading">{{ chunk.heading }}</span>
-                  </div>
-                  <div class="doc-chunk-content" v-html="chunk.rendered" />
-                </section>
-                <div v-if="!renderedChunks.length" v-html="renderMarkdown(editForm?.content)" />
-              </div>
-              <div v-if="chunkTotal > chunkPageSize" class="chunk-pagination">
-                <NPagination
-                  :page="chunkPage"
-                  :page-size="chunkPageSize"
-                  :item-count="chunkTotal"
-                  :page-sizes="[10, 20, 50]"
-                  show-size-picker
-                  @update:page="changeChunkPage"
-                  @update:page-size="changeChunkPageSize"
-                />
-              </div>
-            </div>
-            <NInput v-else-if="editForm" v-model:value="editForm.content" class="source-editor" type="textarea" :autosize="{ minRows: 20, maxRows: 34 }" />
-            <pre v-else>{{ selected.content || '-' }}</pre>
-          </section>
-        </template>
-        <NEmpty v-else class="empty-state" description="请选择文档" />
+        <NDataTable
+          :columns="documentColumns"
+          :data="documents"
+          :loading="loading"
+          :pagination="documentPagination"
+          remote
+          size="small"
+          :scroll-x="1360"
+          @update:page="handleTablePageChange"
+          @update:page-size="handleTablePageSizeChange"
+        />
       </section>
     </div>
+
+    <NDrawer v-model:show="detailVisible" :width="1040" placement="right">
+      <NDrawerContent :title="selected?.title || '文档详情'" closable>
+        <NSpin :show="detailLoading">
+          <template v-if="selected">
+            <header class="doc-header">
+              <div>
+                <div class="eyebrow">{{ selected.category || 'Document' }}</div>
+                <h2>{{ selected.title }}</h2>
+                <p>{{ selected.description || selected.filename }}</p>
+              </div>
+              <NSpace class="doc-actions">
+                <NButton type="primary" :loading="saving" @click="saveDocument(false)">保存修改</NButton>
+                <NButton secondary type="primary" :loading="saving || reindexing" @click="saveDocument(true)">保存并重建索引</NButton>
+                <NButton secondary :loading="reindexing" :disabled="selected.status !== 'completed'" @click="reindexDocument">重建索引</NButton>
+                <NButton v-if="selected.status === 'failed'" secondary type="warning" :loading="retrying" @click="retryDocument">重试处理</NButton>
+                <NButton secondary type="error" @click="deleteDocument">删除</NButton>
+              </NSpace>
+            </header>
+
+            <section class="metric-grid">
+              <div class="metric-card"><span>状态</span><b>{{ statusText(selected.status) }}</b></div>
+              <div class="metric-card"><span>原始类型</span><b>{{ selected.extra_metadata?.original_file_type || '-' }}</b></div>
+              <div class="metric-card"><span>分类</span><b>{{ selected.category || '-' }}</b></div>
+              <div class="metric-card">
+                <span>阅读索引</span>
+                <b>
+                  {{ selected.extra_metadata?.index_status || '-' }}
+                  <template v-if="selected.extra_metadata?.section_count"> / {{ selected.extra_metadata.section_count }} 章</template>
+                  <template v-if="selected.extra_metadata?.line_count"> / {{ selected.extra_metadata.line_count }} 行</template>
+                </b>
+              </div>
+            </section>
+
+            <NAlert v-if="['processing', 'pending'].includes(selected.status)" type="info" class="notice-card">
+              {{ stageText(selected.extra_metadata?.process_stage) }}，进度 {{ selected.extra_metadata?.process_progress || 5 }}%
+              <NProgress type="line" :percentage="selected.extra_metadata?.process_progress || 5" />
+            </NAlert>
+            <NAlert v-if="highlightedChunkId" type="success" class="notice-card citation-highlight" :show-icon="false">
+              已定位到智能对话引用片段，引用块 ID：{{ highlightedChunkId }}。
+            </NAlert>
+            <NAlert v-if="selected.error_message" type="error" class="notice-card">{{ selected.error_message }}</NAlert>
+
+            <section class="edit-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>文档信息</h3>
+                  <p>调整标题、分类、摘要和概览，保存后可选择同步重建阅读索引。</p>
+                </div>
+              </div>
+              <NForm v-if="editForm" label-placement="top" class="doc-form">
+                <div class="two-col">
+                  <NFormItem label="标题"><NInput v-model:value="editForm.title" /></NFormItem>
+                  <NFormItem label="分类"><NInput v-model:value="editForm.category" /></NFormItem>
+                </div>
+                <NFormItem label="描述"><NInput v-model:value="editForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></NFormItem>
+                <NFormItem label="摘要"><NInput v-model:value="editForm.abstract" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" /></NFormItem>
+                <NFormItem label="概览"><NInput v-model:value="editForm.overview" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
+              </NForm>
+            </section>
+
+            <section class="preview-panel">
+              <div class="panel-head preview-head">
+                <div>
+                  <h3>文档内容</h3>
+                  <p>在线编辑完整内容，或按阅读片段分页查看索引内容。</p>
+                </div>
+                <NButtonGroup size="small">
+                  <NButton :type="activeTab === 'editor' ? 'primary' : 'default'" @click="activeTab = 'editor'">在线编辑</NButton>
+                  <NButton :type="activeTab === 'reader' ? 'primary' : 'default'" @click="activeTab = 'reader'">阅读片段</NButton>
+                </NButtonGroup>
+              </div>
+
+              <div v-if="activeTab === 'editor' && editForm" class="editor-stack">
+                <RichTextEditor
+                  v-model="editForm.content"
+                  placeholder="编辑文档内容，保存后可重建阅读索引"
+                  :min-height="520"
+                  :max-height="760"
+                />
+              </div>
+              <div v-else-if="activeTab === 'reader'" class="preview-stack">
+                <div v-if="highlightedChunk" ref="chunkPreview">
+                  <NAlert type="info" class="chunk-preview" :show-icon="false">
+                    <div class="chunk-preview-title">引用片段 #{{ highlightedChunk.chunk_index + 1 }} <span v-if="highlightedChunk.heading">/ {{ highlightedChunk.heading }}</span></div>
+                    <div class="markdown-preview chunk-markdown" v-html="renderDocumentContent(highlightedChunk.content)" />
+                  </NAlert>
+                </div>
+                <div v-else-if="highlightedChunkId" ref="chunkPreview">
+                  <NAlert type="warning" class="chunk-preview" :show-icon="false">
+                    未找到引用块 {{ highlightedChunkId }}，可能文档已重新索引。下方显示当前页文档片段。
+                  </NAlert>
+                </div>
+                <div class="chunked-preview markdown-preview">
+                  <section
+                    v-for="chunk in renderedChunks"
+                    :key="chunk.id"
+                    :ref="(el) => setChunkRef(chunk.id, el)"
+                    class="doc-chunk"
+                    :class="{ active: chunk.active }"
+                  >
+                    <div class="doc-chunk-meta">
+                      <span>片段 #{{ chunk.chunk_index + 1 }}</span>
+                      <span v-if="chunk.heading">{{ chunk.heading }}</span>
+                    </div>
+                    <div class="doc-chunk-content" v-html="chunk.rendered" />
+                  </section>
+                  <div v-if="!renderedChunks.length" v-html="renderDocumentContent(editForm?.content)" />
+                </div>
+                <div v-if="chunkTotal > chunkPageSize" class="chunk-pagination">
+                  <NPagination
+                    :page="chunkPage"
+                    :page-size="chunkPageSize"
+                    :item-count="chunkTotal"
+                    :page-sizes="[10, 20, 50]"
+                    show-size-picker
+                    @update:page="changeChunkPage"
+                    @update:page-size="changeChunkPageSize"
+                  />
+                </div>
+              </div>
+              <pre v-else>{{ selected.content || '-' }}</pre>
+            </section>
+          </template>
+          <NEmpty v-else description="暂无文档详情" />
+        </NSpin>
+      </NDrawerContent>
+    </NDrawer>
   </CommonPage>
 </template>
 
 <style scoped>
 .hidden { display: none; }
 .doc-workspace {
-  --ai-bg: #f7f7f4;
-  --ai-sidebar: #f1f0ea;
-  --ai-line: rgba(17, 24, 39, .10);
-  --ai-text: #111827;
-  --ai-muted: #6b7280;
-  --ai-accent: #10a37f;
-  --ai-primary: var(--primary-color, #f4511e);
-  display: grid;
-  grid-template-columns: 352px minmax(0, 1fr);
-  height: calc(100vh - 96px);
-  min-height: 620px;
-  overflow: hidden;
-  border: 1px solid var(--ai-line);
-  border-radius: 18px;
-  background: var(--ai-bg);
-  box-shadow: 0 18px 50px rgba(15, 23, 42, .08);
-}
-.doc-sidebar {
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  gap: 14px;
+  --line: rgba(17, 24, 39, 0.1);
+  --text: #111827;
+  --muted: #6b7280;
+  --accent: #0f766e;
+  min-height: calc(100vh - 128px);
   padding: 18px;
-  border-right: 1px solid var(--ai-line);
-  background: linear-gradient(180deg, #f3f2ed 0%, var(--ai-sidebar) 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
 }
-.sidebar-head, .doc-header, .panel-head, .preview-head {
+.doc-table-header,
+.doc-header,
+.panel-head,
+.preview-head {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  align-items: flex-start;
 }
-.eyebrow { color: var(--ai-accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-h1, h2, h3, p { margin: 0; }
-h1, h2, h3 { color: var(--ai-text); font-weight: 800; }
-.sidebar-head h2, .doc-header h1 { margin-top: 6px; }
-.sidebar-head p, .doc-header p, .panel-head p, .upload-card p, .item-desc { margin-top: 7px; color: var(--ai-muted); font-size: 13px; line-height: 1.6; }
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+}
+h2,
+h3 {
+  color: var(--text);
+  font-weight: 700;
+}
+.doc-table-header p,
+.doc-header p,
+.panel-head p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .library-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
+  margin-top: 16px;
+}
+.library-metric,
+.metric-card,
+.edit-panel,
+.preview-panel,
+.table-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
 }
 .library-metric {
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--ai-line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, .68);
+  padding: 12px;
+  background: #fafafa;
 }
-.library-metric span {
+.library-metric span,
+.metric-card span {
   display: block;
-  color: var(--ai-muted);
+  color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
 }
 .library-metric b {
   display: block;
-  margin-top: 5px;
-  color: var(--ai-text);
-  font-size: 20px;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 22px;
   line-height: 1;
 }
 .library-metric.warning b { color: #a16207; }
 .library-metric.error b { color: #b4234a; }
-.upload-card {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+.table-panel {
+  margin-top: 16px;
   padding: 14px;
-  border: 1px dashed rgba(17, 24, 39, .24);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, .72);
-  cursor: pointer;
-  transition: .18s ease;
 }
-.upload-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(16, 163, 127, .48);
-  background: #fff;
-  box-shadow: 0 12px 26px rgba(15, 23, 42, .07);
-}
-.upload-card b {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--ai-text);
-}
-.upload-card b span {
-  color: var(--ai-accent);
-  font-size: 12px;
-  font-weight: 800;
-}
-.upload-mark {
-  width: 44px;
-  height: 44px;
+.table-toolbar {
   display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: #111827;
-  color: #fff;
+  grid-template-columns: minmax(240px, 420px) auto;
+  gap: 10px;
+  margin-bottom: 12px;
 }
-.sidebar-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: center; min-height: 34px; }
-.document-search-input { min-width: 0; width: 100%; }
-.document-search-input :deep(.n-input-wrapper) { min-height: 34px; }
-.doc-sidebar :deep(.n-spin-container),
-.doc-sidebar :deep(.n-spin-content) {
-  min-height: 0;
-  height: 100%;
+.doc-header {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
 }
-.doc-list { display: grid; align-content: start; gap: 8px; min-height: 0; max-height: 100%; overflow-y: auto; padding-right: 4px; }
-.doc-list-item {
-  position: relative;
+.doc-actions {
+  justify-content: flex-end;
+}
+.metric-grid {
   display: grid;
-  gap: 8px;
-  width: 100%;
-  padding: 13px;
-  text-align: left;
-  border: 1px solid transparent;
-  border-radius: 14px;
-  background: transparent;
-  cursor: pointer;
-  transition: .18s ease;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
 }
-.doc-list-item::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 999px;
-  background: transparent;
+.metric-card {
+  min-width: 0;
+  padding: 12px;
+  background: #fafafa;
 }
-.doc-list-item:hover, .doc-list-item.active {
-  border-color: rgba(17, 24, 39, .12);
-  background: rgba(255, 255, 255, .82);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, .07);
-}
-.doc-list-item.active::before { background: var(--ai-primary); }
-.item-title {
+.metric-card b {
+  display: block;
+  margin-top: 6px;
   overflow: hidden;
-  color: var(--ai-text);
-  font-weight: 800;
+  color: var(--text);
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.item-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.doc-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
-.doc-status.success { color: #0f7a56; background: rgba(16, 163, 127, .12); }
-.doc-status.warning { color: #a16207; background: rgba(245, 158, 11, .14); }
-.doc-status.error { color: #b4234a; background: rgba(208, 48, 80, .12); }
-.doc-main { min-width: 0; min-height: 0; overflow: auto; padding: 24px max(26px, calc((100% - 1040px) / 2)); background: linear-gradient(180deg, #fff 0%, #fbfbf8 100%); }
-.doc-header { padding-bottom: 18px; border-bottom: 1px solid var(--ai-line); }
-.doc-actions { justify-content: flex-end; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.metric-card, .edit-panel, .preview-panel { border: 1px solid var(--ai-line); border-radius: 16px; background: rgba(255, 255, 255, .86); box-shadow: 0 12px 34px rgba(15, 23, 42, .06); }
-.metric-card { padding: 16px; }
-.metric-card span { color: var(--ai-muted); font-size: 12px; }
-.metric-card b { display: block; margin-top: 8px; color: var(--ai-text); }
-.notice-card, .edit-panel, .preview-panel { margin-top: 16px; }
-.citation-highlight { border: 1px solid rgba(16, 163, 127, .32); box-shadow: 0 10px 24px rgba(16, 163, 127, .10); }
-.panel-head { padding: 16px; border-bottom: 1px solid var(--ai-line); background: #fbfbf8; }
-.doc-form { padding: 16px; }
-.two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
-.preview-stack { display: grid; gap: 14px; padding: 16px; }
-.chunk-preview { border: 1px solid rgba(37, 99, 235, .32); box-shadow: 0 14px 30px rgba(37, 99, 235, .12); }
-.chunk-preview-title { margin-bottom: 8px; color: #1d4ed8; font-weight: 800; }
-.chunk-markdown { max-height: none; border-radius: 12px; padding: 12px; background: rgba(239, 246, 255, .76); }
-.markdown-preview { line-height: 1.75; word-break: break-word; }
+.notice-card,
+.edit-panel,
+.preview-panel {
+  margin-top: 16px;
+}
+.citation-highlight {
+  border: 1px solid rgba(15, 118, 110, 0.32);
+}
+.panel-head {
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fafafa;
+}
+.doc-form,
+.preview-stack,
+.editor-stack {
+  padding: 14px;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.editor-stack :deep(.ql-editor) {
+  line-height: 1.75;
+  word-break: break-word;
+}
+.editor-stack :deep(.ql-editor img),
 .markdown-preview :deep(img) {
   display: block;
   max-width: min(100%, 960px);
   height: auto;
   max-height: 70vh;
   margin: 12px auto;
-  border: 1px solid rgba(17, 24, 39, .08);
-  border-radius: 10px;
-  background: #f6f7f8;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
   object-fit: contain;
 }
-.markdown-preview :deep(img[data-secure-asset][src=""]) {
+.markdown-preview :deep(img[data-secure-asset][src='']) {
   width: min(100%, 520px);
   min-height: 180px;
 }
-.chunked-preview { display: grid; gap: 12px; }
-.chunk-pagination { display: flex; justify-content: flex-end; padding-top: 2px; }
-.doc-chunk { border: 1px solid rgba(17, 24, 39, .10); border-radius: 16px; padding: 16px; background: #fff; transition: .18s ease; }
-.doc-chunk.active { border-color: rgba(37, 99, 235, .42); background: rgba(239, 246, 255, .92); box-shadow: 0 12px 28px rgba(37, 99, 235, .14); }
-.doc-chunk-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--ai-muted); font-size: 12px; font-weight: 800; }
-.source-editor { padding: 16px; }
-.source-editor :deep(.n-input__textarea-el) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; line-height: 1.75; }
-pre { white-space: pre-wrap; word-break: break-word; margin: 16px; line-height: 1.75; }
-.doc-chunk-content :deep(p), .markdown-preview :deep(p) { margin: 8px 0; }
-.doc-chunk-content :deep(pre), .markdown-preview :deep(pre) { padding: 12px; border-radius: 10px; background: rgba(15, 23, 42, .08); overflow: auto; }
-.doc-chunk-content :deep(code), .markdown-preview :deep(code) { padding: 2px 5px; border-radius: 5px; background: rgba(15, 23, 42, .08); }
-.markdown-preview :deep(h1), .markdown-preview :deep(h2), .markdown-preview :deep(h3) { margin: 18px 0 10px; font-weight: 800; }
-.markdown-preview :deep(table) { width: 100%; border-collapse: collapse; margin: 12px 0; }
-.markdown-preview :deep(th), .markdown-preview :deep(td) { border: 1px solid rgba(148, 163, 184, .35); padding: 8px; text-align: left; }
-.empty-state { margin-top: 20vh; }
-@media (max-width: 1100px) {
-  .doc-workspace { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 96px); }
-  .doc-sidebar { border-right: 0; border-bottom: 1px solid var(--ai-line); }
-  .doc-header, .panel-head { flex-direction: column; }
-  .metric-grid, .two-col { grid-template-columns: 1fr; }
+.preview-stack {
+  display: grid;
+  gap: 14px;
 }
-@media (max-width: 640px) {
-  .library-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .doc-main { padding: 18px; }
-  .doc-actions { justify-content: flex-start; }
+.chunk-preview {
+  border: 1px solid rgba(37, 99, 235, 0.32);
+}
+.chunk-preview-title {
+  margin-bottom: 8px;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.chunk-markdown {
+  max-height: none;
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(239, 246, 255, 0.76);
+}
+.markdown-preview {
+  line-height: 1.75;
+  word-break: break-word;
+}
+.chunked-preview {
+  display: grid;
+  gap: 12px;
+}
+.chunk-pagination {
+  display: flex;
+  justify-content: flex-end;
+}
+.doc-chunk {
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+.doc-chunk.active {
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(239, 246, 255, 0.92);
+}
+.doc-chunk-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+pre {
+  margin: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.doc-chunk-content :deep(p),
+.markdown-preview :deep(p) {
+  margin: 8px 0;
+}
+.doc-chunk-content :deep(pre),
+.markdown-preview :deep(pre) {
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: auto;
+}
+.doc-chunk-content :deep(code),
+.markdown-preview :deep(code) {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.08);
+}
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3) {
+  margin: 18px 0 10px;
+  font-weight: 700;
+}
+.markdown-preview :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 8px;
+  text-align: left;
+}
+@media (max-width: 900px) {
+  .doc-table-header,
+  .doc-header,
+  .panel-head {
+    display: grid;
+  }
+  .library-metrics,
+  .metric-grid,
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+  .table-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

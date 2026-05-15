@@ -26,7 +26,7 @@ from app.services.skill_know.content_analyzer import skill_know_content_analyzer
 from app.services.skill_know.config_service import skill_know_config_service
 from app.services.skill_know.document_index_service import skill_know_document_index_service
 from app.services.skill_know.document_parser import SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS, SUPPORTED_MARKDOWN_UPLOAD_MESSAGE, skill_know_document_parser
-from app.services.skill_know.markdown_optimizer import skill_know_markdown_optimizer
+from app.services.skill_know.document_text import normalize_document_text
 from app.services.skill_know.utils import document_to_dict, make_uri, new_uuid, preview_text, sha256_text
 from app.settings import settings
 
@@ -743,12 +743,11 @@ class SkillKnowDocumentService:
         document.extra_metadata = metadata
         await document.save()
 
-    def _task_context(self, *, temp_path: str, ext: str, doc_title: str, abs_path: str) -> dict:
+    def _task_context(self, *, temp_path: str, ext: str, doc_title: str) -> dict:
         return {
             "source_temp_path": temp_path,
             "source_ext": ext,
             "source_title": doc_title,
-            "target_abs_path": abs_path,
         }
 
     async def _mark_retry_attempt(self, document: SkillKnowDocument, **context) -> None:
@@ -774,8 +773,36 @@ class SkillKnowDocumentService:
         document.extra_metadata = metadata
         document.status = SkillKnowDocumentStatus.COMPLETED
         document.error_message = None
+        content_text = normalize_document_text(document.content or "")
+        document.file_size = len(content_text.encode("utf-8", errors="ignore")) if content_text else 0
         await document.save()
         return await document_to_dict(document)
+
+    async def _run_reindex_task(self, document_id: int) -> None:
+        async with self._process_semaphore:
+            document = await SkillKnowDocument.filter(id=document_id).first()
+            if not document:
+                return
+            try:
+                await self._reindex_existing_content(document)
+            except Exception as exc:
+                logger.exception(
+                    "[skill_know.document.reindex.failed] document_id={} filename={} title={} error={}",
+                    document.id,
+                    document.filename,
+                    document.title,
+                    str(exc),
+                )
+                metadata = self._metadata(document)
+                metadata.update({
+                    "process_stage": "failed",
+                    "process_progress": 100,
+                    "last_process_at": datetime.now().isoformat(timespec="seconds"),
+                })
+                document.extra_metadata = metadata
+                document.status = SkillKnowDocumentStatus.FAILED
+                document.error_message = preview_text(str(exc), 240)
+                await document.save()
 
     async def upload(self, file: UploadFile, *, background_tasks: BackgroundTasks, title: str | None = None, folder_id: int | None = None) -> dict:
         filename = (file.filename or "").strip()
@@ -785,8 +812,6 @@ class SkillKnowDocumentService:
         if ext not in SUPPORTED_MARKDOWN_UPLOAD_EXTENSIONS:
             raise HTTPException(status_code=400, detail=SUPPORTED_MARKDOWN_UPLOAD_MESSAGE)
         uid = uuid.uuid4().hex
-        stored_name = f"{uid}.md"
-        abs_path = os.path.join(self._upload_dir(), stored_name)
         temp_path = os.path.join(self._temp_dir(), f"{uid}.{ext}")
         temp_size = await self._save_upload_to_temp(file, temp_path)
         doc_title = title or filename
@@ -795,23 +820,23 @@ class SkillKnowDocumentService:
             uri=make_uri("documents", uid),
             title=doc_title,
             filename=filename,
-            file_path=abs_path,
+            file_path="",
             file_size=0,
-            file_type="md",
+            file_type=ext,
             folder_id=folder_id,
             owner_id=CTX_USER_ID.get(),
             extra_metadata={
                 "original_filename": filename,
                 "original_file_type": ext,
                 "original_file_size": temp_size,
-                "converted_by": "markitdown",
+                "converted_by": "document_reader_agent",
                 "index_status": "pending",
                 "process_stage": "uploaded",
                 "process_progress": 5,
             },
             status=SkillKnowDocumentStatus.PROCESSING,
         )
-        asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title, abs_path))
+        asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title))
         return await document_to_dict(document)
 
     async def init_chunk_upload(self, data, *, user_id: int) -> dict:
@@ -910,8 +935,6 @@ class SkillKnowDocumentService:
             raise HTTPException(status_code=400, detail="文件大小校验失败")
 
         uid = uuid.uuid4().hex
-        stored_name = f"{uid}.md"
-        abs_path = os.path.join(self._upload_dir(), stored_name)
         temp_path = os.path.join(self._temp_dir(), f"{uid}.{ext}")
 
         try:
@@ -945,16 +968,16 @@ class SkillKnowDocumentService:
             uri=make_uri("documents", uid),
             title=data.title or str(manifest.get("title") or filename),
             filename=filename,
-            file_path=abs_path,
+            file_path="",
             file_size=0,
-            file_type="md",
+            file_type=ext,
             folder_id=manifest.get("folder_id"),
             owner_id=int(manifest.get("user_id") or 0),
             extra_metadata={
                 "original_filename": filename,
                 "original_file_type": ext,
                 "original_file_size": data.file_size,
-                "converted_by": "markitdown",
+                "converted_by": "document_reader_agent",
                 "index_status": "pending",
                 "process_stage": "uploaded",
                 "process_progress": 5,
@@ -963,18 +986,18 @@ class SkillKnowDocumentService:
             },
             status=SkillKnowDocumentStatus.PROCESSING,
         )
-        asyncio.create_task(self.process_document(document.id, temp_path, ext, data.title or filename, abs_path))
+        asyncio.create_task(self.process_document(document.id, temp_path, ext, data.title or filename))
         return await document_to_dict(document)
 
-    async def process_document(self, document_id: int, temp_path: str, ext: str, doc_title: str, abs_path: str) -> None:
+    async def process_document(self, document_id: int, temp_path: str, ext: str, doc_title: str) -> None:
         async with self._process_semaphore:
-            await self._process_document_locked(document_id, temp_path, ext, doc_title, abs_path)
+            await self._process_document_locked(document_id, temp_path, ext, doc_title)
 
-    async def _process_document_locked(self, document_id: int, temp_path: str, ext: str, doc_title: str, abs_path: str) -> None:
+    async def _process_document_locked(self, document_id: int, temp_path: str, ext: str, doc_title: str) -> None:
         document = await SkillKnowDocument.filter(id=document_id).first()
         if not document:
             return
-        await self._mark_retry_attempt(document, **self._task_context(temp_path=temp_path, ext=ext, doc_title=doc_title, abs_path=abs_path))
+        await self._mark_retry_attempt(document, **self._task_context(temp_path=temp_path, ext=ext, doc_title=doc_title))
         try:
             await self._set_progress(document, "converting", 20)
             asset_dir = self._asset_dir(document.uuid)
@@ -984,10 +1007,7 @@ class SkillKnowDocumentService:
             if ext not in {"xlsx", "pdf"}:
                 content = self._append_embedded_file_images(content, temp_path, ext, document_id=document.id, document_uuid=document.uuid)
             content = self._rewrite_markdown_asset_paths(content, document_id=document.id)
-            content, optimized = await skill_know_markdown_optimizer.optimize(doc_title, content)
             content_data = content.encode("utf-8", errors="ignore")
-            with open(abs_path, "wb") as f:
-                f.write(content_data)
 
             await self._set_progress(document, "analyzing", 45)
             analysis = await skill_know_content_analyzer.analyze(doc_title, content)
@@ -1006,20 +1026,18 @@ class SkillKnowDocumentService:
                 index_result = await skill_know_document_index_service.rebuild(document)
             except Exception as index_exc:
                 logger.exception(
-                    "[skill_know.document.process.index_failed] document_id={} filename={} title={} ext={} chat_base_url={} embedding_base_url={} error={}",
+                    "[skill_know.document.process.index_failed] document_id={} filename={} title={} ext={} chat_base_url={} error={}",
                     document.id,
                     document.filename,
                     document.title,
                     ext,
                     await skill_know_config_service.get("llm_chat_base_url", await skill_know_config_service.get("llm_base_url")),
-                    await skill_know_config_service.get("llm_embedding_base_url", await skill_know_config_service.get("llm_base_url")),
                     str(index_exc),
                 )
                 compact_error = preview_text(str(index_exc), 240)
-                raise RuntimeError(f"Markdown 已生成，但索引失败: {compact_error}") from index_exc
+                raise RuntimeError(f"文档内容已解析，但阅读索引失败: {compact_error}") from index_exc
             metadata = dict(document.extra_metadata or {})
             metadata["asset_dir"] = str(asset_dir)
-            metadata["markdown_optimized"] = optimized
             metadata.update(index_result)
             metadata.update({"process_stage": "completed", "process_progress": 100})
             document.extra_metadata = metadata
@@ -1042,7 +1060,16 @@ class SkillKnowDocumentService:
             except OSError:
                 pass
 
-    async def list(self, *, page: int, page_size: int, folder_id=None, category=None, status=None) -> tuple[int, list[dict]]:
+    async def list(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        folder_id=None,
+        category=None,
+        status=None,
+        keyword: str | None = None,
+    ) -> tuple[int, list[dict]]:
         q = Q()
         if folder_id is not None:
             q &= Q(folder_id=folder_id)
@@ -1050,6 +1077,10 @@ class SkillKnowDocumentService:
             q &= Q(category=category)
         if status:
             q &= Q(status=status)
+        if keyword:
+            kw = keyword.strip()
+            if kw:
+                q &= Q(title__icontains=kw) | Q(filename__icontains=kw) | Q(description__icontains=kw) | Q(category__icontains=kw)
         query = SkillKnowDocument.filter(q, owner_id=CTX_USER_ID.get())
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
@@ -1094,7 +1125,8 @@ class SkillKnowDocumentService:
         if "content" in data.model_fields_set:
             content_text = document.content or ""
             document.content_hash = sha256_text(content_text) if content_text else None
-            document.file_size = len(content_text.encode("utf-8", errors="ignore")) if content_text else 0
+            readable_text = normalize_document_text(content_text)
+            document.file_size = len(readable_text.encode("utf-8", errors="ignore")) if readable_text else 0
             metadata = dict(document.extra_metadata or {})
             metadata["index_status"] = "pending"
             metadata["process_stage"] = "edited"
@@ -1134,20 +1166,34 @@ class SkillKnowDocumentService:
         await document.save()
         return await document_to_dict(document)
 
-    async def search(self, query: str, *, limit: int = 20) -> list[dict]:
-        rows = (
-            await SkillKnowDocument.filter(owner_id=CTX_USER_ID.get())
-            .filter(Q(title__contains=query) | Q(description__contains=query) | Q(content__contains=query))
-            .order_by("-updated_at", "-id")
-            .limit(limit)
-        )
-        return [await document_to_dict(item) for item in rows]
-
     async def reindex(self, document_id: int) -> dict:
         document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
-        return await self._reindex_existing_content(document)
+        if not document.content:
+            raise HTTPException(status_code=400, detail="文档内容为空，无法重建索引")
+        document.status = SkillKnowDocumentStatus.PROCESSING
+        document.error_message = None
+        await document.save()
+        await self._set_progress(document, "indexing", 70, index_status="rebuilding")
+        asyncio.create_task(self._run_reindex_task(document.id))
+        return await document_to_dict(document)
+
+    async def reindex_all(self) -> dict:
+        rows = await SkillKnowDocument.filter(owner_id=CTX_USER_ID.get()).exclude(content__isnull=True)
+        scheduled = 0
+        skipped = 0
+        for document in rows:
+            if not (document.content or "").strip():
+                skipped += 1
+                continue
+            document.status = SkillKnowDocumentStatus.PROCESSING
+            document.error_message = None
+            await document.save()
+            await self._set_progress(document, "indexing", 70, index_status="rebuilding")
+            asyncio.create_task(self._run_reindex_task(document.id))
+            scheduled += 1
+        return {"scheduled": scheduled, "skipped": skipped, "total": len(rows)}
 
     async def retry(self, document_id: int) -> dict:
         document = await SkillKnowDocument.filter(id=document_id, owner_id=CTX_USER_ID.get()).first()
@@ -1157,12 +1203,11 @@ class SkillKnowDocumentService:
         temp_path = str(metadata.get("source_temp_path") or "")
         ext = str(metadata.get("source_ext") or metadata.get("original_file_type") or "").lower()
         doc_title = str(metadata.get("source_title") or document.title or document.filename)
-        abs_path = str(metadata.get("target_abs_path") or document.file_path)
-        if temp_path and abs_path and ext and Path(temp_path).is_file():
+        if temp_path and ext and Path(temp_path).is_file():
             document.status = SkillKnowDocumentStatus.PROCESSING
             document.error_message = None
             await document.save()
-            asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title, abs_path))
+            asyncio.create_task(self.process_document(document.id, temp_path, ext, doc_title))
             return await document_to_dict(document)
         if document.content:
             return await self._reindex_existing_content(document)

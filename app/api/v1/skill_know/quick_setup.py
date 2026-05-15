@@ -50,8 +50,6 @@ async def provider_models(provider_id: str):
                 {"id": "llama3.1", "name": "llama3.1", "type": "chat"},
                 {"id": "qwen2.5", "name": "qwen2.5", "type": "chat"},
                 {"id": "deepseek-r1", "name": "deepseek-r1", "type": "chat"},
-                {"id": "nomic-embed-text", "name": "nomic-embed-text", "type": "embedding"},
-                {"id": "mxbai-embed-large", "name": "mxbai-embed-large", "type": "embedding"},
             ],
         })
     return Success(data={
@@ -60,7 +58,5 @@ async def provider_models(provider_id: str):
         "models": [
             {"id": "gpt-4o-mini", "name": "gpt-4o-mini", "tool_calling": True},
             {"id": "gpt-4o", "name": "gpt-4o", "tool_calling": True},
-            {"id": "text-embedding-3-small", "name": "text-embedding-3-small", "type": "embedding"},
-            {"id": "text-embedding-3-large", "name": "text-embedding-3-large", "type": "embedding"},
         ],
     })

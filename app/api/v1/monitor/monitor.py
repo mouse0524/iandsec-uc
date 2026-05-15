@@ -30,7 +30,3 @@ async def monitor_redis():
 async def clear_redis(confirm: bool = Query(False)):
     return Success(data=await system_monitor_service.clear_redis(confirm=confirm), msg="Redis缓存已清空")
 
-
-@router.get("/chroma", summary="Chroma向量库状态")
-async def monitor_chroma():
-    return Success(data=await system_monitor_service.chroma_status())

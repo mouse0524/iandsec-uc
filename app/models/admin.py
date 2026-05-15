@@ -8,9 +8,7 @@ from .enums import (
     PartnerRegisterStatus,
     RegisterType,
     SkillKnowDocumentStatus,
-    SkillKnowLearningStatus,
     SkillKnowMessageRole,
-    SkillKnowPromptCategory,
     TicketActionType,
     TicketStatus,
 )
@@ -290,7 +288,6 @@ class SkillKnowDocumentChunk(BaseModel, TimestampMixin):
     content = fields.TextField(description="Markdown分块内容")
     content_hash = fields.CharField(max_length=64, description="内容哈希", index=True)
     token_count = fields.IntField(default=0, description="粗略Token数")
-    vector_id = fields.CharField(max_length=500, null=True, description="Chroma向量ID", index=True)
     extra_metadata = fields.JSONField(default=dict, description="元数据")
 
     class Meta:
@@ -298,16 +295,34 @@ class SkillKnowDocumentChunk(BaseModel, TimestampMixin):
         unique_together = ("document_id", "chunk_index")
 
 
-class SkillKnowVectorIndex(BaseModel, TimestampMixin):
-    uri = fields.CharField(max_length=500, description="资源URI", index=True)
-    level = fields.IntField(description="内容层级", index=True)
-    text = fields.TextField(description="索引文本")
-    vector_id = fields.CharField(max_length=500, null=True, description="Chroma向量ID", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="索引元数据")
+class SkillKnowDocumentSection(BaseModel, TimestampMixin):
+    uuid = fields.CharField(max_length=36, unique=True, description="??UUID", index=True)
+    document_id = fields.BigIntField(description="??ID", index=True)
+    section_key = fields.CharField(max_length=100, description="??Key", index=True)
+    heading = fields.CharField(max_length=300, null=True, description="????", index=True)
+    heading_path = fields.CharField(max_length=1000, null=True, description="????")
+    level = fields.IntField(default=0, description="????", index=True)
+    start_line = fields.IntField(description="????", index=True)
+    end_line = fields.IntField(description="????", index=True)
+    text = fields.TextField(description="????")
+    text_preview = fields.TextField(null=True, description="????")
+    keywords = fields.JSONField(default=list, description="???")
+    token_count = fields.IntField(default=0, description="??Token?")
+    extra_metadata = fields.JSONField(default=dict, description="???")
 
     class Meta:
-        table = "sk_vector_index"
-        unique_together = ("uri", "level")
+        table = "sk_document_section"
+        unique_together = ("document_id", "section_key")
+
+
+class SkillKnowDocumentLine(BaseModel, TimestampMixin):
+    document_id = fields.BigIntField(description="??ID", index=True)
+    line_no = fields.IntField(description="??", index=True)
+    content = fields.TextField(description="???")
+
+    class Meta:
+        table = "sk_document_line"
+        unique_together = ("document_id", "line_no")
 
 
 class SkillKnowConversation(BaseModel, TimestampMixin):
@@ -335,56 +350,6 @@ class SkillKnowMessage(BaseModel, TimestampMixin):
         table = "sk_message"
 
 
-class SkillKnowMessageFeedback(BaseModel, TimestampMixin):
-    message_id = fields.BigIntField(description="消息ID", index=True)
-    conversation_id = fields.BigIntField(description="会话ID", index=True)
-    rating = fields.IntField(null=True, description="评分1-5", index=True)
-    is_helpful = fields.BooleanField(null=True, description="是否有帮助", index=True)
-    reason = fields.TextField(null=True, description="反馈原因")
-    correct_answer = fields.TextField(null=True, description="正确答案")
-    created_by = fields.BigIntField(null=True, description="反馈人ID", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_message_feedback"
-
-
-class SkillKnowLearningCandidate(BaseModel, TimestampMixin):
-    question = fields.TextField(description="用户问题")
-    assistant_answer = fields.TextField(null=True, description="助手回答")
-    feedback_reason = fields.TextField(null=True, description="反馈原因")
-    correct_answer = fields.TextField(null=True, description="正确答案")
-    source_conversation_id = fields.BigIntField(null=True, description="来源会话ID", index=True)
-    source_message_id = fields.BigIntField(null=True, description="来源消息ID", index=True)
-    status = fields.CharEnumField(
-        SkillKnowLearningStatus,
-        default=SkillKnowLearningStatus.PENDING,
-        description="学习候选状态",
-        index=True,
-    )
-    candidate_markdown = fields.TextField(null=True, description="候选Markdown")
-    created_by = fields.BigIntField(null=True, description="创建人ID", index=True)
-    reviewed_by = fields.BigIntField(null=True, description="审核人ID", index=True)
-    reviewed_at = fields.DatetimeField(null=True, description="审核时间", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_learning_candidate"
-
-
-class SkillKnowPrompt(BaseModel, TimestampMixin):
-    key = fields.CharField(max_length=100, unique=True, description="提示词Key", index=True)
-    category = fields.CharEnumField(SkillKnowPromptCategory, description="提示词分类", index=True)
-    name = fields.CharField(max_length=100, description="显示名称")
-    description = fields.CharField(max_length=500, null=True, description="描述")
-    content = fields.TextField(description="提示词内容")
-    variables = fields.JSONField(default=list, description="变量列表")
-    is_active = fields.BooleanField(default=True, description="是否启用", index=True)
-
-    class Meta:
-        table = "sk_prompt"
-
-
 class SkillKnowSystemConfig(BaseModel, TimestampMixin):
     key = fields.CharField(max_length=100, unique=True, description="配置Key", index=True)
     value = fields.JSONField(null=True, description="配置值")
@@ -409,13 +374,3 @@ class SkillKnowUploadTask(BaseModel, TimestampMixin):
         table = "sk_upload_task"
 
 
-class SkillKnowContextRelation(BaseModel, TimestampMixin):
-    source_uri = fields.CharField(max_length=500, description="源URI", index=True)
-    target_uri = fields.CharField(max_length=500, description="目标URI", index=True)
-    relation_type = fields.CharField(max_length=50, description="关系类型", index=True)
-    reason = fields.TextField(default="", description="关系原因")
-    weight = fields.FloatField(default=1.0, description="权重")
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_context_relation"

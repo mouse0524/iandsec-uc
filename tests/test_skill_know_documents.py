@@ -1,7 +1,5 @@
 import asyncio
 import base64
-import sys
-import types
 import tempfile
 import unittest
 import zipfile
@@ -10,9 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
-from app.services.skill_know.chroma_store import SkillKnowChromaStore
 from app.services.skill_know.document_service import SkillKnowDocumentService
-from app.services.skill_know.retriever import SkillKnowRetriever
+from app.services.skill_know.document_text import normalize_document_text
+from app.services.skill_know.reader_agent.agent_service import SkillKnowReaderAgentService
+from app.services.skill_know.reader_agent.reader_tools import SkillKnowReaderTools
+from app.services.skill_know.reader_agent.section_indexer import SkillKnowSectionIndexer
 from app.core.ctx import CTX_USER_ID
 
 
@@ -316,58 +316,159 @@ class SkillKnowDocumentServiceTestCase(unittest.TestCase):
         self.assertTrue(result.exists())
         document_filter.assert_called_once_with(id=1, owner_id=1)
 
-    def test_chroma_client_uses_existing_telemetry_impl_with_telemetry_disabled(self):
-        store = SkillKnowChromaStore()
-        chromadb_module = types.SimpleNamespace(PersistentClient=MagicMock(return_value=MagicMock()))
-        class FakeSettings:
-            def __init__(self, **kwargs):
-                self.__dict__.update(kwargs)
+    def test_section_indexer_parses_heading_sections_with_line_ranges(self):
+        indexer = SkillKnowSectionIndexer()
+        lines = [
+            "# 服务端操作说明",
+            "目录",
+            "## 透明加解密",
+            "进入到策略配置页面。",
+            "开启加解密类型，保存并推送策略。",
+            "## WPS老板策略",
+            "勾选金山WPS策略。",
+        ]
 
-        with (
-            patch.dict(sys.modules, {"chromadb": chromadb_module, "chromadb.config": types.SimpleNamespace(Settings=FakeSettings)}),
-            patch("app.services.skill_know.chroma_store.os.makedirs"),
-        ):
-            store._client()
+        sections = indexer.parse_sections(lines)
 
-        settings = chromadb_module.PersistentClient.call_args.kwargs["settings"]
-        self.assertFalse(settings.anonymized_telemetry)
-        self.assertEqual(settings.chroma_product_telemetry_impl, "chromadb.telemetry.product.posthog.Posthog")
-        self.assertNotIn(".null.", settings.chroma_product_telemetry_impl)
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(sections[1].heading, "透明加解密")
+        self.assertEqual(sections[1].heading_path, "服务端操作说明 / 透明加解密")
+        self.assertEqual((sections[1].start_line, sections[1].end_line), (3, 5))
+        self.assertIn("透明加解密", sections[1].keywords)
 
-    def test_retriever_expands_hit_with_neighbor_chunks(self):
-        retriever = SkillKnowRetriever()
-        before = MagicMock(document_id=1, chunk_index=0, content="上文：登录失败时")
-        after = MagicMock(document_id=1, chunk_index=2, content="下文：再联系管理员")
+    def test_html_content_is_normalized_for_reader_index(self):
+        html = """
+        <h1>服务端操作说明</h1>
+        <p>目录</p>
+        <h2>透明加解密</h2>
+        <p>进入到策略配置页面。</p>
+        <ul><li>开启加解密类型</li><li>保存并推送策略</li></ul>
+        <table><tr><th>项目</th><th>说明</th></tr><tr><td>WPS</td><td>勾选金山WPS策略</td></tr></table>
+        """
 
-        class AwaitableRows:
-            def __await__(self):
-                async def rows():
-                    return [before, after]
+        text = normalize_document_text(html)
+        sections = SkillKnowSectionIndexer().parse_sections(text.splitlines())
 
-                return rows().__await__()
+        self.assertIn("# 服务端操作说明", text)
+        self.assertIn("## 透明加解密", text)
+        self.assertIn("- 开启加解密类型", text)
+        self.assertIn("项目 | 说明", text)
+        self.assertEqual(sections[1].heading, "透明加解密")
+        self.assertIn("保存并推送策略", sections[1].text)
 
-        async def run():
-            with patch("app.services.skill_know.retriever.SkillKnowDocumentChunk.filter", return_value=AwaitableRows()) as chunk_filter:
-                result = await retriever._expand_with_neighbor_context(
-                    [
-                        {
-                            "document_id": 1,
-                            "chunk_id": 10,
-                            "chunk_uri": "doc#chunk-1",
-                            "content": "命中：请重新获取验证码",
-                            "metadata": {"chunk_index": 1},
-                        }
-                    ]
-                )
-            return result, chunk_filter
+    def test_reader_tools_prioritize_strong_terms_over_generic_config_words(self):
+        tools = SkillKnowReaderTools()
 
-        result, chunk_filter = asyncio.run(run())
+        terms = tools.terms("透明加解密怎么配置")
 
-        self.assertIn("[上一片段]", result[0]["content"])
-        self.assertIn("[命中片段]", result[0]["content"])
-        self.assertIn("[下一片段]", result[0]["content"])
-        self.assertTrue(result[0]["metadata"]["context_expanded"])
-        chunk_filter.assert_called_once_with(document_id=1, chunk_index__in=[0, 2])
+        self.assertLess(terms.index("透明加解密"), terms.index("配置"))
+        self.assertIn("加解密", terms)
+        self.assertNotIn("怎么配置", terms)
+
+    def test_reader_tools_score_prefers_exact_heading_match(self):
+        tools = SkillKnowReaderTools()
+        exact = MagicMock(
+            heading="透明加解密",
+            heading_path="文件加密服务 / 策略配置 / 透明加解密",
+            text_preview="进入到策略配置页面，开启加解密类型，保存并推送策略。",
+            text="进入到策略配置页面，开启加解密类型，保存并推送策略。",
+            keywords=["透明加解密", "策略配置"],
+        )
+        generic = MagicMock(
+            heading="流程辅助控制",
+            heading_path="文件解密流程 / 流程辅助控制",
+            text_preview="本地解密成明文，解密后带压缩密码。",
+            text="本地解密成明文，解密后带压缩密码。",
+            keywords=["解密", "密码"],
+        )
+        terms = tools.terms("透明加解密怎么配置")
+
+        exact_score, _ = tools._score_section("透明加解密怎么配置", exact, terms)
+        generic_score, _ = tools._score_section("透明加解密怎么配置", generic, terms)
+
+        self.assertGreater(exact_score, generic_score)
+
+    def test_reader_tools_expands_landing_decrypt_to_policy_terms(self):
+        tools = SkillKnowReaderTools()
+
+        terms = tools.terms("落地解密在哪里配置")
+
+        self.assertIn("落地解密", terms)
+        self.assertIn("落地加密", terms)
+        self.assertIn("加解密类型", terms)
+        self.assertIn("策略配置", terms)
+
+    def test_reader_tools_keeps_domain_terms_for_long_followup_query(self):
+        tools = SkillKnowReaderTools()
+
+        terms = tools.terms("请基于上面的回答继续说明：我要对共享盘192.168.10.100进行全盘落地解密，给我详细的策略配置")
+
+        self.assertLess(terms.index("落地解密"), 8)
+        self.assertLess(terms.index("加解密类型"), 8)
+        self.assertIn("共享盘", terms)
+        self.assertIn("网络路径", terms)
+        self.assertIn("全盘", terms)
+        self.assertIn("文件类型", terms)
+        self.assertNotIn("请基于上面回答继续说明", terms)
+
+    def test_reader_tools_score_prefers_landing_policy_section(self):
+        tools = SkillKnowReaderTools()
+        policy = MagicMock(
+            heading="透明加解密",
+            heading_path="文件加密服务 / 策略配置 / 透明加解密",
+            text_preview="进入到策略配置页面，勾选落地加密，开启加解密类型，保存并推送策略。",
+            text="进入到策略配置页面，勾选落地加密，开启加解密类型，保存并推送策略。",
+            keywords=["透明加解密", "策略配置", "落地加密"],
+        )
+        generic = MagicMock(
+            heading="文件解密流程",
+            heading_path="流程管理 / 文件解密流程",
+            text_preview="提交解密申请后，审批通过可本地解密成明文。",
+            text="提交解密申请后，审批通过可本地解密成明文。",
+            keywords=["解密", "流程"],
+        )
+        terms = tools.terms("落地解密在哪里配置")
+
+        policy_score, _ = tools._score_section("落地解密在哪里配置", policy, terms)
+        generic_score, _ = tools._score_section("落地解密在哪里配置", generic, terms)
+
+        self.assertGreater(policy_score, generic_score)
+
+    def test_reader_agent_prompt_includes_history_for_followup(self):
+        service = SkillKnowReaderAgentService()
+
+        messages = service._messages(
+            "请基于上面的回答继续说明：共享盘怎么配置？",
+            "[ev-1]\n文档：手册\n章节：策略配置\n行号：1-5\n```markdown\n进入策略配置页面。\n```",
+            history_context="用户：落地解密在哪里配置？\n\n助手：在策略配置中配置落地加密。",
+        )
+
+        user_content = messages[1]["content"]
+        self.assertIn("## 会话历史上下文", user_content)
+        self.assertIn("落地解密在哪里配置", user_content)
+        self.assertIn("## 当前用户问题", user_content)
+        self.assertIn("共享盘怎么配置", user_content)
+        self.assertIn("## 内部原文依据", user_content)
+
+    def test_reader_agent_search_query_uses_user_history_only_for_followup(self):
+        service = SkillKnowReaderAgentService()
+
+        query = service._search_query(
+            "继续说明共享盘配置",
+            "\n\n".join(
+                [
+                    "用户：落地解密在哪里配置",
+                    "助手：当前知识库没有找到足够依据回答该问题。\n\n问题：网关\n\n建议补充：对应产品版本、模块名称、完整操作路径、截图或原始手册章节。",
+                    "用户：网关",
+                ]
+            ),
+        )
+
+        self.assertIn("落地解密在哪里配置", query)
+        self.assertIn("网关", query)
+        self.assertIn("继续说明共享盘配置", query)
+        self.assertNotIn("当前知识库没有找到足够依据", query)
+        self.assertNotIn("截图或原始手册章节", query)
 
 
 if __name__ == "__main__":
