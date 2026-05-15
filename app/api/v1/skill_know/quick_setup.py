@@ -27,6 +27,11 @@ async def test_connection(payload: SkillKnowTestConnectionIn):
     return Success(data=await skill_know_quick_setup_service.test_connection(payload))
 
 
+@router.post("/models", summary="查询当前对话端点支持的模型")
+async def chat_models(payload: SkillKnowTestConnectionIn):
+    return Success(data=await skill_know_quick_setup_service.chat_models(payload))
+
+
 @router.post("/reset", summary="重置快速设置")
 async def reset_setup():
     return Success(data=await skill_know_quick_setup_service.reset())

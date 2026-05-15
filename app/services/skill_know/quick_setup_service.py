@@ -50,6 +50,13 @@ class SkillKnowQuickSetupService:
         chat_result = await skill_know_openai_client.test_chat_connection(payload)
         return {"success": bool(chat_result.get("success")), "chat": chat_result}
 
+    async def chat_models(self, data) -> dict:
+        payload = data.model_dump()
+        for key in ("llm_api_key", "llm_chat_api_key"):
+            if not str(payload.get(key) or "").strip():
+                payload.pop(key, None)
+        return await skill_know_openai_client.list_chat_models(payload)
+
     async def reset(self) -> dict:
         for key in [
             "llm_api_key",

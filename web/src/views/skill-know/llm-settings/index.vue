@@ -8,6 +8,7 @@ defineOptions({ name: 'LLM设置' })
 const loading = ref(false)
 const testing = ref(false)
 const saving = ref(false)
+const loadingModels = ref(false)
 const debugging = ref(false)
 const goldenRunning = ref(false)
 const health = ref(null)
@@ -16,6 +17,8 @@ const testResult = ref(null)
 const retrievalDebug = ref(null)
 const goldenResult = ref(null)
 const goldenCases = ref([])
+const modelOptions = ref([])
+const selectedModels = ref([])
 const goldenSaving = ref(false)
 const debugQuery = ref('落地解密在哪里配置')
 const lastTestAt = ref('')
@@ -58,6 +61,7 @@ async function loadState() {
       llm_chat_base_url: llm.llm_chat_base_url || llm.llm_base_url || form.llm_chat_base_url,
       llm_chat_model: llm.llm_chat_model || form.llm_chat_model,
     })
+    syncSelectedModelsFromForm()
   } finally {
     loading.value = false
   }
@@ -130,6 +134,43 @@ function buildPayload() {
   return payload
 }
 
+function parseModels(value) {
+  return String(value || '')
+    .split(/[\n,;，；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function syncSelectedModelsFromForm() {
+  selectedModels.value = parseModels(form.llm_chat_model).slice(0, 5)
+}
+
+function applySelectedModels(value) {
+  const models = Array.from(new Set((value || []).map((item) => String(item).trim()).filter(Boolean))).slice(0, 5)
+  selectedModels.value = models
+  form.llm_chat_model = models.join('\n')
+}
+
+async function loadChatModels() {
+  if (form.llm_chat_provider !== 'ollama' && !form.llm_chat_api_key?.trim() && !maskedChatKey.value) {
+    $message.warning('请先填写或保存对话 API Key')
+    return
+  }
+  loadingModels.value = true
+  try {
+    const res = await api.skillKnowChatModels(buildPayload())
+    const rows = Array.isArray(res.data?.models) ? res.data.models : []
+    modelOptions.value = rows.map((item) => ({
+      label: item.id || item.name,
+      value: item.id || item.name,
+    })).filter((item) => item.value)
+    syncSelectedModelsFromForm()
+    $message.success(`已查询到 ${modelOptions.value.length} 个模型`)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 async function testConnection() {
   testing.value = true
   try {
@@ -198,6 +239,8 @@ const effectiveSummary = computed(() => ({
 const maskedChatKey = computed(() => state.value?.llm?.llm_chat_api_key || state.value?.llm?.llm_api_key || '')
 
 function applyProviderDefaults() {
+  modelOptions.value = []
+  selectedModels.value = []
   if (form.llm_chat_provider === 'ollama') {
     form.llm_chat_base_url = 'http://127.0.0.1:11434'
     if (!form.llm_chat_model || form.llm_chat_model === 'gpt-4o-mini') form.llm_chat_model = 'llama3.1'
@@ -254,7 +297,32 @@ function applyProviderDefaults() {
                 <NFormItem label="提供商"><NSelect v-model:value="form.llm_chat_provider" :options="providerOptions" @update:value="applyProviderDefaults" /></NFormItem>
                 <NFormItem v-if="form.llm_chat_provider !== 'ollama'" label="对话 API Key"><NInput v-model:value="form.llm_chat_api_key" type="password" show-password-on="click" placeholder="留空则不覆盖已保存 Key" /></NFormItem>
                 <NFormItem label="对话端点 URL"><NInput v-model:value="form.llm_chat_base_url" /></NFormItem>
-                <NFormItem label="Chat Model"><NInput v-model:value="form.llm_chat_model" /></NFormItem>
+                <NFormItem label="Chat Models">
+                  <NInput
+                    v-model:value="form.llm_chat_model"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 5 }"
+                    placeholder="最多 5 个，按顺序故障转移；用逗号或换行分隔"
+                  />
+                </NFormItem>
+                <div class="model-picker">
+                  <div class="model-picker-head">
+                    <span>从当前端点查询模型，最多选择 5 个作为故障转移顺序。</span>
+                    <NButton size="small" secondary :loading="loadingModels" @click="loadChatModels">
+                      查询模型
+                    </NButton>
+                  </div>
+                  <NSelect
+                    v-model:value="selectedModels"
+                    multiple
+                    filterable
+                    clearable
+                    :max-tag-count="3"
+                    :options="modelOptions"
+                    placeholder="先点击查询模型，再选择"
+                    @update:value="applySelectedModels"
+                  />
+                </div>
               </NForm>
             </section>
 
@@ -418,6 +486,8 @@ h1 { margin-top: 6px; }
 .form-stack { display: grid; gap: 14px; padding: 16px; }
 .endpoint-title { display: flex; justify-content: space-between; gap: 12px; color: var(--ai-text); }
 .endpoint-title span { color: var(--ai-muted); font-size: 12px; }
+.model-picker { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--ai-line); border-radius: 12px; background: #fff; }
+.model-picker-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; color: var(--ai-muted); font-size: 13px; line-height: 1.5; }
 .compact-form :deep(.n-input-number) { width: 100%; }
 .test-card { margin: 16px; padding: 15px; border-radius: 16px; }
 .test-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }

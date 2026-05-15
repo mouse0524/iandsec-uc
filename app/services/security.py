@@ -8,9 +8,13 @@ from fastapi import HTTPException
 
 from app.settings import settings
 
+DEFAULT_PUBLIC_HOSTS = {"api.openai.com"}
+
 
 def _is_private_hostname(hostname: str) -> bool:
     lowered = hostname.strip().lower().rstrip(".")
+    if lowered in DEFAULT_PUBLIC_HOSTS:
+        return False
     if lowered in {"localhost", "0", "0.0.0.0"}:
         return True
     try:
@@ -43,7 +47,7 @@ def validate_external_service_url(url: str | None, *, label: str = "外部服务
         raise HTTPException(status_code=400, detail=f"{label}地址不能包含认证信息")
     if _is_private_hostname(parsed.hostname):
         raise HTTPException(status_code=400, detail=f"{label}地址不能指向内网或本机")
-    allowed_hosts = {item.lower() for item in settings.EXTERNAL_URL_ALLOWED_HOSTS}
+    allowed_hosts = {item.lower() for item in settings.EXTERNAL_URL_ALLOWED_HOSTS} | DEFAULT_PUBLIC_HOSTS
     if allowed_hosts and parsed.hostname.lower() not in allowed_hosts:
         raise HTTPException(status_code=400, detail=f"{label}地址不在允许的域名列表中")
     return raw

@@ -182,6 +182,7 @@ export default {
   skillKnowProviderModels: (providerId) => request.get(`/skill-know/llm-settings/providers/${providerId}/models`),
   skillKnowCompleteSetup: (data = {}) => request.post('/skill-know/llm-settings/essential', data),
   skillKnowTestConnection: (data = {}) => request.post('/skill-know/llm-settings/test-connection', data),
+  skillKnowChatModels: (data = {}) => request.post('/skill-know/llm-settings/models', data),
   skillKnowResetSetup: () => request.post('/skill-know/llm-settings/reset'),
   skillKnowHealth: () => request.get('/skill-know/health'),
   skillKnowHealthDetail: () => request.get('/skill-know/health/detail'),

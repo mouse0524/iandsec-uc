@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import (
     SkillKnowDocumentStatus,
@@ -60,6 +62,16 @@ class SkillKnowQuickSetupIn(BaseModel):
     llm_chat_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
 
+    @field_validator("llm_chat_model")
+    @classmethod
+    def validate_chat_models(cls, value: str) -> str:
+        models = [item.strip() for item in re.split(r"[\n,;，；]+", str(value or "")) if item.strip()]
+        if not models:
+            raise ValueError("至少配置一个 Chat Model")
+        if len(models) > 5:
+            raise ValueError("Chat Model 最多配置 5 个")
+        return value
+
 
 class SkillKnowTestConnectionIn(BaseModel):
     llm_api_key: str | None = None
@@ -67,6 +79,11 @@ class SkillKnowTestConnectionIn(BaseModel):
     llm_chat_provider: str = "openai"
     llm_chat_base_url: str = "https://api.openai.com/v1"
     llm_chat_model: str = "gpt-4o-mini"
+
+    @field_validator("llm_chat_model")
+    @classmethod
+    def validate_chat_models(cls, value: str) -> str:
+        return SkillKnowQuickSetupIn.validate_chat_models(value)
 
 
 class SkillKnowChatIn(BaseModel):
