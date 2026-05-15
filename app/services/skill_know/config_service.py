@@ -29,6 +29,29 @@ class SkillKnowConfigService:
         "markdown_optimize_timeout": 45,
     }
     SENSITIVE_KEYS = {"llm_api_key", "llm_chat_api_key", "llm_embedding_api_key"}
+    LLM_KEYS = [
+        "llm_api_key",
+        "llm_chat_api_key",
+        "llm_embedding_api_key",
+        "llm_base_url",
+        "llm_chat_provider",
+        "llm_embedding_provider",
+        "llm_chat_base_url",
+        "llm_embedding_base_url",
+        "llm_chat_model",
+        "llm_embedding_model",
+        "llm_temperature",
+        "llm_timeout",
+        "retrieval_top_k",
+        "retrieval_score_threshold",
+        "retrieval_max_context_chars",
+        "chunk_size",
+        "chunk_overlap",
+        "markdown_optimize_enabled",
+        "markdown_optimize_prompt",
+        "markdown_optimize_max_chars",
+        "markdown_optimize_timeout",
+    ]
 
     @staticmethod
     def _mask_value(key: str, value):
@@ -38,6 +61,13 @@ class SkillKnowConfigService:
         if len(text) <= 8:
             return "****"
         return text[:4] + "****" + text[-4:]
+
+    @staticmethod
+    def _decode_value(item: SkillKnowSystemConfig):
+        value = item.value
+        if isinstance(value, dict) and "__raw" in value:
+            return value.get("__raw")
+        return value
 
     async def get(self, key: str, default=None):
         if key not in self.SENSITIVE_KEYS:
@@ -99,30 +129,17 @@ class SkillKnowConfigService:
         return item
 
     async def llm_config(self, masked: bool = False) -> dict:
-        keys = [
-            "llm_api_key",
-            "llm_chat_api_key",
-            "llm_embedding_api_key",
-            "llm_base_url",
-            "llm_chat_provider",
-            "llm_embedding_provider",
-            "llm_chat_base_url",
-            "llm_embedding_base_url",
-            "llm_chat_model",
-            "llm_embedding_model",
-            "llm_temperature",
-            "llm_timeout",
-            "retrieval_top_k",
-            "retrieval_score_threshold",
-            "retrieval_max_context_chars",
-            "chunk_size",
-            "chunk_overlap",
-            "markdown_optimize_enabled",
-            "markdown_optimize_prompt",
-            "markdown_optimize_max_chars",
-            "markdown_optimize_timeout",
-        ]
-        data = {key: await self.get(key) for key in keys}
+        data = {key: self.DEFAULTS.get(key) for key in self.LLM_KEYS}
+        try:
+            cached = await execute_redis("get", self.CACHE_KEY_ALL)
+            if cached:
+                data.update(json.loads(cached))
+        except Exception as exc:
+            logger.warning("[skill_know.config.cache] read_failed key={} error={}", self.CACHE_KEY_ALL, str(exc))
+
+        rows = await SkillKnowSystemConfig.filter(key__in=self.LLM_KEYS)
+        for item in rows:
+            data[item.key] = self._decode_value(item)
         if not masked:
             try:
                 cache_data = {key: value for key, value in data.items() if key not in self.SENSITIVE_KEYS}
@@ -136,11 +153,12 @@ class SkillKnowConfigService:
         return data
 
     async def is_configured(self) -> bool:
-        legacy_key = await self.get("llm_api_key")
-        chat_provider = str(await self.get("llm_chat_provider", "openai") or "openai").lower()
-        embedding_provider = str(await self.get("llm_embedding_provider", "openai") or "openai").lower()
-        chat_ready = chat_provider == "ollama" or bool(await self.get("llm_chat_api_key", legacy_key))
-        embedding_ready = embedding_provider == "ollama" or bool(await self.get("llm_embedding_api_key", legacy_key))
+        config = await self.llm_config()
+        legacy_key = config.get("llm_api_key")
+        chat_provider = str(config.get("llm_chat_provider") or "openai").lower()
+        embedding_provider = str(config.get("llm_embedding_provider") or "openai").lower()
+        chat_ready = chat_provider == "ollama" or bool(config.get("llm_chat_api_key") or legacy_key)
+        embedding_ready = embedding_provider == "ollama" or bool(config.get("llm_embedding_api_key") or legacy_key)
         return chat_ready and embedding_ready
 
     async def clear_cache(self) -> None:

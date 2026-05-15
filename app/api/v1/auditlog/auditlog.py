@@ -14,6 +14,8 @@ from app.schemas.apis import *
 from app.utils.http_headers import build_download_content_disposition
 
 router = APIRouter()
+AUDIT_EXPORT_MAX_ROWS = 50000
+AUDIT_EXPORT_BATCH_SIZE = 1000
 
 
 @router.get("/list", summary="查看操作日志")
@@ -113,8 +115,14 @@ async def export_audit_logs(
         q &= Q(created_at__gte=start_time)
     elif end_time:
         q &= Q(created_at__lte=end_time)
-    rows = await AuditLog.filter(q).order_by("-created_at")
-    data = [await item.to_dict() for item in rows]
+    total = await AuditLog.filter(q).count()
+    if total > AUDIT_EXPORT_MAX_ROWS:
+        return Fail(msg=f"导出数据量过大，当前 {total} 条，请缩小时间范围到 {AUDIT_EXPORT_MAX_ROWS} 条以内")
+
+    data = []
+    for offset in range(0, total, AUDIT_EXPORT_BATCH_SIZE):
+        rows = await AuditLog.filter(q).order_by("-created_at").offset(offset).limit(AUDIT_EXPORT_BATCH_SIZE)
+        data.extend([await item.to_dict() for item in rows])
 
     json_text = json.dumps(data, ensure_ascii=False, indent=2)
     csv_buffer = io.StringIO()

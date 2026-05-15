@@ -7,6 +7,8 @@ from app.services.skill_know.utils import preview_text
 
 
 class SkillKnowContentAnalyzer:
+    MAX_SAMPLE_CHARS = 6000
+
     async def analyze(self, title: str, content: str, *, use_llm: bool = True) -> dict:
         if use_llm and await skill_know_config_service.is_configured():
             try:
@@ -16,7 +18,7 @@ class SkillKnowContentAnalyzer:
         return self._analyze_by_rule(title, content)
 
     async def _analyze_with_llm(self, title: str, content: str) -> dict:
-        sample = content[:12000]
+        sample = content[:self.MAX_SAMPLE_CHARS]
         prompt = (
             "你是 Skill-Know 知识库内容分析器。请把文档处理为 JSON，字段包括："
             "abstract(100字内摘要), overview(Markdown结构化概览), category(短分类), tags(字符串数组), "

@@ -1135,7 +1135,12 @@ class SkillKnowDocumentService:
         return await document_to_dict(document)
 
     async def search(self, query: str, *, limit: int = 20) -> list[dict]:
-        rows = await SkillKnowDocument.filter(owner_id=CTX_USER_ID.get()).filter(Q(title__contains=query) | Q(description__contains=query) | Q(content__contains=query)).limit(limit)
+        rows = (
+            await SkillKnowDocument.filter(owner_id=CTX_USER_ID.get())
+            .filter(Q(title__contains=query) | Q(description__contains=query) | Q(content__contains=query))
+            .order_by("-updated_at", "-id")
+            .limit(limit)
+        )
         return [await document_to_dict(item) for item in rows]
 
     async def reindex(self, document_id: int) -> dict:

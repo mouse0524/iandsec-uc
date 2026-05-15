@@ -163,6 +163,73 @@ class SkillKnowChromaStore:
                 return None
         return None
 
+    async def upsert_document_chunks(self, items: list[dict[str, Any]]) -> dict[str, str]:
+        if not items:
+            return {}
+        if not (await skill_know_config_service.is_configured() and self._is_chromadb_available()):
+            return {}
+        texts = [str(item.get("text") or "") for item in items]
+        try:
+            embeddings = await skill_know_openai_client.embeddings(texts)
+        except Exception as exc:
+            first = items[0]
+            logger.exception(
+                "[skill_know.chroma.upsert_document_chunks.failed] chunk_uri={} document_id={} chunk_index={} title={} heading={} embedding_base_url={} error={}",
+                first.get("chunk_uri"),
+                first.get("metadata", {}).get("document_id"),
+                first.get("metadata", {}).get("chunk_index"),
+                first.get("metadata", {}).get("title"),
+                first.get("metadata", {}).get("heading"),
+                await skill_know_config_service.get("llm_embedding_base_url", await skill_know_config_service.get("llm_base_url")),
+                str(exc),
+            )
+            return {}
+
+        collection = self._document_collection()
+        rows: list[tuple[str, str, list[float], dict[str, Any]]] = []
+        for idx, item in enumerate(items):
+            embedding = embeddings[idx] if idx < len(embeddings) else []
+            if not embedding:
+                continue
+            chunk_uri = str(item.get("chunk_uri") or "")
+            text = str(item.get("text") or "")
+            metadata = {k: v for k, v in dict(item.get("metadata") or {}).items() if v is not None}
+            if not chunk_uri or not text:
+                continue
+            rows.append((chunk_uri, text, embedding, metadata))
+        vector_ids: dict[str, str] = {}
+        if not rows:
+            return vector_ids
+        try:
+            collection.upsert(
+                ids=[row[0] for row in rows],
+                documents=[row[1] for row in rows],
+                embeddings=[row[2] for row in rows],
+                metadatas=[row[3] for row in rows],
+            )
+            return {row[0]: row[0] for row in rows}
+        except Exception as exc:
+            logger.warning(
+                "[skill_know.chroma.upsert_document_chunks.batch_failed] count={} error={} action=fallback_single",
+                len(rows),
+                str(exc),
+            )
+        for chunk_uri, text, embedding, metadata in rows:
+            try:
+                collection.upsert(ids=[chunk_uri], documents=[text], embeddings=[embedding], metadatas=[metadata])
+                vector_ids[chunk_uri] = chunk_uri
+            except Exception as exc:
+                logger.warning(
+                    "[skill_know.chroma.upsert_document_chunk.single_failed] chunk_uri={} document_id={} chunk_index={} title={} heading={} error={}",
+                    chunk_uri,
+                    metadata.get("document_id"),
+                    metadata.get("chunk_index"),
+                    metadata.get("title"),
+                    metadata.get("heading"),
+                    str(exc),
+                )
+        return vector_ids
+
     async def diagnose(self, *, test_embedding: bool = False) -> dict[str, Any]:
         config = await skill_know_config_service.llm_config(masked=True)
         result: dict[str, Any] = {
@@ -231,8 +298,14 @@ class SkillKnowChromaStore:
                         }
                         for idx in range(len(ids))
                     ]
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "[skill_know.chroma.search_document_chunks.failed] query_preview={} embedding_provider={} embedding_model={} error={}",
+                    str(query or "")[:120],
+                    await skill_know_config_service.get("llm_embedding_provider"),
+                    await skill_know_config_service.get("llm_embedding_model"),
+                    str(exc),
+                )
         rows = await SkillKnowDocumentChunk.filter(content__contains=query).limit(limit)
         return [
             {

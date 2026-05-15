@@ -73,6 +73,30 @@ class SkillKnowOpenAIClient:
         content = (data.get("message") or {}).get("content") or data.get("response") or ""
         return {"choices": [{"message": {"content": content}}], "raw": data}
 
+    @staticmethod
+    def _normalize_embeddings_payload(payload: Any) -> list[list[float]]:
+        raw = payload
+        if isinstance(raw, dict):
+            raw = raw.get("embeddings") or raw.get("data") or raw.get("embedding") or []
+        if not isinstance(raw, list):
+            return []
+        if not raw:
+            return []
+        if all(isinstance(item, (int, float)) for item in raw):
+            return [[float(item) for item in raw]]
+        vectors: list[list[float]] = []
+        for item in raw:
+            if isinstance(item, list):
+                vectors.append([float(value) for value in item if isinstance(value, (int, float))])
+                continue
+            if isinstance(item, dict):
+                embedding = item.get("embedding")
+                if isinstance(embedding, list):
+                    vectors.append([float(value) for value in embedding if isinstance(value, (int, float))])
+                    continue
+            vectors.append([])
+        return vectors
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -228,6 +252,8 @@ class SkillKnowOpenAIClient:
         }
 
     async def embeddings_with_override(self, texts: list[str], *, override: dict | None = None) -> list[list[float]]:
+        if not texts:
+            return []
         config = await self._config(override)
         api_key = config.get("llm_embedding_api_key")
         if config["llm_embedding_provider"] != "ollama" and not api_key:
@@ -235,16 +261,15 @@ class SkillKnowOpenAIClient:
         if config["llm_embedding_provider"] == "ollama":
             model = config.get("llm_embedding_model") or "nomic-embed-text"
             async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
-                vectors: list[list[float]] = []
-                for text in texts:
-                    resp = await client.post(
-                        f"{config['llm_embedding_base_url']}/api/embeddings",
-                        headers=self._headers(),
-                        json={"model": model, "prompt": text},
-                    )
-                    resp.raise_for_status()
-                    vectors.append(resp.json().get("embedding") or [])
-                return vectors
+                payload_input: str | list[str]
+                payload_input = texts[0] if len(texts) == 1 else texts
+                resp = await client.post(
+                    f"{config['llm_embedding_base_url']}/api/embed",
+                    headers=self._headers(),
+                    json={"model": model, "input": payload_input},
+                )
+                resp.raise_for_status()
+                return self._normalize_embeddings_payload(resp.json())
         async with httpx.AsyncClient(timeout=float(config.get("llm_timeout") or 60)) as client:
             resp = await client.post(
                 f"{config['llm_embedding_base_url']}/embeddings",
@@ -252,8 +277,7 @@ class SkillKnowOpenAIClient:
                 json={"model": config.get("llm_embedding_model") or "text-embedding-3-small", "input": texts},
             )
             resp.raise_for_status()
-            data = resp.json().get("data") or []
-            return [item.get("embedding") or [] for item in data]
+            return self._normalize_embeddings_payload(resp.json())
 
 
 skill_know_openai_client = SkillKnowOpenAIClient()

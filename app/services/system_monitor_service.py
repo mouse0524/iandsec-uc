@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ class SystemMonitorService:
         "skill_know:prompt:*",
         "skill_know:prompts:list:*",
         "ticket:prefill:*",
+        "monitor:*",
     )
 
     def _bytes(self, value: Any) -> int:
@@ -43,16 +45,39 @@ class SystemMonitorService:
     def _percent(self, used: int, total: int) -> float:
         return round(used / total * 100, 2) if total else 0.0
 
+    async def _cached(self, key: str, ttl_seconds: int, loader):
+        try:
+            cached = await execute_redis("get", key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+        data = await loader()
+        try:
+            await execute_redis("setex", key, ttl_seconds, json.dumps(data, ensure_ascii=False))
+        except Exception:
+            pass
+        return data
+
     async def overview(self) -> dict[str, Any]:
-        return {
-            "generated_at": datetime.now().strftime(settings.DATETIME_FORMAT),
-            "system": await self.system_resources(),
-            "mysql": await self.mysql_status(),
-            "redis": await self.redis_status(),
-            "chroma": await self.chroma_status(),
-        }
+        async def load():
+            return {
+                "generated_at": datetime.now().strftime(settings.DATETIME_FORMAT),
+                "system": await self.system_resources(),
+                "mysql": await self.mysql_status(),
+                "redis": await self.redis_status(),
+                "chroma": await self.chroma_status(),
+            }
+
+        return await self._cached("monitor:overview:v1", 5, load)
 
     async def system_resources(self) -> dict[str, Any]:
+        async def load():
+            return await self._system_resources_uncached()
+
+        return await self._cached("monitor:resources:v1", 5, load)
+
+    async def _system_resources_uncached(self) -> dict[str, Any]:
         disk = shutil.disk_usage(settings.BASE_DIR)
         data: dict[str, Any] = {
             "hostname": platform.node(),
@@ -106,6 +131,12 @@ class SystemMonitorService:
         return data
 
     async def mysql_status(self) -> dict[str, Any]:
+        async def load():
+            return await self._mysql_status_uncached()
+
+        return await self._cached("monitor:mysql:v1", 10, load)
+
+    async def _mysql_status_uncached(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "host": settings.MYSQL_HOST,
             "port": settings.MYSQL_PORT,
@@ -131,6 +162,12 @@ class SystemMonitorService:
         return data
 
     async def redis_status(self) -> dict[str, Any]:
+        async def load():
+            return await self._redis_status_uncached()
+
+        return await self._cached("monitor:redis:v1", 5, load)
+
+    async def _redis_status_uncached(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "host": settings.REDIS_HOST,
             "port": settings.REDIS_PORT,
@@ -184,6 +221,12 @@ class SystemMonitorService:
         }
 
     async def chroma_status(self) -> dict[str, Any]:
+        async def load():
+            return await self._chroma_status_uncached()
+
+        return await self._cached("monitor:chroma:v1", 10, load)
+
+    async def _chroma_status_uncached(self) -> dict[str, Any]:
         data = await skill_know_chroma_store.diagnose()
         persist_dir = Path(str(data.get("persist_dir") or ""))
         if persist_dir.exists():

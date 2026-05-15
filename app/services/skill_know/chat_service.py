@@ -7,6 +7,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import HTTPException
+from tortoise.functions import Max
 
 from app.core.ctx import CTX_USER_ID
 from app.log import logger
@@ -59,9 +60,14 @@ class SkillKnowChatService:
         return await SkillKnowConversation.create(uuid=new_uuid(), title=message[:60], owner_id=owner_id)
 
     async def _prompt(self, key: str, fallback: str) -> str:
-        await skill_know_prompt_service.initialize_defaults()
         prompt = await SkillKnowPrompt.filter(key=key, is_active=True).first()
         return prompt.content if prompt else fallback
+
+    async def _prompts(self, mappings: list[tuple[str, str]]) -> dict[str, str]:
+        await skill_know_prompt_service.initialize_defaults()
+        rows = await SkillKnowPrompt.filter(key__in=[key for key, _ in mappings], is_active=True)
+        existing = {row.key: row.content for row in rows if row.content}
+        return {key: existing.get(key, fallback) for key, fallback in mappings}
 
     def _render_context(self, items: list[dict], max_chars: int) -> str:
         blocks = []
@@ -111,6 +117,39 @@ class SkillKnowChatService:
             history.append({"role": str(row.role), "content": row.content})
         return history
 
+    @staticmethod
+    def _drop_current_user_message(history_messages: list[dict], message: str) -> list[dict]:
+        if not history_messages:
+            return history_messages
+        last = history_messages[-1]
+        if last.get("role") == SkillKnowMessageRole.USER and str(last.get("content") or "") == message:
+            return history_messages[:-1]
+        return history_messages
+
+    @staticmethod
+    def _current_user_message(message: str, context: str) -> dict:
+        if context:
+            content = "\n\n".join(
+                [
+                    "请优先基于以下 Markdown 知识库片段回答用户问题。",
+                    "如果片段不足以得出结论，请明确说明缺少哪些依据，不要脱离知识库编造。",
+                    "## Markdown 知识库片段",
+                    context,
+                    "## 用户问题",
+                    message,
+                ]
+            )
+        else:
+            content = "\n\n".join(
+                [
+                    "当前没有检索到相关 Markdown 知识库片段。",
+                    "请先说明知识库依据不足，再给出可执行的排查建议和需要补充的信息。",
+                    "## 用户问题",
+                    message,
+                ]
+            )
+        return {"role": "user", "content": content}
+
     async def chat(self, message: str, conversation_id: int | None = None) -> dict:
         content = ""
         async for item in self.stream(message, conversation_id=conversation_id):
@@ -149,15 +188,15 @@ class SkillKnowChatService:
         support_prompt = await self._prompt("support.troubleshooting", "处理产品问题时先确认现象，再给出排查步骤和需要补充的信息。")
         escalation_prompt = await self._prompt("support.escalation", "当问题影响生产、安全或无法恢复时，提示升级处理并列出必要材料。")
 
-        history_messages = await self._history_messages(conv.id)
+        history_messages = self._drop_current_user_message(await self._history_messages(conv.id), message)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "system", "content": security_prompt},
             {"role": "system", "content": support_prompt},
             {"role": "system", "content": escalation_prompt},
             {"role": "system", "content": answer_prompt},
-            {"role": "system", "content": f"已检索到的 Markdown 知识库片段：\n{context}" if context else "当前没有检索到相关 Markdown 片段。"},
             *history_messages,
+            self._current_user_message(message, context),
         ]
 
         llm_start = event("llm.call.started", {"model": await skill_know_config_service.get("llm_chat_model"), "stream": True})
@@ -241,10 +280,18 @@ class SkillKnowChatService:
             query = SkillKnowConversation.filter(owner_id=CTX_USER_ID.get())
         total = await query.count()
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
+        conversation_ids = [item.id for item in rows]
+        last_messages = {}
+        if conversation_ids:
+            latest_rows = await SkillKnowMessage.filter(conversation_id__in=conversation_ids).group_by("conversation_id").annotate(last_id=Max("id")).values("conversation_id", "last_id")
+            last_ids = [row["last_id"] for row in latest_rows if row.get("last_id")]
+            if last_ids:
+                messages = await SkillKnowMessage.filter(id__in=last_ids)
+                last_messages = {message.conversation_id: message for message in messages}
         result = []
         for item in rows:
             data = await item.to_dict()
-            last_message = await SkillKnowMessage.filter(conversation_id=item.id).order_by("-id").first()
+            last_message = last_messages.get(item.id)
             if last_message:
                 data["last_message_preview"] = preview_text(last_message.content, 72)
                 data["last_message_role"] = str(last_message.role)

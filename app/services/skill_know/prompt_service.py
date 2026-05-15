@@ -161,6 +161,7 @@ DEPRECATED_DEFAULT_PROMPT_KEYS = {"learning.feedback_summary"}
 
 class SkillKnowPromptService:
     CACHE_TTL_SECONDS = 600
+    _defaults_ready = False
 
     @staticmethod
     def _prompt_cache_key(key: str) -> str:
@@ -171,6 +172,8 @@ class SkillKnowPromptService:
         return f"skill_know:prompts:list:{category or 'all'}:{int(include_inactive)}:v1"
 
     async def initialize_defaults(self, *, update_existing: bool = False, prune_deprecated: bool = False) -> dict:
+        if self._defaults_ready and not update_existing and not prune_deprecated:
+            return {"created": 0, "updated": 0, "deleted": 0}
         created_count = 0
         updated_count = 0
         for item in DEFAULT_PROMPTS:
@@ -192,11 +195,14 @@ class SkillKnowPromptService:
             deleted_count = await SkillKnowPrompt.filter(key__in=DEPRECATED_DEFAULT_PROMPT_KEYS).delete()
         if created_count or updated_count or deleted_count:
             await self.clear_cache()
+        if not update_existing and not prune_deprecated:
+            self._defaults_ready = True
         return {"created": created_count, "updated": updated_count, "deleted": deleted_count}
 
     async def sync_defaults(self) -> dict:
         result = await self.initialize_defaults(update_existing=True, prune_deprecated=True)
         await self.clear_cache()
+        self._defaults_ready = True
         total = await SkillKnowPrompt.all().count()
         return {**result, "total": total}
 
@@ -252,6 +258,7 @@ class SkillKnowPromptService:
         if data.is_active is not None:
             item.is_active = data.is_active
         await item.save()
+        self._defaults_ready = True
         await self.clear_cache(key)
         return await prompt_to_dict(item)
 
@@ -270,6 +277,7 @@ class SkillKnowPromptService:
             item.variables = default["variables"]
             item.is_active = True
             await item.save()
+        self._defaults_ready = True
         await self.clear_cache(key)
         return await prompt_to_dict(item)
 

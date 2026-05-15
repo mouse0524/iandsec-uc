@@ -139,6 +139,8 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
             return None
 
         content_type = (response.headers.get("content-type") or "").lower()
+        if "text/event-stream" in content_type:
+            return {"msg": "Streaming response skipped", "content-type": content_type}
         if "application/json" not in content_type:
             return {"msg": "Non-JSON response skipped", "content-type": content_type or None}
 
@@ -154,6 +156,8 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         if hasattr(response, "body"):
             body = response.body
         else:
+            if content_length is None:
+                return {"msg": "Streaming response skipped", "content-type": content_type or None}
             body_chunks = []
             total_size = 0
             too_large = False

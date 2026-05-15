@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
+from tortoise import Tortoise
 from tortoise.expressions import Q
 
 from app.log import logger
@@ -295,21 +296,46 @@ async def get_workbench_stats():
     terminal_latest_reported_at = None
     if is_global:
         expire_limit = now + timedelta(days=30)
-        latest_reports = await TerminalAuthReport.all().order_by("-reported_at")
-        latest_by_company = {}
-        for report in latest_reports:
-            if report.company_name not in latest_by_company:
-                latest_by_company[report.company_name] = report
-        terminal_company_count = len(latest_by_company)
-        for report in latest_by_company.values():
-            stats_map = report.terminal_stats or {}
+        latest_rows = []
+        try:
+            conn = Tortoise.get_connection("mysql")
+            latest_rows = await conn.execute_query_dict(
+                """
+                SELECT t.company_name, t.auth_expire_at, t.maintain_expire_at, t.terminal_stats, t.reported_at
+                FROM terminal_auth_report t
+                INNER JOIN (
+                    SELECT company_name, MAX(reported_at) AS max_reported_at
+                    FROM terminal_auth_report
+                    GROUP BY company_name
+                ) latest_time ON latest_time.company_name = t.company_name AND latest_time.max_reported_at = t.reported_at
+                INNER JOIN (
+                    SELECT company_name, reported_at, MAX(id) AS max_id
+                    FROM terminal_auth_report
+                    GROUP BY company_name, reported_at
+                ) latest_id ON latest_id.company_name = t.company_name AND latest_id.reported_at = t.reported_at AND latest_id.max_id = t.id
+                ORDER BY t.reported_at DESC
+                """
+            )
+        except Exception as exc:
+            logger.warning("[api.workbench_stats] terminal_latest_query_failed error={}", str(exc))
+            latest_rows = []
+        terminal_company_count = len(latest_rows)
+        for report in latest_rows:
+            stats_map = report.get("terminal_stats") or {}
+            if isinstance(stats_map, str):
+                try:
+                    stats_map = json.loads(stats_map)
+                except json.JSONDecodeError:
+                    stats_map = {}
             terminal_total += sum(int(value or 0) for value in stats_map.values())
-            if now <= report.auth_expire_at <= expire_limit:
+            auth_expire_at = report.get("auth_expire_at")
+            maintain_expire_at = report.get("maintain_expire_at")
+            if auth_expire_at and now <= auth_expire_at <= expire_limit:
                 terminal_auth_expiring += 1
-            if now <= report.maintain_expire_at <= expire_limit:
+            if maintain_expire_at and now <= maintain_expire_at <= expire_limit:
                 terminal_maintain_expiring += 1
-        if latest_reports:
-            terminal_latest_reported_at = latest_reports[0].reported_at.isoformat()
+        if latest_rows and latest_rows[0].get("reported_at"):
+            terminal_latest_reported_at = latest_rows[0]["reported_at"].isoformat()
 
     data = {
         "ticket_total": ticket_total,
@@ -348,7 +374,7 @@ async def get_workbench_stats():
         "terminal_latest_reported_at": terminal_latest_reported_at,
     }
     try:
-        await execute_redis("setex", cache_key, 60, json.dumps(data, ensure_ascii=False))
+        await execute_redis("setex", cache_key, 120, json.dumps(data, ensure_ascii=False))
     except Exception as exc:
         logger.warning("[api.workbench_stats] cache_write_failed key={} error={}", cache_key, str(exc))
     return Success(data=data)
