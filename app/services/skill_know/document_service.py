@@ -989,6 +989,49 @@ class SkillKnowDocumentService:
         asyncio.create_task(self.process_document(document.id, temp_path, ext, data.title or filename))
         return await document_to_dict(document)
 
+    async def create_markdown_document(
+        self,
+        *,
+        title: str,
+        content: str,
+        folder_id: int | None = None,
+        metadata: dict | None = None,
+    ) -> dict:
+        doc_title = (title or "学习候选").strip()[:200]
+        markdown = str(content or "").strip()
+        if not markdown:
+            raise HTTPException(status_code=400, detail="Markdown 内容不能为空")
+        uid = uuid.uuid4().hex
+        filename = f"{uid}.md"
+        file_path = os.path.join(self._upload_dir(), filename)
+        Path(file_path).write_text(markdown, encoding="utf-8")
+        extra_metadata = {
+            "original_filename": filename,
+            "original_file_type": "md",
+            "converted_by": "learning_candidate",
+            "index_status": "pending",
+            "process_stage": "created",
+            "process_progress": 5,
+            **(metadata or {}),
+        }
+        document = await SkillKnowDocument.create(
+            uuid=new_uuid(),
+            uri=make_uri("documents", uid),
+            title=doc_title,
+            filename=filename,
+            file_path=file_path,
+            file_size=len(markdown.encode("utf-8", errors="ignore")),
+            file_type="md",
+            folder_id=folder_id,
+            owner_id=CTX_USER_ID.get(),
+            content=markdown,
+            content_hash=sha256_text(markdown),
+            extra_metadata=extra_metadata,
+            status=SkillKnowDocumentStatus.PROCESSING,
+        )
+        asyncio.create_task(self._run_reindex_task(document.id))
+        return await document_to_dict(document)
+
     async def process_document(self, document_id: int, temp_path: str, ext: str, doc_title: str) -> None:
         async with self._process_semaphore:
             await self._process_document_locked(document_id, temp_path, ext, doc_title)

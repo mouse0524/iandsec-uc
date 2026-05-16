@@ -11,11 +11,11 @@ DEFAULT_GOLDEN_CASES = [
     {"id": "default-landing-decrypt", "question": "落地解密在哪里配置", "expected_heading_contains": "加解密", "enabled": True},
     {"id": "default-share-landing", "question": "共享盘全盘落地解密怎么配置", "expected_heading_contains": "加解密", "enabled": True},
     {"id": "default-transparent", "question": "透明加解密怎么配置", "expected_heading_contains": "加解密", "enabled": True},
-    {"id": "default-wps", "question": "WPS加密策略怎么配置", "expected_heading_contains": "WPS", "enabled": True},
-    {"id": "default-usb-register", "question": "注册U盘不生效怎么排查", "expected_heading_contains": "移动", "enabled": True},
-    {"id": "default-usb-key", "question": "U盘客户端导出key在哪里", "expected_heading_contains": "移动", "enabled": True},
+    {"id": "default-wps", "question": "WPS 加密策略怎么配置", "expected_heading_contains": "WPS", "enabled": True},
+    {"id": "default-usb-register", "question": "注册 U 盘不生效怎么排查", "expected_heading_contains": "移动", "enabled": True},
+    {"id": "default-usb-key", "question": "U 盘客户端导出 key 在哪里", "expected_heading_contains": "移动", "enabled": True},
     {"id": "default-gateway", "question": "网关怎么配置", "expected_heading_contains": "网关", "enabled": True},
-    {"id": "default-sysadmin-password", "question": "管理员sysadmin的密码是多少", "expected_heading_contains": "密码", "enabled": True},
+    {"id": "default-sysadmin-password", "question": "管理员 sysadmin 的密码是多少", "expected_heading_contains": "密码", "enabled": True},
 ]
 
 

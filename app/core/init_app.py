@@ -520,6 +520,13 @@ async def init_menus():
             "icon": "material-symbols:rate-review-outline-rounded",
             "component": "/skill-know/conversations",
         },
+        {
+            "name": "自进化报告",
+            "path": "evolution",
+            "order": 5,
+            "icon": "material-symbols:model-training-outline-rounded",
+            "component": "/skill-know/evolution",
+        },
     ]
     legacy_skill_know_components = [
         "/skill-know/search",
@@ -808,6 +815,37 @@ async def init_roles():
 
 
 async def init_skill_know_config_defaults():
+    defaults = [
+        {
+            "key": "evolution_daily_eval_enabled",
+            "value": True,
+            "group": "evolution",
+            "description": "是否启用 Skill-Know 自进化每日评测",
+        },
+        {
+            "key": "evolution_daily_eval_time",
+            "value": {"__raw": "02:10"},
+            "group": "evolution",
+            "description": "Skill-Know 自进化每日评测时间(HH:MM)",
+        },
+        {
+            "key": "evolution_daily_eval_top_k",
+            "value": 8,
+            "group": "evolution",
+            "description": "Skill-Know 自进化每日评测 TopK",
+        },
+    ]
+    for default in defaults:
+        exists = await SkillKnowSystemConfig.filter(key=default["key"]).exists()
+        if not exists:
+            await SkillKnowSystemConfig.create(
+                key=default["key"],
+                value=default["value"],
+                group=default["group"],
+                description=default["description"],
+                is_sensitive=False,
+            )
+
     item = await SkillKnowSystemConfig.filter(key="retrieval_max_context_chars").first()
     if not item:
         await SkillKnowSystemConfig.create(

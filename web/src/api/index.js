@@ -191,4 +191,24 @@ export default {
   skillKnowGoldenCases: () => request.get('/skill-know/eval/golden/cases'),
   skillKnowSaveGoldenCase: (data = {}) => request.post('/skill-know/eval/golden/cases', data),
   skillKnowDeleteGoldenCase: (params = {}) => request.delete('/skill-know/eval/golden/cases', { params }),
+  skillKnowEvolutionReports: (params = {}) => request.get('/skill-know/evolution/reports', { params }),
+  skillKnowEvolutionReport: (reportId) => request.get(`/skill-know/evolution/reports/${reportId}`),
+  skillKnowRunEvolutionReport: (params = {}) =>
+    request.post('/skill-know/evolution/reports/run', null, { params, timeout: 300000 }),
+  skillKnowEvolutionSettings: () => request.get('/skill-know/evolution/settings'),
+  skillKnowSaveEvolutionSettings: (data = {}) => request.post('/skill-know/evolution/settings', data),
+  skillKnowKnowledgeGaps: (params = {}) => request.get('/skill-know/evolution/gaps', { params }),
+  skillKnowUpdateKnowledgeGapStatus: (gapId, data = {}) =>
+    request.post(`/skill-know/evolution/gaps/${gapId}/status`, data),
+  skillKnowConvertGapToGoldenCase: (gapId, data = {}) =>
+    request.post(`/skill-know/evolution/gaps/${gapId}/golden-case`, data),
+  skillKnowLearningCandidates: (params = {}) => request.get('/skill-know/evolution/candidates', { params }),
+  skillKnowCreateLearningCandidate: (gapId, data = {}) =>
+    request.post(`/skill-know/evolution/gaps/${gapId}/candidate`, data),
+  skillKnowUpdateLearningCandidateStatus: (candidateId, data = {}) =>
+    request.post(`/skill-know/evolution/candidates/${candidateId}/status`, data),
+  skillKnowGenerateLearningCandidateDraft: (candidateId) =>
+    request.post(`/skill-know/evolution/candidates/${candidateId}/draft`),
+  skillKnowImportLearningCandidate: (candidateId, data = {}) =>
+    request.post(`/skill-know/evolution/candidates/${candidateId}/import`, data),
 }

@@ -10,6 +10,7 @@ from app.core.init_app import (
     register_exceptions,
     register_routers,
 )
+from app.services.skill_know.evolution_scheduler import skill_know_evolution_scheduler
 
 try:
     from app.settings.config import settings
@@ -20,8 +21,12 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_data()
-    yield
-    await Tortoise.close_connections()
+    skill_know_evolution_scheduler.start()
+    try:
+        yield
+    finally:
+        await skill_know_evolution_scheduler.stop()
+        await Tortoise.close_connections()
 
 
 def create_app() -> FastAPI:
