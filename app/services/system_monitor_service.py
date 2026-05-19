@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from tortoise import Tortoise
 
 from app.core.redis_client import execute_redis
+from app.services.skill_know.index_health_service import skill_know_index_health_service
 from app.settings import settings
 
 
@@ -64,6 +65,7 @@ class SystemMonitorService:
                 "system": await self.system_resources(),
                 "mysql": await self.mysql_status(),
                 "redis": await self.redis_status(),
+                "skill_know_index": await self.skill_know_index_status(),
             }
 
         return await self._cached("monitor:overview:v1", 5, load)
@@ -163,6 +165,21 @@ class SystemMonitorService:
             return await self._redis_status_uncached()
 
         return await self._cached("monitor:redis:v1", 5, load)
+
+    async def skill_know_index_status(self) -> dict[str, Any]:
+        async def load():
+            try:
+                detail = await skill_know_index_health_service.detail()
+                reader_index = detail.get("reader_index") or {}
+                return {
+                    "status": "ok" if detail.get("status") == "healthy" else "degraded",
+                    "components": detail.get("components") or {},
+                    **reader_index,
+                }
+            except Exception as exc:
+                return {"status": "error", "error": str(exc)}
+
+        return await self._cached("monitor:skill_know_index:v1", 10, load)
 
     async def _redis_status_uncached(self) -> dict[str, Any]:
         data: dict[str, Any] = {

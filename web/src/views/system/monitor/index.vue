@@ -12,6 +12,7 @@ const monitor = ref({})
 const system = computed(() => monitor.value.system || {})
 const mysql = computed(() => monitor.value.mysql || {})
 const redis = computed(() => monitor.value.redis || {})
+const skillKnowIndex = computed(() => monitor.value.skill_know_index || {})
 
 onMounted(loadOverview)
 
@@ -40,7 +41,7 @@ function formatSeconds(value) {
 }
 
 function statusType(status) {
-  return status === 'ok' ? 'success' : status === 'missing' ? 'warning' : 'error'
+  return status === 'ok' ? 'success' : ['missing', 'degraded', 'needs_reindex'].includes(status) ? 'warning' : 'error'
 }
 
 async function loadOverview() {
@@ -81,7 +82,7 @@ async function clearRedis() {
           <div>
             <div class="eyebrow">Operations</div>
             <h1>系统监控</h1>
-            <p>集中查看系统资源、MySQL 与 Redis 缓存状态。</p>
+            <p>集中查看系统资源、MySQL、Redis 与本地 WH 索引状态。</p>
           </div>
           <NSpace>
             <NButton secondary :loading="loading" @click="loadOverview">刷新</NButton>
@@ -163,6 +164,26 @@ async function clearRedis() {
               <div><span>连接客户端</span><b>{{ redis.connected_clients ?? '-' }}</b></div>
               <div><span>命中率</span><b>{{ redis.hit_rate ?? 0 }}%</b></div>
               <div v-if="redis.error"><span>错误</span><b>{{ redis.error }}</b></div>
+            </div>
+          </div>
+
+          <div class="monitor-panel">
+            <div class="panel-head">
+              <div>
+                <h3>本地 WH 索引</h3>
+                <p>{{ skillKnowIndex.index_dir || '-' }}</p>
+              </div>
+              <NTag :type="statusType(skillKnowIndex.status)" round>{{ skillKnowIndex.status || 'unknown' }}</NTag>
+            </div>
+            <div class="info-list">
+              <div><span>后端</span><b>{{ skillKnowIndex.backend || 'whoosh' }}</b></div>
+              <div><span>可用</span><b>{{ skillKnowIndex.available ? '是' : '否' }}</b></div>
+              <div><span>索引存在</span><b>{{ skillKnowIndex.exists ? '是' : '否' }}</b></div>
+              <div><span>文档数</span><b>{{ skillKnowIndex.document_count ?? '-' }}</b></div>
+              <div><span>分段数</span><b>{{ skillKnowIndex.section_count ?? '-' }}</b></div>
+              <div><span>索引条目</span><b>{{ skillKnowIndex.doc_count ?? 0 }} / {{ skillKnowIndex.doc_count_all ?? 0 }}</b></div>
+              <div><span>领域词版本</span><b>{{ skillKnowIndex.domain_terms_version || '-' }}</b></div>
+              <div v-if="skillKnowIndex.error"><span>错误</span><b>{{ skillKnowIndex.error }}</b></div>
             </div>
           </div>
         </section>
