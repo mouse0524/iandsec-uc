@@ -208,7 +208,11 @@ class SystemSettingController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先开启")
         if not base_url:
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
-        base_url = validate_external_service_url(base_url, label="WebDAV Base URL")
+        base_url = validate_external_service_url(
+            base_url,
+            label="WebDAV Base URL",
+            enforce_allowed_hosts=False,
+        )
         if not username or not password:
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
 
@@ -243,7 +247,11 @@ class SystemSettingController:
         if payload.get("webdav_password") == "******":
             payload["webdav_password"] = sections["webdav"].get("webdav_password")
         if payload.get("webdav_base_url"):
-            payload["webdav_base_url"] = validate_external_service_url(payload.get("webdav_base_url"), label="WebDAV Base URL")
+            payload["webdav_base_url"] = validate_external_service_url(
+                payload.get("webdav_base_url"),
+                label="WebDAV Base URL",
+                enforce_allowed_hosts=False,
+            )
 
         site_keys = {"site_title", "site_logo", "allow_partner_register"}
         ticket_keys = {

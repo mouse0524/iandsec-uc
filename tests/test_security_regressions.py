@@ -30,6 +30,16 @@ class SecurityRegressionTestCase(unittest.TestCase):
     def test_external_service_url_accepts_https_public_host(self):
         self.assertEqual(validate_external_service_url("https://api.openai.com/v1", label="LLM"), "https://api.openai.com/v1")
 
+    def test_webdav_url_can_skip_allowed_host_list(self):
+        self.assertEqual(
+            validate_external_service_url(
+                "https://dav.example.com/webdav",
+                label="WebDAV Base URL",
+                enforce_allowed_hosts=False,
+            ),
+            "https://dav.example.com/webdav",
+        )
+
     def test_openai_compatible_model_url_rejects_private_hosts(self):
         with self.assertRaises(RuntimeError):
             SkillKnowOpenAIClient._validate_openai_compatible_url("http://127.0.0.1:11434/v1", label="LLM对话地址")

@@ -115,7 +115,11 @@ class WebDavController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先在系统设置中启用")
         if not data.get("webdav_base_url"):
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
-        data["webdav_base_url"] = validate_external_service_url(data.get("webdav_base_url"), label="WebDAV Base URL")
+        data["webdav_base_url"] = validate_external_service_url(
+            data.get("webdav_base_url"),
+            label="WebDAV Base URL",
+            enforce_allowed_hosts=False,
+        )
         if not data.get("webdav_username") or not data.get("webdav_password"):
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
         return data
