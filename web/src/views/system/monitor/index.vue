@@ -7,6 +7,7 @@ defineOptions({ name: '系统监控' })
 
 const loading = ref(false)
 const clearing = ref(false)
+const reindexing = ref(false)
 const monitor = ref({})
 
 const system = computed(() => monitor.value.system || {})
@@ -68,6 +69,25 @@ async function clearRedis() {
         await loadOverview()
       } finally {
         clearing.value = false
+      }
+    },
+  })
+}
+
+async function rebuildWhIndex() {
+  window.$dialog.warning({
+    title: '重建本地 WH 索引',
+    content: '将重新调度当前账号可见文档的本地阅读索引任务，期间检索结果可能短暂波动。确认继续？',
+    positiveText: '重建',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      reindexing.value = true
+      try {
+        const res = await api.skillKnowReindexAllDocuments()
+        $message.success(`已调度 ${res.data?.scheduled || 0} 个文档，跳过 ${res.data?.skipped || 0} 个`)
+        await loadOverview()
+      } finally {
+        reindexing.value = false
       }
     },
   })
@@ -173,7 +193,10 @@ async function clearRedis() {
                 <h3>本地 WH 索引</h3>
                 <p>{{ skillKnowIndex.index_dir || '-' }}</p>
               </div>
-              <NTag :type="statusType(skillKnowIndex.status)" round>{{ skillKnowIndex.status || 'unknown' }}</NTag>
+              <NSpace align="center">
+                <NButton size="small" secondary :loading="reindexing" @click="rebuildWhIndex">一键重建索引</NButton>
+                <NTag :type="statusType(skillKnowIndex.status)" round>{{ skillKnowIndex.status || 'unknown' }}</NTag>
+              </NSpace>
             </div>
             <div class="info-list">
               <div><span>后端</span><b>{{ skillKnowIndex.backend || 'whoosh' }}</b></div>

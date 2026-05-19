@@ -169,6 +169,7 @@ export default {
   skillKnowDeleteDocument: (params = {}) => request.delete('/skill-know/documents/delete', { params }),
   skillKnowMoveDocument: (data = {}) => request.post('/skill-know/documents/move', data),
   skillKnowReindexDocument: (params = {}) => request.post('/skill-know/documents/reindex', null, { params }),
+  skillKnowReindexAllDocuments: () => request.post('/skill-know/documents/reindex-all'),
   skillKnowRetryDocument: (params = {}) => request.post('/skill-know/documents/retry', null, { params }),
   skillKnowRecoverStuckDocuments: (params = {}) => request.post('/skill-know/documents/recover-stuck', null, { params }),
   // skill know - chat/settings
