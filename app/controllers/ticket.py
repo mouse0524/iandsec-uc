@@ -198,7 +198,7 @@ class TicketController:
             )
         return bound_count
 
-    async def create_ticket(self, *, submitter_id: int, payload: dict) -> Ticket:
+    async def create_ticket(self, *, submitter_id: int, payload: dict, notify_pending_review: bool = True) -> Ticket:
         logger.info(
             "[ticket.create] start submitter_id={} project_phase={} category={} title={}",
             submitter_id,
@@ -228,7 +228,8 @@ class TicketController:
             operator_id=submitter_id,
             comment=None,
         )
-        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+        if notify_pending_review:
+            await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
         logger.info(
             "[ticket.create] success ticket_id={} ticket_no={} submitter_id={} attachment_count={}",
             ticket.id,
@@ -237,6 +238,41 @@ class TicketController:
             len(attachment_ids),
         )
         return ticket
+
+    async def create_ticket_with_optional_auto_review(self, *, submitter_id: int, payload: dict) -> Ticket:
+        config = await system_setting_controller.get_public_config()
+        auto_approve = config.get("customer_service_auto_approve_ticket", False)
+        ticket = await self.create_ticket(
+            submitter_id=submitter_id,
+            payload=payload,
+            notify_pending_review=not auto_approve,
+        )
+        if not auto_approve:
+            return ticket
+
+        tech_user = await User.filter(is_active=True, roles__name="技术").order_by("id").first()
+        if not tech_user:
+            logger.warning("[ticket.auto_review] skipped ticket_id={} reason=no_active_tech_user", ticket.id)
+            await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+            return ticket
+
+        try:
+            return await self.set_customer_service_review(
+                ticket_id=ticket.id,
+                reviewer_id=0,
+                approved=True,
+                comment="客服自动审批",
+                tech_id=tech_user.id,
+            )
+        except Exception:
+            logger.warning(
+                "[ticket.auto_review] failed ticket_id={} tech_id={}",
+                ticket.id,
+                tech_user.id,
+                exc_info=True,
+            )
+            await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+            return ticket
 
     async def get_ticket(self, ticket_id: int) -> Ticket:
         return await Ticket.get(id=ticket_id)

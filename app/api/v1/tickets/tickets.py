@@ -83,7 +83,7 @@ async def create_ticket(payload: TicketCreate):
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
-    ticket = await ticket_controller.create_ticket(submitter_id=user.id, payload=body)
+    ticket = await ticket_controller.create_ticket_with_optional_auto_review(submitter_id=user.id, payload=body)
     logger.info("[api.ticket.create] success user_id={} ticket_id={}", user.id, ticket.id)
     return Success(msg="提交成功", data=await ticket.to_dict())
 

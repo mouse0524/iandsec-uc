@@ -33,11 +33,13 @@ class SystemSettingController:
             "site_title": "安得和众用户服务中心",
             "site_logo": None,
             "allow_partner_register": True,
+            "customer_service_auto_approve_register": False,
         },
         "ticket": {
             "ticket_attachment_extensions": ["zip", "rar", "png", "jpg", "gif"],
             "ticket_project_phases": ["售前", "实施", "售后"],
             "ticket_categories": ["登录问题", "权限问题", "系统异常", "其他"],
+            "customer_service_auto_approve_ticket": False,
             "ticket_root_causes": ["代码缺陷", "配置错误", "环境异常", "数据问题", "操作不当", "第三方依赖"],
             "ticket_description_templates": [
                 "问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：",
@@ -157,9 +159,11 @@ class SystemSettingController:
             "site_title": site.get("site_title"),
             "site_logo": logo_url,
             "allow_partner_register": site.get("allow_partner_register", True),
+            "customer_service_auto_approve_register": site.get("customer_service_auto_approve_register", False),
             "ticket_attachment_extensions": ticket.get("ticket_attachment_extensions") or [],
             "ticket_project_phases": ticket.get("ticket_project_phases") or [],
             "ticket_categories": ticket.get("ticket_categories") or [],
+            "customer_service_auto_approve_ticket": ticket.get("customer_service_auto_approve_ticket", False),
             "ticket_root_causes": ticket.get("ticket_root_causes") or [],
             "ticket_description_templates": ticket.get("ticket_description_templates") or [],
             "login_security_enabled": login_security.get("login_security_enabled", True),
@@ -253,11 +257,12 @@ class SystemSettingController:
                 enforce_allowed_hosts=False,
             )
 
-        site_keys = {"site_title", "site_logo", "allow_partner_register"}
+        site_keys = {"site_title", "site_logo", "allow_partner_register", "customer_service_auto_approve_register"}
         ticket_keys = {
             "ticket_attachment_extensions",
             "ticket_project_phases",
             "ticket_categories",
+            "customer_service_auto_approve_ticket",
             "ticket_root_causes",
             "ticket_description_templates",
         }

@@ -57,7 +57,7 @@ async def create_public_ticket(payload: TicketCreate):
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
     await ticket_controller.validate_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])
-    ticket = await ticket_controller.create_ticket(submitter_id=0, payload=body)
+    ticket = await ticket_controller.create_ticket_with_optional_auto_review(submitter_id=0, payload=body)
     await ticket_controller.consume_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])
     logger.info(
         "[api.public_ticket.create] success ticket_id={} ticket_no={} attachment_ids={}",

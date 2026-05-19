@@ -7,9 +7,11 @@ class SystemSettingUpdateIn(BaseModel):
     site_title: str = Field(..., description="网站标题")
     site_logo: str | None = Field(default=None, description="网站Logo")
     allow_partner_register: bool = Field(default=True, description="是否开放代理商注册")
+    customer_service_auto_approve_register: bool = Field(default=False, description="客服是否自动审批注册")
     ticket_attachment_extensions: list[str] = Field(default_factory=list, description="工单附件允许上传类型")
     ticket_project_phases: list[str] = Field(default_factory=list, description="工单项目阶段")
     ticket_categories: list[str] = Field(default_factory=list, description="工单分类")
+    customer_service_auto_approve_ticket: bool = Field(default=False, description="客服是否自动审批工单")
     ticket_root_causes: list[str] = Field(default_factory=list, description="工单问题根因")
     ticket_description_templates: list[str] = Field(default_factory=list, description="工单问题描述模板")
     login_security_enabled: bool = Field(default=True, description="是否启用登录安全策略")
@@ -154,9 +156,11 @@ class PublicSiteConfigOut(BaseModel):
     site_title: str
     site_logo: str | None = None
     allow_partner_register: bool
+    customer_service_auto_approve_register: bool
     ticket_attachment_extensions: list[str]
     ticket_project_phases: list[str]
     ticket_categories: list[str]
+    customer_service_auto_approve_ticket: bool
     ticket_description_templates: list[str]
     login_security_enabled: bool
     login_account_ip_fail_limit: int

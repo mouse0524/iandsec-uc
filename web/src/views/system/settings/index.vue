@@ -37,9 +37,11 @@ const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
   allow_partner_register: true,
+  customer_service_auto_approve_register: false,
   ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
   ticket_project_phases: ['售前', '实施', '售后'],
   ticket_categories: ['登录问题', '权限问题', '系统异常', '其他'],
+  customer_service_auto_approve_ticket: false,
   ticket_root_causes: ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖'],
   ticket_description_templates: ['问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：'],
   login_security_enabled: true,
@@ -469,6 +471,9 @@ function applyPresetHtmlTemplates() {
               <NFormItem label="开放注册">
                 <NSwitch v-model:value="form.allow_partner_register" />
               </NFormItem>
+              <NFormItem label="客服自动审批注册">
+                <NSwitch v-model:value="form.customer_service_auto_approve_register" />
+              </NFormItem>
             </NCard>
           </NTabPane>
 
@@ -482,6 +487,9 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="问题分类" path="ticket_categories">
                 <NDynamicTags v-model:value="form.ticket_categories" />
+              </NFormItem>
+              <NFormItem label="客服自动审批工单">
+                <NSwitch v-model:value="form.customer_service_auto_approve_ticket" />
               </NFormItem>
               <NFormItem label="问题根因" path="ticket_root_causes">
                 <NDynamicTags v-model:value="form.ticket_root_causes" />

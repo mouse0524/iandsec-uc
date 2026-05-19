@@ -43,12 +43,21 @@ async def partner_register(payload: PartnerRegisterIn):
         logger.warning("[api.partner.register] email_code_invalid email={}", payload.email)
         return Fail(code=400, msg="邮箱验证码错误或已失效，请重新获取后再提交")
 
+    auto_approve = config.get("customer_service_auto_approve_register", False)
     try:
         register_obj = await partner_controller.register(payload)
+        if auto_approve:
+            register_obj = await partner_controller.review(
+                register_id=register_obj.id,
+                reviewer_id=0,
+                approved=True,
+                comment="客服自动审批",
+            )
     except HTTPException as exc:
         return Fail(code=exc.status_code, msg=str(exc.detail))
     logger.info("[api.partner.register] success register_id={} email={}", register_obj.id, register_obj.email)
-    return Success(msg="注册成功，请等待审核", data=await register_obj.to_dict(exclude_fields=["password_hash"]))
+    msg = "注册成功，已自动审核通过" if auto_approve else "注册成功，请等待审核"
+    return Success(msg=msg, data=await register_obj.to_dict(exclude_fields=["password_hash"]))
 
 
 @router.post("/register/channel", summary="渠道商注册")
