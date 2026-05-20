@@ -19,6 +19,8 @@ export const useAppStore = defineStore('app', {
       siteTitle: import.meta.env.VITE_TITLE || '安得和众用户服务中心',
       siteLogo: '',
       allowPartnerRegister: true,
+      allowChannelRegister: true,
+      allowUserRegister: true,
       ticketAttachmentExtensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
       ticketProjectPhases: ['售前', '实施', '售后'],
       ticketCategories: ['登录问题', '权限问题', '系统异常', '其他'],
@@ -66,8 +68,13 @@ export const useAppStore = defineStore('app', {
     setSiteConfig(config = {}) {
       this.siteTitle = config.site_title || this.siteTitle
       this.siteLogo = config.site_logo || ''
-      this.allowPartnerRegister =
+      const legacyRegisterEnabled =
         typeof config.allow_partner_register === 'boolean' ? config.allow_partner_register : this.allowPartnerRegister
+      this.allowChannelRegister =
+        typeof config.allow_channel_register === 'boolean' ? config.allow_channel_register : legacyRegisterEnabled
+      this.allowUserRegister =
+        typeof config.allow_user_register === 'boolean' ? config.allow_user_register : legacyRegisterEnabled
+      this.allowPartnerRegister = this.allowChannelRegister || this.allowUserRegister
       if (Array.isArray(config.ticket_attachment_extensions) && config.ticket_attachment_extensions.length > 0) {
         this.ticketAttachmentExtensions = config.ticket_attachment_extensions
       }

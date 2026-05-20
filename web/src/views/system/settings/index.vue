@@ -37,6 +37,8 @@ const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
   allow_partner_register: true,
+  allow_channel_register: true,
+  allow_user_register: true,
   customer_service_auto_approve_register: false,
   ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
   ticket_project_phases: ['售前', '实施', '售后'],
@@ -305,9 +307,17 @@ async function loadData() {
   try {
     loading.value = true
     const res = await api.getSystemSettings()
+    const legacyRegisterEnabled =
+      typeof res.data?.allow_partner_register === 'boolean' ? res.data.allow_partner_register : true
     form.value = {
       ...form.value,
       ...res.data,
+      allow_channel_register:
+        typeof res.data?.allow_channel_register === 'boolean'
+          ? res.data.allow_channel_register
+          : legacyRegisterEnabled,
+      allow_user_register:
+        typeof res.data?.allow_user_register === 'boolean' ? res.data.allow_user_register : legacyRegisterEnabled,
       ticket_attachment_extensions: res.data?.ticket_attachment_extensions?.length
         ? res.data.ticket_attachment_extensions
         : form.value.ticket_attachment_extensions,
@@ -338,6 +348,7 @@ function save() {
       saving.value = true
       const payload = {
         ...form.value,
+        allow_partner_register: form.value.allow_channel_register || form.value.allow_user_register,
         ticket_notify_by_role: normalizeTicketNotifyByRole(form.value.ticket_notify_by_role),
       }
       await api.updateSystemSettings(payload)
@@ -468,8 +479,11 @@ function applyPresetHtmlTemplates() {
                   />
                 </div>
               </NFormItem>
-              <NFormItem label="开放注册">
-                <NSwitch v-model:value="form.allow_partner_register" />
+              <NFormItem label="开放渠道商注册">
+                <NSwitch v-model:value="form.allow_channel_register" />
+              </NFormItem>
+              <NFormItem label="开放用户注册">
+                <NSwitch v-model:value="form.allow_user_register" />
               </NFormItem>
               <NFormItem label="客服自动审批注册">
                 <NSwitch v-model:value="form.customer_service_auto_approve_register" />

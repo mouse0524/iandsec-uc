@@ -31,7 +31,7 @@ from app.models.admin import (
     User,
     WebDavShareLink,
 )
-from app.models.enums import PartnerRegisterStatus, SkillKnowDocumentStatus, TicketStatus
+from app.models.enums import PartnerRegisterStatus, RegisterType, SkillKnowDocumentStatus, TicketStatus
 from app.schemas.captcha import CaptchaOut
 from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, SendVerifyCodeIn
 from app.schemas.base import Fail, Success
@@ -54,6 +54,23 @@ def _login_error_message(config: dict, fallback: str) -> str:
     if config.get("login_generic_error_enabled", True):
         return "用户名、密码或验证码错误"
     return fallback
+
+
+def _register_closed_message(register_type: RegisterType | None) -> str:
+    if register_type == RegisterType.CHANNEL:
+        return "当前暂未开放渠道商注册，如需开通请联系平台管理员"
+    if register_type == RegisterType.USER:
+        return "当前暂未开放用户注册，如需开通请联系平台管理员"
+    return "当前暂未开放注册，如需开通请联系平台管理员"
+
+
+def _is_register_type_enabled(config: dict, register_type: RegisterType | None) -> bool:
+    legacy_enabled = config.get("allow_partner_register", True)
+    if register_type == RegisterType.CHANNEL:
+        return config.get("allow_channel_register", legacy_enabled)
+    if register_type == RegisterType.USER:
+        return config.get("allow_user_register", legacy_enabled)
+    return legacy_enabled
 
 
 @router.post("/access_token", summary="获取token")
@@ -142,8 +159,8 @@ async def get_site_logo():
 @router.post("/send_email_code", summary="发送邮箱验证码")
 async def send_email_code(payload: SendVerifyCodeIn):
     config = await system_setting_controller.get_public_config()
-    if not config.get("allow_partner_register", True):
-        return Fail(code=403, msg="当前暂未开放注册，如需开通请联系平台管理员")
+    if not _is_register_type_enabled(config, payload.register_type):
+        return Fail(code=403, msg=_register_closed_message(payload.register_type))
 
     email = payload.email.strip().lower()
     logger.info("[api.send_email_code] start email={}", email)

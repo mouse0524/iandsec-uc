@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NEmpty, NTag } from 'naive-ui'
+import { NButton, NEmpty, NModal, NTag } from 'naive-ui'
 import CrudModal from '@/components/table/CrudModal.vue'
 import api from '@/api'
 import { htmlToPlainText, isImageName, sanitizeHtml } from '@/utils'
@@ -24,6 +24,9 @@ const props = defineProps({
 const attachments = computed(() => props.ticket?.attachments || [])
 const imageAttachments = computed(() => attachments.value.filter((item) => isImageName(item.origin_name || item.file_path || '')))
 const imagePreviewMap = ref({})
+const descriptionImagePreviewVisible = ref(false)
+const descriptionImagePreviewSrc = ref('')
+const descriptionImagePreviewAlt = ref('')
 const safeDescription = computed(() => sanitizeHtml(props.ticket?.description || '-'))
 
 function revokeImagePreviewUrls() {
@@ -36,12 +39,30 @@ function getImagePreviewUrl(item) {
   return imagePreviewMap.value[item.id] || ''
 }
 
+function closeDescriptionImagePreview() {
+  descriptionImagePreviewVisible.value = false
+  descriptionImagePreviewSrc.value = ''
+  descriptionImagePreviewAlt.value = ''
+}
+
+function openDescriptionImagePreview(event) {
+  const target = event?.target
+  if (!(target instanceof HTMLImageElement)) return
+  const src = target.currentSrc || target.src
+  if (!src) return
+  event.preventDefault()
+  descriptionImagePreviewSrc.value = src
+  descriptionImagePreviewAlt.value = target.alt || '问题描述图片'
+  descriptionImagePreviewVisible.value = true
+}
+
 watch(
   () => [props.visible, props.ticket?.id, imageAttachments.value.length],
   async ([visible]) => {
     if (!visible) {
       revokeImagePreviewUrls()
       imagePreviewMap.value = {}
+      closeDescriptionImagePreview()
       return
     }
     revokeImagePreviewUrls()
@@ -191,7 +212,7 @@ function getActionIconClass(action) {
 
     <div class="description-card">
       <div class="section-title">问题描述</div>
-      <div class="description-content" v-html="safeDescription"></div>
+      <div class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
     </div>
 
     <div class="attachment-card">
@@ -263,6 +284,11 @@ function getActionIconClass(action) {
       </n-timeline>
     </div>
   </CrudModal>
+  <NModal v-model:show="descriptionImagePreviewVisible" preset="card" title="图片预览" class="description-image-modal">
+    <div class="description-image-preview">
+      <img :src="descriptionImagePreviewSrc" :alt="descriptionImagePreviewAlt" />
+    </div>
+  </NModal>
 </template>
 
 <style scoped>
@@ -342,6 +368,53 @@ function getActionIconClass(action) {
   color: #374151;
   line-height: 1.8;
   word-break: break-word;
+  overflow: hidden;
+}
+
+.description-content :deep(img) {
+  display: inline-block;
+  max-width: min(180px, 100%);
+  max-height: 140px;
+  width: auto;
+  height: auto;
+  margin: 8px 8px 8px 0;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  object-fit: contain;
+  vertical-align: top;
+  cursor: zoom-in;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.description-content :deep(p) {
+  max-width: 100%;
+}
+
+.description-content :deep(*) {
+  max-width: 100%;
+}
+
+.description-image-modal {
+  width: min(92vw, 960px);
+}
+
+.description-image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 78vh;
+  overflow: auto;
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.description-image-preview img {
+  max-width: 100%;
+  max-height: 74vh;
+  object-fit: contain;
+  display: block;
 }
 
 .ticket-timeline {

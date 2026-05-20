@@ -7,6 +7,8 @@ class SystemSettingUpdateIn(BaseModel):
     site_title: str = Field(..., description="网站标题")
     site_logo: str | None = Field(default=None, description="网站Logo")
     allow_partner_register: bool = Field(default=True, description="是否开放代理商注册")
+    allow_channel_register: bool = Field(default=True, description="是否开放渠道商注册")
+    allow_user_register: bool = Field(default=True, description="是否开放用户注册")
     customer_service_auto_approve_register: bool = Field(default=False, description="客服是否自动审批注册")
     ticket_attachment_extensions: list[str] = Field(default_factory=list, description="工单附件允许上传类型")
     ticket_project_phases: list[str] = Field(default_factory=list, description="工单项目阶段")
@@ -156,6 +158,8 @@ class PublicSiteConfigOut(BaseModel):
     site_title: str
     site_logo: str | None = None
     allow_partner_register: bool
+    allow_channel_register: bool
+    allow_user_register: bool
     customer_service_auto_approve_register: bool
     ticket_attachment_extensions: list[str]
     ticket_project_phases: list[str]

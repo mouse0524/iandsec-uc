@@ -107,7 +107,7 @@
 
           <div class="auth-links">
             <n-button text type="primary" @click="openForgotPasswordModal">忘记密码</n-button>
-            <n-button v-if="appStore.allowPartnerRegister" text type="primary" @click="showPartnerModal = true">注册账号</n-button>
+            <n-button v-if="appStore.allowPartnerRegister" text type="primary" @click="openPartnerRegisterModal">注册账号</n-button>
           </div>
 
           <div class="agreement-row">
@@ -135,6 +135,7 @@
               <n-button
                 round
                 :type="partnerForm.register_type === 'channel' ? 'primary' : 'default'"
+                :disabled="!appStore.allowChannelRegister"
                 @click="partnerForm.register_type = 'channel'"
               >
                 渠道商注册
@@ -142,6 +143,7 @@
               <n-button
                 round
                 :type="partnerForm.register_type === 'user' ? 'primary' : 'default'"
+                :disabled="!appStore.allowUserRegister"
                 @click="partnerForm.register_type = 'user'"
               >
                 用户注册
@@ -412,6 +414,12 @@ const emailCodeButtonText = computed(() => {
   return emailCodeCooldown.value > 0 ? `${emailCodeCooldown.value}s后重试` : '发送验证码'
 })
 
+function getDefaultRegisterType() {
+  if (appStore.allowChannelRegister) return 'channel'
+  if (appStore.allowUserRegister) return 'user'
+  return ''
+}
+
 initLoginInfo()
 fetchPublicConfig()
 fetchLoginCaptcha()
@@ -527,13 +535,35 @@ async function fetchPublicConfig() {
   try {
     const res = await api.getPublicConfig()
     appStore.setSiteConfig(res.data || {})
+    if (!isSelectedRegisterTypeEnabled()) {
+      partnerForm.value.register_type = getDefaultRegisterType()
+    }
   } catch (error) {
     // ignore public config fetch errors
   }
 }
 
+function isSelectedRegisterTypeEnabled() {
+  if (partnerForm.value.register_type === 'channel') return appStore.allowChannelRegister
+  if (partnerForm.value.register_type === 'user') return appStore.allowUserRegister
+  return false
+}
+
+function openPartnerRegisterModal() {
+  const registerType = getDefaultRegisterType()
+  if (!registerType) {
+    $message.warning('当前暂未开放注册，如需开通请联系平台管理员')
+    return
+  }
+  partnerForm.value.register_type = registerType
+  showPartnerModal.value = true
+}
+
 watch(showPartnerModal, async (v) => {
   if (v) {
+    if (!isSelectedRegisterTypeEnabled()) {
+      partnerForm.value.register_type = getDefaultRegisterType()
+    }
     await fetchPartnerCaptcha()
   } else {
     resetPartnerRegisterState()
@@ -541,6 +571,10 @@ watch(showPartnerModal, async (v) => {
 })
 
 function submitPartnerRegister() {
+  if (!isSelectedRegisterTypeEnabled()) {
+    $message.warning('当前注册类型暂未开放')
+    return
+  }
   partnerFormRef.value?.validate(async (err) => {
     if (err) return
     try {
@@ -561,6 +595,10 @@ function submitPartnerRegister() {
 }
 
 async function openCaptchaModal() {
+  if (!isSelectedRegisterTypeEnabled()) {
+    $message.warning('当前注册类型暂未开放')
+    return
+  }
   if (!partnerForm.value.email?.trim()) {
     $message.warning('请先填写邮箱地址，再发送验证码')
     return
@@ -594,6 +632,7 @@ async function sendEmailCode() {
       email,
       captcha_id: captchaId,
       captcha_code: captchaCode,
+      register_type: partnerForm.value.register_type,
     })
     $message.success('验证码已发送，请注意查收邮箱')
     showCaptchaModal.value = false
@@ -640,7 +679,7 @@ function resetPartnerRegisterState() {
   emailCodeSending.value = false
   partnerCaptchaImage.value = ''
   partnerForm.value = {
-    register_type: 'channel',
+    register_type: getDefaultRegisterType() || 'channel',
     company_name: '',
     contact_name: '',
     email: '',

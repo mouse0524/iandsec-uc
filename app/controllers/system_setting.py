@@ -33,6 +33,8 @@ class SystemSettingController:
             "site_title": "安得和众用户服务中心",
             "site_logo": None,
             "allow_partner_register": True,
+            "allow_channel_register": True,
+            "allow_user_register": True,
             "customer_service_auto_approve_register": False,
         },
         "ticket": {
@@ -155,10 +157,15 @@ class SystemSettingController:
         login_security = sections["login_security"]
         logo_url = "/api/v1/base/site_logo" if site.get("site_logo") else ""
         required_categories = login_security.get("password_required_categories") or ["letter", "digit"]
+        legacy_register_enabled = site.get("allow_partner_register", True)
+        allow_channel_register = site.get("allow_channel_register", legacy_register_enabled)
+        allow_user_register = site.get("allow_user_register", legacy_register_enabled)
         result = {
             "site_title": site.get("site_title"),
             "site_logo": logo_url,
-            "allow_partner_register": site.get("allow_partner_register", True),
+            "allow_partner_register": allow_channel_register or allow_user_register,
+            "allow_channel_register": allow_channel_register,
+            "allow_user_register": allow_user_register,
             "customer_service_auto_approve_register": site.get("customer_service_auto_approve_register", False),
             "ticket_attachment_extensions": ticket.get("ticket_attachment_extensions") or [],
             "ticket_project_phases": ticket.get("ticket_project_phases") or [],
@@ -257,7 +264,29 @@ class SystemSettingController:
                 enforce_allowed_hosts=False,
             )
 
-        site_keys = {"site_title", "site_logo", "allow_partner_register", "customer_service_auto_approve_register"}
+        if "allow_channel_register" not in payload and "allow_user_register" not in payload and "allow_partner_register" in payload:
+            payload["allow_channel_register"] = payload["allow_partner_register"]
+            payload["allow_user_register"] = payload["allow_partner_register"]
+        if "allow_channel_register" in payload or "allow_user_register" in payload:
+            current_site = sections["site"]
+            channel_enabled = payload.get(
+                "allow_channel_register",
+                current_site.get("allow_channel_register", current_site.get("allow_partner_register", True)),
+            )
+            user_enabled = payload.get(
+                "allow_user_register",
+                current_site.get("allow_user_register", current_site.get("allow_partner_register", True)),
+            )
+            payload["allow_partner_register"] = bool(channel_enabled or user_enabled)
+
+        site_keys = {
+            "site_title",
+            "site_logo",
+            "allow_partner_register",
+            "allow_channel_register",
+            "allow_user_register",
+            "customer_service_auto_approve_register",
+        }
         ticket_keys = {
             "ticket_attachment_extensions",
             "ticket_project_phases",

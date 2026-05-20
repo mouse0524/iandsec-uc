@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.partner import partner as partner_module
+from app.api.v1.base import base as base_module
 from app.models.enums import RegisterType
 
 
@@ -27,6 +28,12 @@ def _client():
     return TestClient(app)
 
 
+def _base_client():
+    app = FastAPI()
+    app.include_router(base_module.router, prefix="/api/v1/base")
+    return TestClient(app)
+
+
 def _payload():
     return {
         "register_type": RegisterType.CHANNEL.value,
@@ -37,6 +44,13 @@ def _payload():
         "password": "Passw0rd!",
         "email_code": "123456",
     }
+
+
+def _user_payload():
+    data = _payload()
+    data["register_type"] = RegisterType.USER.value
+    data["hardware_id"] = "HW-001"
+    return data
 
 
 def test_partner_register_auto_approves_when_enabled():
@@ -77,3 +91,93 @@ def test_partner_register_waits_for_review_when_auto_approve_disabled():
     assert body["msg"] == "注册成功，请等待审核"
     assert body["data"]["status"] == "pending"
     mock_review.assert_not_awaited()
+
+
+def test_partner_register_rejects_when_channel_register_disabled():
+    with (
+        patch.object(
+            partner_module.system_setting_controller,
+            "get_public_config",
+            AsyncMock(
+                return_value={
+                    "allow_partner_register": True,
+                    "allow_channel_register": False,
+                    "allow_user_register": True,
+                    "customer_service_auto_approve_register": False,
+                }
+            ),
+        ),
+        patch.object(partner_module.mail_controller, "verify_email_code", AsyncMock()) as mock_verify,
+        patch.object(partner_module.partner_controller, "register", AsyncMock()) as mock_register,
+    ):
+        response = _client().post("/api/v1/partner/register", json=_payload())
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["code"] == 403
+    assert "渠道商注册" in body["msg"]
+    mock_verify.assert_not_awaited()
+    mock_register.assert_not_awaited()
+
+
+def test_partner_register_rejects_when_user_register_disabled():
+    with (
+        patch.object(
+            partner_module.system_setting_controller,
+            "get_public_config",
+            AsyncMock(
+                return_value={
+                    "allow_partner_register": True,
+                    "allow_channel_register": True,
+                    "allow_user_register": False,
+                    "customer_service_auto_approve_register": False,
+                }
+            ),
+        ),
+        patch.object(partner_module.mail_controller, "verify_email_code", AsyncMock()) as mock_verify,
+        patch.object(partner_module.partner_controller, "register", AsyncMock()) as mock_register,
+    ):
+        response = _client().post("/api/v1/partner/register", json=_user_payload())
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["code"] == 403
+    assert "用户注册" in body["msg"]
+    mock_verify.assert_not_awaited()
+    mock_register.assert_not_awaited()
+
+
+def test_send_email_code_rejects_disabled_register_type():
+    payload = {
+        "email": "new@example.com",
+        "captcha_id": "captcha-1",
+        "captcha_code": "1234",
+        "register_type": RegisterType.USER.value,
+    }
+    with (
+        patch.object(
+            base_module.system_setting_controller,
+            "get_public_config",
+            AsyncMock(
+                return_value={
+                    "allow_partner_register": True,
+                    "allow_channel_register": True,
+                    "allow_user_register": False,
+                }
+            ),
+        ),
+        patch.object(base_module.User, "filter") as mock_user_filter,
+        patch.object(base_module.PartnerRegistration, "filter") as mock_registration_filter,
+        patch.object(base_module.captcha_controller, "verify_captcha", AsyncMock()) as mock_captcha,
+        patch.object(base_module.mail_controller, "send_partner_verify_code", AsyncMock()) as mock_send,
+    ):
+        response = _base_client().post("/api/v1/base/send_email_code", json=payload)
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["code"] == 403
+    assert "用户注册" in body["msg"]
+    mock_user_filter.assert_not_called()
+    mock_registration_filter.assert_not_called()
+    mock_captcha.assert_not_awaited()
+    mock_send.assert_not_awaited()

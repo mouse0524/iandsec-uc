@@ -26,6 +26,23 @@ async def _is_cs_or_admin(user_id: int) -> bool:
     return "管理员" in role_names or "客服" in role_names
 
 
+def _register_closed_message(register_type: RegisterType) -> str:
+    if register_type == RegisterType.CHANNEL:
+        return "当前暂未开放渠道商注册，如需开通请联系平台管理员"
+    if register_type == RegisterType.USER:
+        return "当前暂未开放用户注册，如需开通请联系平台管理员"
+    return "当前暂未开放注册，如需开通请联系平台管理员"
+
+
+def _is_register_type_enabled(config: dict, register_type: RegisterType) -> bool:
+    legacy_enabled = config.get("allow_partner_register", True)
+    if register_type == RegisterType.CHANNEL:
+        return config.get("allow_channel_register", legacy_enabled)
+    if register_type == RegisterType.USER:
+        return config.get("allow_user_register", legacy_enabled)
+    return legacy_enabled
+
+
 @router.post("/register", summary="渠道商/用户注册")
 async def partner_register(payload: PartnerRegisterIn):
     logger.info(
@@ -35,8 +52,8 @@ async def partner_register(payload: PartnerRegisterIn):
         payload.company_name,
     )
     config = await system_setting_controller.get_public_config()
-    if not config.get("allow_partner_register", True):
-        return Fail(code=403, msg="当前暂未开放注册，如需开通请联系平台管理员")
+    if not _is_register_type_enabled(config, payload.register_type):
+        return Fail(code=403, msg=_register_closed_message(payload.register_type))
 
     email_valid = await mail_controller.verify_email_code(payload.email, payload.email_code)
     if not email_valid:
