@@ -110,6 +110,10 @@
             <n-button v-if="appStore.allowPartnerRegister" text type="primary" @click="openPartnerRegisterModal">注册账号</n-button>
           </div>
 
+          <div class="remember-row">
+            <n-checkbox v-model:checked="loginRemember">保持登录状态，最多30天</n-checkbox>
+          </div>
+
           <div class="agreement-row">
             <n-checkbox v-model:checked="loginAgree">
               <span>我已阅读并同意</span>
@@ -329,6 +333,7 @@ const loginInfo = ref({
   captcha_id: '',
   captcha_code: '',
 })
+const loginRemember = ref(false)
 const loginAgree = ref(false)
 
 const loginCaptchaImage = ref('')
@@ -499,9 +504,10 @@ async function handleLogin() {
       password: password.toString(),
       captcha_id: loginInfo.value.captcha_id,
       captcha_code: captchaCode,
+      remember_me: loginRemember.value,
     })
     $message.success(t('views.login.message_login_success'))
-    setToken(res.data.access_token)
+    setToken(res.data.access_token, loginRemember.value)
     await addDynamicRoutes()
     const redirectPath = normalizeRedirectPath(query.redirect)
     const targetPath = resolveRoleTargetPath(redirectPath)
@@ -1082,6 +1088,7 @@ watch(showForgotPasswordModal, (v) => {
   gap: 12px;
 }
 
+.remember-row,
 .agreement-row {
   margin-top: 14px;
   color: #475569;

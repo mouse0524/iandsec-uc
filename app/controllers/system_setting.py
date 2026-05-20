@@ -56,6 +56,7 @@ class SystemSettingController:
             "login_ip_lock_minutes": 60,
             "login_fail_window_minutes": 60,
             "login_generic_error_enabled": True,
+            "user_token_expire_minutes": 60,
             "password_min_length": 8,
             "password_required_categories": ["letter", "digit"],
         },
@@ -180,6 +181,7 @@ class SystemSettingController:
             "login_ip_lock_minutes": login_security.get("login_ip_lock_minutes", 60),
             "login_fail_window_minutes": login_security.get("login_fail_window_minutes", 60),
             "login_generic_error_enabled": login_security.get("login_generic_error_enabled", True),
+            "user_token_expire_minutes": login_security.get("user_token_expire_minutes", 60),
             "password_min_length": login_security.get("password_min_length", 8),
             "password_required_categories": required_categories,
             "password_min_category_count": len(required_categories),
@@ -303,6 +305,7 @@ class SystemSettingController:
             "login_ip_lock_minutes",
             "login_fail_window_minutes",
             "login_generic_error_enabled",
+            "user_token_expire_minutes",
             "password_min_length",
             "password_required_categories",
         }

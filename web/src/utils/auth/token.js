@@ -1,14 +1,24 @@
 import { lStorage, sStorage } from '@/utils'
 
 const TOKEN_CODE = 'access_token'
+const REMEMBER_TOKEN_EXPIRE_SECONDS = 30 * 24 * 60 * 60
 
 export function getToken() {
-  return sStorage.get(TOKEN_CODE) || lStorage.get(TOKEN_CODE)
+  const sessionToken = sStorage.getItem(TOKEN_CODE)
+  const localToken = lStorage.getItem(TOKEN_CODE)
+  if (!sessionToken?.value) return localToken?.value
+  if (!localToken?.value) return sessionToken.value
+  return (localToken.time || 0) > (sessionToken.time || 0) ? localToken.value : sessionToken.value
 }
 
-export function setToken(token) {
+export function setToken(token, remember = false) {
   lStorage.remove(TOKEN_CODE)
-  sStorage.set(TOKEN_CODE, token)
+  sStorage.remove(TOKEN_CODE)
+  if (remember) {
+    lStorage.set(TOKEN_CODE, token, REMEMBER_TOKEN_EXPIRE_SECONDS)
+  } else {
+    sStorage.set(TOKEN_CODE, token)
+  }
 }
 
 export function removeToken() {

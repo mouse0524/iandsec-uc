@@ -114,7 +114,11 @@ async def login_access_token(credentials: CredentialsSchema, request: Request):
 
     await login_security_controller.clear_success(username=credentials.username, ip=client_ip)
     await user_controller.update_last_login(user.id)
-    access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    token_expire_minutes = int(config.get("user_token_expire_minutes") or settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    token_expire_minutes = min(30 * 24 * 60, max(1, token_expire_minutes))
+    if credentials.remember_me:
+        token_expire_minutes = 30 * 24 * 60
+    access_token_expires = timedelta(minutes=token_expire_minutes)
     expire = datetime.now(timezone.utc) + access_token_expires
 
     data = JWTOut(
@@ -133,7 +137,13 @@ async def login_access_token(credentials: CredentialsSchema, request: Request):
         ),
         username=user.username,
     )
-    logger.info("[api.login] success username={} user_id={}", user.username, user.id)
+    logger.info(
+        "[api.login] success username={} user_id={} remember_me={} expire_minutes={}",
+        user.username,
+        user.id,
+        credentials.remember_me,
+        token_expire_minutes,
+    )
     return Success(data=data.model_dump())
 
 

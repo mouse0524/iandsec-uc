@@ -204,7 +204,9 @@ async function rebuildWhIndex() {
               <div><span>索引存在</span><b>{{ skillKnowIndex.exists ? '是' : '否' }}</b></div>
               <div><span>文档数</span><b>{{ skillKnowIndex.document_count ?? '-' }}</b></div>
               <div><span>分段数</span><b>{{ skillKnowIndex.section_count ?? '-' }}</b></div>
-              <div><span>索引条目</span><b>{{ skillKnowIndex.doc_count ?? 0 }} / {{ skillKnowIndex.doc_count_all ?? 0 }}</b></div>
+              <div><span>有效索引条目</span><b>{{ skillKnowIndex.doc_count ?? 0 }}</b></div>
+              <div><span>索引内部总记录</span><b>{{ skillKnowIndex.doc_count_all ?? 0 }}</b></div>
+              <div><span>已删除残留</span><b>{{ skillKnowIndex.deleted_doc_count ?? 0 }}</b></div>
               <div><span>领域词版本</span><b>{{ skillKnowIndex.domain_terms_version || '-' }}</b></div>
               <div v-if="skillKnowIndex.error"><span>错误</span><b>{{ skillKnowIndex.error }}</b></div>
             </div>

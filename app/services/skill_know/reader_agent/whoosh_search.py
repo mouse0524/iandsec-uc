@@ -217,12 +217,15 @@ class SkillKnowWhooshSearch:
                 return {"available": True, "index_dir": str(self.index_dir), "exists": False, "doc_count": 0}
             ix = index.open_dir(str(self.index_dir))
             with ix.searcher() as searcher:
+                doc_count = searcher.doc_count()
+                doc_count_all = searcher.doc_count_all()
                 return {
                     "available": True,
                     "index_dir": str(self.index_dir),
                     "exists": True,
-                    "doc_count": searcher.doc_count(),
-                    "doc_count_all": searcher.doc_count_all(),
+                    "doc_count": doc_count,
+                    "doc_count_all": doc_count_all,
+                    "deleted_doc_count": max(0, doc_count_all - doc_count),
                     "schema_fields": list(ix.schema.names()),
                 }
         except Exception as exc:

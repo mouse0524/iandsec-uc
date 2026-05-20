@@ -9,6 +9,7 @@ class CredentialsSchema(BaseModel):
     password: str = Field(..., description="密码", example="123456")
     captcha_id: str = Field(..., description="验证码ID")
     captcha_code: str = Field(..., description="验证码")
+    remember_me: bool = Field(default=False, description="是否保持登录状态")
 
 
 class JWTOut(BaseModel):

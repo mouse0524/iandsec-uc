@@ -53,6 +53,7 @@ const form = ref({
   login_ip_lock_minutes: 60,
   login_fail_window_minutes: 60,
   login_generic_error_enabled: true,
+  user_token_expire_minutes: 60,
   password_min_length: 8,
   password_required_categories: ['letter', 'digit'],
   ticket_notify_by_role: {
@@ -279,6 +280,13 @@ const rules = {
     type: 'number',
     min: 1,
     message: '请输入正确的失败统计窗口',
+    trigger: ['blur', 'change'],
+  },
+  user_token_expire_minutes: {
+    required: true,
+    type: 'number',
+    min: 1,
+    message: '请输入正确的Token失效时间',
     trigger: ['blur', 'change'],
   },
   password_min_length: {
@@ -587,6 +595,9 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="统一错误提示">
                 <NSwitch v-model:value="form.login_generic_error_enabled" />
+              </NFormItem>
+              <NFormItem label="Token失效(分钟)" path="user_token_expire_minutes">
+                <NInputNumber v-model:value="form.user_token_expire_minutes" :min="1" :max="43200" />
               </NFormItem>
               <NFormItem label="密码最小长度" path="password_min_length">
                 <NInputNumber v-model:value="form.password_min_length" :min="8" :max="64" />
