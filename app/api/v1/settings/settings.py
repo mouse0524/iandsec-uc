@@ -19,7 +19,11 @@ async def get_system_setting():
 @router.post("/update", summary="更新系统设置")
 async def update_system_setting(payload: SystemSettingUpdateIn):
     logger.info("[api.settings.update] request")
-    setting = await system_setting_controller.update(payload.model_dump())
+    data = payload.model_dump()
+    for key in ("allow_channel_register", "allow_user_register"):
+        if key not in payload.model_fields_set:
+            data.pop(key, None)
+    setting = await system_setting_controller.update(data)
     data = await system_setting_controller.get_safe_dict()
     logger.info("[api.settings.update] success setting_id={}", data.get("id"))
     return Success(msg="保存成功", data=data)

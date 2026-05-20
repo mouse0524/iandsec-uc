@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.partner import partner as partner_module
 from app.api.v1.base import base as base_module
+from app.api.v1.settings import settings as settings_module
 from app.models.enums import RegisterType
 
 
@@ -31,6 +32,12 @@ def _client():
 def _base_client():
     app = FastAPI()
     app.include_router(base_module.router, prefix="/api/v1/base")
+    return TestClient(app)
+
+
+def _settings_client():
+    app = FastAPI()
+    app.include_router(settings_module.router, prefix="/api/v1/settings")
     return TestClient(app)
 
 
@@ -181,3 +188,28 @@ def test_send_email_code_rejects_disabled_register_type():
     mock_registration_filter.assert_not_called()
     mock_captcha.assert_not_awaited()
     mock_send.assert_not_awaited()
+
+
+def test_settings_update_preserves_legacy_register_toggle_when_new_fields_missing():
+    legacy_payload = {
+        "site_title": "Demo",
+        "allow_partner_register": False,
+        "customer_service_auto_approve_register": False,
+        "ticket_attachment_extensions": ["zip"],
+        "ticket_project_phases": ["售后"],
+        "ticket_categories": ["其他"],
+        "customer_service_auto_approve_ticket": False,
+        "ticket_root_causes": ["配置错误"],
+        "ticket_description_templates": ["问题现象："],
+    }
+    with (
+        patch.object(settings_module.system_setting_controller, "update", AsyncMock()) as mock_update,
+        patch.object(settings_module.system_setting_controller, "get_safe_dict", AsyncMock(return_value={})),
+    ):
+        response = _settings_client().post("/api/v1/settings/update", json=legacy_payload)
+
+    assert response.status_code == 200
+    payload = mock_update.await_args.args[0]
+    assert payload["allow_partner_register"] is False
+    assert "allow_channel_register" not in payload
+    assert "allow_user_register" not in payload
