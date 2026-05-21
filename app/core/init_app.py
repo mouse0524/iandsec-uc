@@ -756,6 +756,7 @@ async def init_roles():
     webdav_apis = await Api.filter(
         path__in=[
             "/api/v1/webdav/list",
+            "/api/v1/webdav/download-url",
             "/api/v1/webdav/share/create",
             "/api/v1/webdav/share/list",
             "/api/v1/webdav/share/delete",

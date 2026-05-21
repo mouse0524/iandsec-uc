@@ -286,6 +286,8 @@ class TicketController:
             "ticket_no",
             "project_phase",
             "category",
+            "contact_name",
+            "phone",
             "title",
             "root_cause",
             "status",

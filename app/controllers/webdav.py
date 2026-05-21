@@ -29,7 +29,7 @@ class WebDavController:
         return conf["webdav_username"], conf["webdav_password"]
 
     def _client(self, conf: dict, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=timeout)
+        return httpx.AsyncClient(timeout=timeout, follow_redirects=True)
 
     def _auth_headers(self, conf: dict, headers: dict[str, str] | None = None) -> dict[str, str]:
         username, password = self._auth(conf)
@@ -143,6 +143,14 @@ class WebDavController:
         sig = self._sign(secret, code, ts)
         return {"ts": ts, "sig": sig}
 
+    async def build_direct_download_signature(self, *, path: str) -> dict[str, int | str]:
+        conf = await self._get_config()
+        secret = self._get_signature_secret(conf)
+        norm_path = self._normalize_path(path)
+        ts = int(datetime.now(timezone.utc).timestamp())
+        sig = self._sign(secret, f"direct-download:{norm_path}", ts)
+        return {"ts": ts, "sig": sig}
+
     async def verify_share_signature(self, *, code: str, ts: int, sig: str) -> None:
         conf = await self._get_config()
         secret = self._get_signature_secret(conf)
@@ -151,6 +159,18 @@ class WebDavController:
         if abs(now_ts - int(ts)) > signature_ttl:
             raise HTTPException(status_code=401, detail="签名已过期")
         expected = self._sign(secret, code, int(ts))
+        if not hmac.compare_digest(expected, str(sig)):
+            raise HTTPException(status_code=401, detail="签名校验失败")
+
+    async def verify_direct_download_signature(self, *, path: str, ts: int, sig: str) -> None:
+        conf = await self._get_config()
+        secret = self._get_signature_secret(conf)
+        signature_ttl = int(conf.get("webdav_signature_ttl") or 600)
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if abs(now_ts - int(ts)) > signature_ttl:
+            raise HTTPException(status_code=401, detail="签名已过期")
+        norm_path = self._normalize_path(path)
+        expected = self._sign(secret, f"direct-download:{norm_path}", int(ts))
         if not hmac.compare_digest(expected, str(sig)):
             raise HTTPException(status_code=401, detail="签名校验失败")
 
@@ -511,6 +531,17 @@ class WebDavController:
         except httpx.RequestError as exc:
             await client.aclose()
             raise self._raise_webdav_network_error("下载文件", exc) from exc
+        if 300 <= resp.status_code < 400:
+            location = resp.headers.get("location", "")
+            logger.warning(
+                "[webdav.download] redirect_not_followed path={} status={} location={}",
+                norm_path,
+                resp.status_code,
+                location,
+            )
+            await resp.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=502, detail="下载文件失败：WebDAV返回跳转但未能获取真实文件")
         if resp.status_code >= 400:
             await resp.aclose()
             await client.aclose()

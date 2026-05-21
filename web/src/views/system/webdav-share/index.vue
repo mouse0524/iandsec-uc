@@ -24,6 +24,32 @@ async function getShareTableData(params = {}) {
   }
 }
 
+function buildDownloadUrl(apiUrl) {
+  if (!apiUrl) return ''
+  if (/^https?:\/\//i.test(apiUrl)) return apiUrl
+  const path = apiUrl.startsWith('/') ? apiUrl : `/${apiUrl}`
+  return `${window.location.origin}${path}`
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const success = document.execCommand('copy')
+  textarea.remove()
+  if (!success) throw new Error('copy failed')
+}
+
 const shareColumns = [
   { title: '分享码', key: 'code', width: 120, align: 'center' },
   { title: '创建者', key: 'creator_name', width: 120, align: 'center' },
@@ -49,9 +75,7 @@ const shareColumns = [
     width: 280,
     align: 'left',
     render(row) {
-      const origin = window.location.origin
-      const apiUrl = row.download_url || ''
-      const url = apiUrl ? `${origin}${apiUrl}` : ''
+      const url = buildDownloadUrl(row.download_url || '')
       const disabled = !row.is_active || row.is_expired || row.status === 'expired'
       return h(
         NButton,
@@ -65,8 +89,12 @@ const shareColumns = [
               $message.error('当前记录缺少下载链接，请刷新后重试')
               return
             }
-            await navigator.clipboard.writeText(url)
-            $message.success('下载链接已复制')
+            try {
+              await copyText(url)
+              $message.success('下载链接已复制')
+            } catch (error) {
+              $message.error('复制失败，请手动选中链接复制')
+            }
           },
         },
         { default: () => (disabled ? '已失效' : (url || '链接生成中')) }

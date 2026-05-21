@@ -27,6 +27,38 @@ async def list_webdav(path: str = Query("/", description="目录路径")):
     return Success(data=rows)
 
 
+@router.get("/download-url", summary="生成WebDAV直接下载链接")
+async def download_webdav_file(path: str = Query(..., description="文件路径")):
+    logger.info("[api.webdav.download] request path={}", path)
+    sign_data = await webdav_controller.build_direct_download_signature(path=path)
+    query = urlencode({"path": path, "ts": sign_data["ts"], "sig": sign_data["sig"]})
+    return Success(data={"download_url": f"/api/v1/public/webdav/download?{query}"})
+
+
+@public_router.get("/download", summary="公开直接下载WebDAV文件")
+async def public_download_webdav_file(
+    request: Request,
+    path: str = Query(..., description="文件路径"),
+    ts: Optional[int] = Query(None, description="时间戳(秒)"),
+    sig: Optional[str] = Query(None, description="签名"),
+):
+    if ts is None or not isinstance(ts, int) or ts <= 0 or not sig:
+        return Fail(code=400, msg="下载链接缺少签名参数，请重新点击直接下载")
+
+    client_ip = get_client_ip(request)
+    await webdav_controller.verify_direct_download_signature(path=path, ts=ts, sig=sig)
+    iterator, headers = await webdav_controller.download_stream(path)
+    content_type = headers.get("content-type") or "application/octet-stream"
+    file_name = path.rstrip("/").split("/")[-1] or "download"
+    disposition = build_download_content_disposition(file_name)
+    logger.info("[webdav.direct.download] success ip={} path={}", client_ip, path)
+    return StreamingResponse(
+        iterator(),
+        media_type=content_type,
+        headers={"Content-Disposition": disposition},
+    )
+
+
 @router.post("/share/create", summary="创建WebDAV分享")
 async def create_webdav_share(payload: WebDavShareCreateIn):
     user_id = CTX_USER_ID.get()

@@ -3,6 +3,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
 from app.controllers.webdav import WebDavController
 
 
@@ -39,6 +41,9 @@ class WebDavControllerTestCase(unittest.TestCase):
     def test_list_shares_filters_by_file_name(self):
         asyncio.run(self._assert_list_shares_filters_by_file_name())
 
+    def test_download_stream_follows_redirects(self):
+        asyncio.run(self._assert_download_stream_follows_redirects())
+
     async def _assert_list_shares_filters_by_file_name(self):
         controller = WebDavController()
         q = MagicMock()
@@ -58,6 +63,43 @@ class WebDavControllerTestCase(unittest.TestCase):
             )
 
         q.filter.assert_called_once_with(file_name__icontains="demo")
+
+    async def _assert_download_stream_follows_redirects(self):
+        controller = WebDavController()
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(
+                302,
+                headers={"Location": "https://cdn.example.com/demo.txt"},
+            )
+            if request.url.host == "dav.example.com"
+            else httpx.Response(
+                200,
+                headers={"Content-Type": "text/plain"},
+                content=b"real file",
+            )
+        )
+        conf = {
+            "webdav_enabled": True,
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_username": "user",
+            "webdav_password": "pass",
+        }
+
+        with patch.object(controller, "_get_config", AsyncMock(return_value=conf)):
+            with patch.object(
+                controller,
+                "_client",
+                lambda conf, timeout: httpx.AsyncClient(
+                    timeout=timeout,
+                    follow_redirects=True,
+                    transport=transport,
+                ),
+            ):
+                iterator, headers = await controller.download_stream("/demo.txt")
+                chunks = [chunk async for chunk in iterator()]
+
+        self.assertEqual(b"".join(chunks), b"real file")
+        self.assertEqual(headers.get("content-type"), "text/plain")
 
 
 if __name__ == "__main__":

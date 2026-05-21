@@ -183,6 +183,24 @@ const columns = [
     },
   },
   { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
+  {
+    title: '联系人',
+    key: 'contact_name',
+    align: 'center',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return row.contact_name || '-'
+    },
+  },
+  {
+    title: '手机号',
+    key: 'phone',
+    align: 'center',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return row.phone || '-'
+    },
+  },
   { title: '项目阶段', key: 'project_phase', align: 'center' },
   { title: '分类', key: 'category', align: 'center' },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },

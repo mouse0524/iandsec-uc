@@ -9,6 +9,7 @@ class BaseUser(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
     alias: Optional[str] = None
+    phone: Optional[str] = None
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
     created_at: Optional[datetime]
@@ -39,6 +40,7 @@ class UserUpdate(BaseModel):
     email: EmailStr
     username: str
     alias: Optional[str] = None
+    phone: Optional[str] = None
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
     role_ids: Optional[List[int]] = []

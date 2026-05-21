@@ -144,6 +144,7 @@ export default {
   },
   // webdav
   webdavList: (params = {}) => request.get('/webdav/list', { params }),
+  webdavDownload: (params = {}) => request.get('/webdav/download-url', { params }),
   webdavCreateShare: (data = {}) => request.post('/webdav/share/create', data),
   webdavShareList: (params = {}) => request.get('/webdav/share/list', { params }),
   webdavShareDelete: (data = {}) => request.post('/webdav/share/delete', data),

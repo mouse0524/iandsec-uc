@@ -12,6 +12,7 @@ const fileList = ref([])
 const loading = ref(false)
 const fileTable = ref(null)
 const creatingSharePath = ref('')
+const downloadingPath = ref('')
 const isCreatingShare = computed(() => !!creatingSharePath.value)
 
 const breadcrumbItems = computed(() => {
@@ -86,21 +87,39 @@ const fileColumns = [
   {
     title: '操作',
     key: 'actions',
-    width: 140,
+    width: 230,
     align: 'center',
     render(row) {
       if (row.is_dir) return h('span', { class: 'muted-action' }, '进入目录')
       return h(
-        NButton,
-        {
-          size: 'small',
-          type: 'primary',
-          secondary: true,
-          loading: creatingSharePath.value === row.path,
-          disabled: isCreatingShare.value,
-          onClick: () => createShare(row),
-        },
-        { default: () => '创建分享' }
+        'div',
+        { class: 'file-actions' },
+        [
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'primary',
+              secondary: true,
+              loading: creatingSharePath.value === row.path,
+              disabled: isCreatingShare.value || !!downloadingPath.value,
+              onClick: () => createShare(row),
+            },
+            { default: () => '创建分享' }
+          ),
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'info',
+              secondary: true,
+              loading: downloadingPath.value === row.path,
+              disabled: !!downloadingPath.value || isCreatingShare.value,
+              onClick: () => downloadFile(row),
+            },
+            { default: () => '直接下载' }
+          ),
+        ]
       )
     },
   },
@@ -158,6 +177,33 @@ async function createShare(row) {
     }
   } finally {
     creatingSharePath.value = ''
+  }
+}
+
+function openDownloadUrl(url) {
+  const link = document.createElement('a')
+  link.href = url
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+async function downloadFile(row) {
+  if (!row?.path || downloadingPath.value) return
+  try {
+    downloadingPath.value = row.path
+    const res = await api.webdavDownload({ path: row.path })
+    const apiUrl = res?.data?.download_url || ''
+    if (!apiUrl) {
+      $message.error('下载链接生成失败，请稍后重试')
+      return
+    }
+    const path = apiUrl.startsWith('/') ? apiUrl : `/${apiUrl}`
+    openDownloadUrl(`${window.location.origin}${path}`)
+  } finally {
+    downloadingPath.value = ''
   }
 }
 </script>
@@ -318,6 +364,12 @@ async function createShare(row) {
 :deep(.muted-action) {
   color: #94a3b8;
   font-size: 12px;
+}
+:deep(.file-actions) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
 }
 @media (max-width: 1100px) {
   .browser-toolbar { flex-direction: column; align-items: stretch; }
