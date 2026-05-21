@@ -63,10 +63,16 @@ export default {
   createTicket: (data = {}) => request.post('/ticket/create', data),
   getTicketPrefill: () => request.get('/ticket/prefill'),
   getTicketList: (params = {}) => request.get('/ticket/list', { params }),
+  exportTickets: (params = {}) =>
+    request.get('/ticket/export', {
+      params,
+      responseType: 'blob',
+    }),
   getTicketById: (params = {}) => request.get('/ticket/get', { params }),
   updateTicket: (data = {}) => request.post('/ticket/update', data),
   reviewTicket: (data = {}) => request.post('/ticket/review', data),
   techActionTicket: (data = {}) => request.post('/ticket/tech/action', data),
+  assignTicketTech: (data = {}) => request.post('/ticket/assign-tech', data),
   downloadTicketAttachment: (params = {}) =>
     request.get('/ticket/attachment/download', {
       params,

@@ -33,6 +33,7 @@ class TicketActionType(StrEnum):
     CS_APPROVE = "cs_approve"
     CS_REJECT = "cs_reject"
     TECH_START = "tech_start"
+    TECH_ASSIGN = "tech_assign"
     TECH_REJECT = "tech_reject"
     FINISH = "finish"
 

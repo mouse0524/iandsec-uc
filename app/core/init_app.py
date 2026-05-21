@@ -734,13 +734,14 @@ async def init_roles():
             "/api/v1/ticket/upload",
             "/api/v1/ticket/create",
             "/api/v1/ticket/list",
+            "/api/v1/ticket/export",
             "/api/v1/ticket/get",
             "/api/v1/ticket/resubmit",
             "/api/v1/ticket/actions",
         ]
     )
-    ticket_tech_apis = await Api.filter(path__in=["/api/v1/ticket/tech/action"])
-    ticket_review_apis = await Api.filter(path__in=["/api/v1/ticket/review"])
+    ticket_tech_apis = await Api.filter(path__in=["/api/v1/ticket/tech/action", "/api/v1/ticket/assign-tech"])
+    ticket_review_apis = await Api.filter(path__in=["/api/v1/ticket/review", "/api/v1/ticket/assign-tech"])
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
     )
@@ -812,7 +813,7 @@ async def init_roles():
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
     await role_map["客服"].apis.add(
-        *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
+        *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/export", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
     )
     await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)

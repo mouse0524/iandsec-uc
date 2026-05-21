@@ -381,6 +381,55 @@ class TicketController:
         )
         return ticket
 
+    async def assign_tech(
+        self,
+        *,
+        ticket_id: int,
+        operator_id: int,
+        tech_id: int,
+        comment: str | None,
+    ) -> Ticket:
+        logger.info(
+            "[ticket.assign_tech] start ticket_id={} operator_id={} tech_id={} comment={}",
+            ticket_id,
+            operator_id,
+            tech_id,
+            comment,
+        )
+        ticket = await self.get_ticket(ticket_id)
+        if ticket.status != TicketStatus.TECH_PROCESSING:
+            raise HTTPException(status_code=400, detail="仅技术处理中工单支持变更技术处理人")
+
+        tech_user = await User.filter(id=tech_id, is_active=True, roles__name="技术").first()
+        if not tech_user:
+            raise HTTPException(status_code=400, detail="请选择有效的技术处理人")
+        if ticket.tech_id == tech_id:
+            raise HTTPException(status_code=400, detail="新的技术处理人与当前处理人相同")
+
+        old_status = ticket.status
+        old_tech_id = ticket.tech_id
+        comment = self._sanitize_rich_html(comment) or f"技术处理人由 {old_tech_id or '-'} 变更为 {tech_id}"
+        ticket.tech_id = tech_id
+        await ticket.save()
+
+        await self._write_action(
+            ticket_id=ticket.id,
+            action=TicketActionType.TECH_ASSIGN,
+            from_status=old_status,
+            to_status=ticket.status,
+            operator_id=operator_id,
+            comment=comment,
+        )
+        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
+        logger.info(
+            "[ticket.assign_tech] success ticket_id={} old_tech_id={} new_tech_id={} operator_id={}",
+            ticket.id,
+            old_tech_id,
+            tech_id,
+            operator_id,
+        )
+        return ticket
+
     async def set_tech_action(
         self,
         *,

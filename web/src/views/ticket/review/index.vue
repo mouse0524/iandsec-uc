@@ -21,10 +21,14 @@ const summaryStats = ref({
 const detailVisible = ref(false)
 const currentTicket = ref({})
 const commentVisible = ref(false)
+const assignVisible = ref(false)
 const reviewAction = ref(true)
 const pendingReviewRow = ref(null)
+const pendingAssignRow = ref(null)
 const reviewComment = ref('')
 const selectedTechId = ref(null)
+const assignTechId = ref(null)
+const assignComment = ref('')
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
 const projectPhaseOptions = ref([])
@@ -141,6 +145,33 @@ async function submitReviewAction() {
   await review(pendingReviewRow.value, reviewAction.value)
 }
 
+function openAssignAction(row) {
+  pendingAssignRow.value = row
+  assignTechId.value = row.tech_id || null
+  assignComment.value = ''
+  assignVisible.value = true
+}
+
+async function submitAssignAction() {
+  if (!pendingAssignRow.value) return
+  if (!assignTechId.value) {
+    $message.warning('请选择新的技术处理人')
+    return
+  }
+  await api.assignTicketTech({
+    ticket_id: pendingAssignRow.value.id,
+    tech_id: assignTechId.value,
+    comment: assignComment.value?.trim() || '变更技术处理人',
+  })
+  $message.success('技术处理人已变更')
+  assignVisible.value = false
+  pendingAssignRow.value = null
+  assignTechId.value = null
+  assignComment.value = ''
+  $table.value?.handleSearch()
+  refreshSummaryStats()
+}
+
 const columns = [
   { title: '工单编号', key: 'ticket_no', align: 'center' },
   {
@@ -197,6 +228,19 @@ const columns = [
             NButton,
             { size: 'small', type: 'error', onClick: () => openReviewAction(row, false) },
             { default: () => '驳回' }
+          )
+        )
+      }
+      if (row.status === 'tech_processing') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'warning',
+              onClick: () => openAssignAction(row),
+            },
+            { default: () => '改派技术' }
           )
         )
       }
@@ -289,6 +333,26 @@ const columns = [
         <div class="modal-actions">
           <NButton @click="commentVisible = false">取消</NButton>
           <NButton type="primary" @click="submitReviewAction">确认提交</NButton>
+        </div>
+      </NModal>
+
+      <NModal v-model:show="assignVisible" preset="card" style="width: 520px" title="变更技术处理人">
+        <NSelect
+          v-model:value="assignTechId"
+          class="mb-12"
+          :options="techOptions"
+          clearable
+          placeholder="请选择新的技术处理人"
+        />
+        <NInput
+          v-model:value="assignComment"
+          type="textarea"
+          :autosize="{ minRows: 3, maxRows: 5 }"
+          placeholder="可填写改派原因"
+        />
+        <div class="modal-actions">
+          <NButton @click="assignVisible = false">取消</NButton>
+          <NButton type="primary" @click="submitAssignAction">确认变更</NButton>
         </div>
       </NModal>
     </div>

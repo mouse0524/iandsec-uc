@@ -1,9 +1,14 @@
+import asyncio
 from datetime import datetime
+import io
 import json
+import re
 from time import perf_counter
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
 from tortoise.expressions import Q
 
 from app.log import logger
@@ -11,15 +16,19 @@ from app.controllers.captcha import captcha_controller
 from app.controllers.partner import partner_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.ticket import ticket_controller
+from app.controllers.user import user_controller
 from app.core.redis_client import execute_redis
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
-from app.models.admin import Ticket, TicketActionLog, User
+from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.tickets import TicketCreate, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.schemas.tickets import TicketAssignTechIn, TicketCreate, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.settings import settings
+from app.utils.http_headers import build_download_content_disposition
 
 router = APIRouter()
+TICKET_EXPORT_MAX_ROWS = 5000
 
 
 async def _get_current_user() -> User:
@@ -41,6 +50,62 @@ def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) -> boo
     if "技术" in role_names:
         return ticket.submitter_id == user.id or ticket.tech_id == user.id
     return ticket.submitter_id == user.id
+
+
+def _build_ticket_search(
+    *,
+    user: User,
+    role_names: list[str],
+    status: TicketStatus | None = None,
+    project_phase: str | None = None,
+    category: str | None = None,
+    root_cause: str | None = None,
+    title: str | None = None,
+    created_start: datetime | None = None,
+    created_end: datetime | None = None,
+    finished_start: datetime | None = None,
+    finished_end: datetime | None = None,
+) -> Q:
+    q = Q()
+    if status:
+        q &= Q(status=status)
+    if project_phase:
+        q &= Q(project_phase=project_phase)
+    if category:
+        q &= Q(category=category)
+    if root_cause:
+        q &= Q(root_cause=root_cause)
+    if title:
+        q &= Q(title__contains=title)
+    if created_start:
+        q &= Q(created_at__gte=created_start)
+    if created_end:
+        q &= Q(created_at__lt=created_end)
+    if finished_start:
+        q &= Q(finished_at__gte=finished_start)
+    if finished_end:
+        q &= Q(finished_at__lt=finished_end)
+
+    if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
+        if "技术" in role_names:
+            q &= Q(tech_id=user.id)
+        else:
+            q &= Q(submitter_id=user.id)
+    return q
+
+
+def _clean_export_text(value) -> str:
+    text = str(value or "")
+    image_sources = re.findall(r"<\s*img\b[^>]*\bsrc\s*=\s*([\"'])(.*?)\1", text, flags=re.I | re.S)
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</\s*(p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    sources = [src.strip() for _, src in image_sources if src and src.strip()]
+    if sources:
+        text = "\n".join([item for item in [text, "图片：" + "；".join(sources)] if item])
+    return text
 
 
 @router.post("/upload", summary="上传工单附件", dependencies=[DependAuth])
@@ -112,19 +177,19 @@ async def get_ticket_prefill():
     return Success(data=data)
 
 
-@router.get("/list", summary="工单列表", dependencies=[DependAuth])
+@router.get("/list", summary="????", dependencies=[DependAuth])
 async def list_ticket(
-    page: int = Query(1, description="页码"),
-    page_size: int = Query(10, description="每页数量"),
-    status: TicketStatus | None = Query(None, description="状态"),
-    project_phase: str | None = Query(None, description="项目阶段"),
-    category: str | None = Query(None, description="分类"),
-    root_cause: str | None = Query(None, description="问题根因"),
-    title: str | None = Query(None, description="标题"),
-    created_start: datetime | None = Query(None, description="创建时间开始"),
-    created_end: datetime | None = Query(None, description="创建时间结束"),
-    finished_start: datetime | None = Query(None, description="完成时间开始"),
-    finished_end: datetime | None = Query(None, description="完成时间结束"),
+    page: int = Query(1, description="??"),
+    page_size: int = Query(10, description="????"),
+    status: TicketStatus | None = Query(None, description="??"),
+    project_phase: str | None = Query(None, description="????"),
+    category: str | None = Query(None, description="??"),
+    root_cause: str | None = Query(None, description="????"),
+    title: str | None = Query(None, description="??"),
+    created_start: datetime | None = Query(None, description="??????"),
+    created_end: datetime | None = Query(None, description="??????"),
+    finished_start: datetime | None = Query(None, description="??????"),
+    finished_end: datetime | None = Query(None, description="??????"),
 ):
     start_at = perf_counter()
     user = await _get_current_user()
@@ -132,32 +197,19 @@ async def list_ticket(
 
     filter_start_at = perf_counter()
     role_names = await _get_user_role_names(user)
-
-    q = Q()
-    if status:
-        q &= Q(status=status)
-    if project_phase:
-        q &= Q(project_phase=project_phase)
-    if category:
-        q &= Q(category=category)
-    if root_cause:
-        q &= Q(root_cause=root_cause)
-    if title:
-        q &= Q(title__contains=title)
-    if created_start:
-        q &= Q(created_at__gte=created_start)
-    if created_end:
-        q &= Q(created_at__lt=created_end)
-    if finished_start:
-        q &= Q(finished_at__gte=finished_start)
-    if finished_end:
-        q &= Q(finished_at__lt=finished_end)
-
-    if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
-        if "技术" in role_names:
-            q &= Q(tech_id=user.id)
-        else:
-            q &= Q(submitter_id=user.id)
+    q = _build_ticket_search(
+        user=user,
+        role_names=role_names,
+        status=status,
+        project_phase=project_phase,
+        category=category,
+        root_cause=root_cause,
+        title=title,
+        created_start=created_start,
+        created_end=created_end,
+        finished_start=finished_start,
+        finished_end=finished_end,
+    )
     filter_cost_ms = int((perf_counter() - filter_start_at) * 1000)
 
     query_start_at = perf_counter()
@@ -177,6 +229,187 @@ async def list_ticket(
         total_cost_ms,
     )
     return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
+
+
+@router.get("/export", summary="Export tickets", dependencies=[DependAuth])
+async def export_tickets(
+    status: TicketStatus | None = Query(None, description="Status"),
+    project_phase: str | None = Query(None, description="Project phase"),
+    category: str | None = Query(None, description="Category"),
+    root_cause: str | None = Query(None, description="Root cause"),
+    title: str | None = Query(None, description="Title"),
+    created_start: datetime | None = Query(None, description="Created start time"),
+    created_end: datetime | None = Query(None, description="Created end time"),
+    finished_start: datetime | None = Query(None, description="Finished start time"),
+    finished_end: datetime | None = Query(None, description="Finished end time"),
+):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    q = _build_ticket_search(
+        user=user,
+        role_names=role_names,
+        status=status,
+        project_phase=project_phase,
+        category=category,
+        root_cause=root_cause,
+        title=title,
+        created_start=created_start,
+        created_end=created_end,
+        finished_start=finished_start,
+        finished_end=finished_end,
+    )
+    total = await Ticket.filter(q).count()
+    if total > TICKET_EXPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"导出数据量过大，当前 {total} 条，请缩小筛选条件到 {TICKET_EXPORT_MAX_ROWS} 条以内",
+        )
+
+    tickets = await Ticket.filter(q).order_by("-id").limit(TICKET_EXPORT_MAX_ROWS)
+    ticket_ids = [item.id for item in tickets]
+    attachments, actions = [], []
+    if ticket_ids:
+        attachments, actions = await asyncio.gather(
+            TicketAttachment.filter(ticket_id__in=ticket_ids).order_by("ticket_id", "id"),
+            TicketActionLog.filter(ticket_id__in=ticket_ids).order_by("ticket_id", "id"),
+        )
+
+    attachment_map: dict[int, list] = {}
+    for item in attachments:
+        attachment_map.setdefault(item.ticket_id, []).append(item)
+    action_map: dict[int, list] = {}
+    for item in actions:
+        action_map.setdefault(item.ticket_id, []).append(item)
+
+    user_ids = {
+        *(item.submitter_id for item in tickets if item.submitter_id),
+        *(item.reviewer_id for item in tickets if item.reviewer_id),
+        *(item.tech_id for item in tickets if item.tech_id),
+        *(item.operator_id for item in actions if item.operator_id),
+    }
+    user_map: dict[int, str] = {}
+    for uid in user_ids:
+        try:
+            basic = await user_controller.get_user_basic(int(uid))
+            user_map[int(uid)] = str(basic.get("alias") or basic.get("username") or "")
+        except Exception:
+            user_map[int(uid)] = ""
+
+    status_text = {
+        TicketStatus.PENDING_REVIEW.value: "Pending review",
+        TicketStatus.CS_REJECTED.value: "CS rejected",
+        TicketStatus.TECH_PROCESSING.value: "Tech processing",
+        TicketStatus.TECH_REJECTED.value: "Tech rejected",
+        TicketStatus.DONE.value: "Done",
+    }
+    action_text = {
+        TicketActionType.SUBMIT.value: "Submit",
+        TicketActionType.RESUBMIT.value: "Resubmit",
+        TicketActionType.CS_APPROVE.value: "CS approve",
+        TicketActionType.CS_REJECT.value: "CS reject",
+        TicketActionType.TECH_START.value: "Tech start",
+        TicketActionType.TECH_ASSIGN.value: "Tech assign",
+        TicketActionType.TECH_REJECT.value: "Tech reject",
+        TicketActionType.FINISH.value: "Finish",
+    }
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Tickets"
+    headers = [
+        "Ticket No",
+        "Status",
+        "Project Phase",
+        "Category",
+        "Root Cause",
+        "Title",
+        "Company",
+        "Contact",
+        "Email",
+        "Phone",
+        "Submitter",
+        "Reviewer",
+        "Technician",
+        "Description",
+        "Reject Reason",
+        "Attachments",
+        "Action Logs",
+        "Created At",
+        "Updated At",
+        "Finished At",
+    ]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def fmt_dt(value):
+        return value.strftime(settings.DATETIME_FORMAT) if isinstance(value, datetime) else ""
+
+    for ticket in tickets:
+        ticket_attachments = attachment_map.get(ticket.id, [])
+        ticket_actions = action_map.get(ticket.id, [])
+        attachment_text = "\n".join(
+            f"{item.origin_name} ({item.file_size or 0} bytes)" for item in ticket_attachments
+        )
+        action_lines = []
+        for action in ticket_actions:
+            operator_name = user_map.get(action.operator_id, "") or str(action.operator_id or "-")
+            action_lines.append(
+                " | ".join(
+                    part
+                    for part in [
+                        fmt_dt(action.created_at),
+                        action_text.get(str(action.action), str(action.action)),
+                        f"{status_text.get(str(action.from_status), str(action.from_status or '-'))} -> {status_text.get(str(action.to_status), str(action.to_status))}",
+                        operator_name,
+                        _clean_export_text(action.comment),
+                    ]
+                    if part
+                )
+            )
+        sheet.append(
+            [
+                ticket.ticket_no,
+                status_text.get(str(ticket.status), str(ticket.status)),
+                ticket.project_phase,
+                ticket.category,
+                ticket.root_cause or "",
+                ticket.title,
+                ticket.company_name,
+                ticket.contact_name,
+                ticket.email,
+                ticket.phone,
+                user_map.get(ticket.submitter_id, ""),
+                user_map.get(ticket.reviewer_id or 0, ""),
+                user_map.get(ticket.tech_id or 0, ""),
+                _clean_export_text(ticket.description),
+                _clean_export_text(ticket.reject_reason),
+                attachment_text,
+                "\n".join(action_lines),
+                fmt_dt(ticket.created_at),
+                fmt_dt(ticket.updated_at),
+                fmt_dt(ticket.finished_at),
+            ]
+        )
+
+    widths = [22, 14, 14, 16, 18, 30, 22, 14, 28, 18, 16, 16, 16, 56, 36, 36, 70, 20, 20, 20]
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[chr(64 + index)].width = width
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    filename = f"tickets_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    logger.info("[api.ticket.export] user_id={} total={}", user.id, total)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": build_download_content_disposition(filename)},
+    )
 
 
 @router.get("/get", summary="工单详情", dependencies=[DependAuth])
@@ -253,6 +486,37 @@ async def tech_action_ticket(payload: TicketTechActionIn):
     logger.info("[api.ticket.tech_action] success user_id={} ticket_id={} status={}", user.id, ticket.id, ticket.status)
     return Success(msg="处理成功", data=await ticket.to_dict())
 
+
+
+
+@router.post("/assign-tech", summary="改派技术处理人", dependencies=[DependAuth])
+async def assign_ticket_tech(payload: TicketAssignTechIn):
+    user = await _get_current_user()
+    logger.info(
+        "[api.ticket.assign_tech] request user_id={} ticket_id={} tech_id={}",
+        user.id,
+        payload.ticket_id,
+        payload.tech_id,
+    )
+    role_names = await _get_user_role_names(user)
+    is_admin = user.is_superuser or "管理员" in role_names
+    is_customer_service = "客服" in role_names
+    is_tech = "技术" in role_names
+    if not (is_admin or is_customer_service or is_tech):
+        return Fail(code=403, msg="仅客服、技术或管理员可改派技术处理人")
+    if is_tech and not (is_admin or is_customer_service):
+        current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
+        if current_ticket.tech_id != user.id:
+            return Fail(code=403, msg="技术只能改派自己当前处理的工单")
+
+    ticket = await ticket_controller.assign_tech(
+        ticket_id=payload.ticket_id,
+        operator_id=user.id,
+        tech_id=payload.tech_id,
+        comment=payload.comment,
+    )
+    logger.info("[api.ticket.assign_tech] success user_id={} ticket_id={} tech_id={}", user.id, ticket.id, ticket.tech_id)
+    return Success(msg="改派成功", data=await ticket.to_dict())
 
 @router.get("/attachment/download", summary="下载工单附件", dependencies=[DependAuth])
 async def download_ticket_attachment(attachment_id: int = Query(..., description="附件ID")):

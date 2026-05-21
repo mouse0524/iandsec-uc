@@ -121,6 +121,37 @@ function handleTableDataChange(rows) {
   tableData.value = Array.isArray(rows) ? rows : []
 }
 
+function triggerDownload(blob, filename) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+function formatExportTimestamp() {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
+async function exportTicketList() {
+  const res = await api.exportTickets({ ...queryItems.value })
+  const blob =
+    res instanceof Blob
+      ? res
+      : new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  if (blob.type?.includes('application/json')) {
+    const payload = JSON.parse(await blob.text())
+    window.$message?.error(payload?.detail || payload?.msg || '导出失败')
+    return
+  }
+  triggerDownload(blob, `tickets_${formatExportTimestamp()}.xlsx`)
+}
+
 async function loadTicketMetaOptions() {
   try {
     const res = await api.getPublicConfig()
@@ -332,6 +363,9 @@ const columns = [
                 placeholder="选择问题根因"
                 style="width: 180px"
               />
+            </QueryBarItem>
+            <QueryBarItem label="" :label-width="0">
+              <NButton type="primary" secondary @click="exportTicketList">导出</NButton>
             </QueryBarItem>
           </template>
         </CrudTable>

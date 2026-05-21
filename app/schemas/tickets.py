@@ -34,6 +34,12 @@ class TicketTechActionIn(BaseModel):
     root_cause: Optional[str] = Field(None, description="问题根因")
 
 
+class TicketAssignTechIn(BaseModel):
+    ticket_id: int = Field(..., description="工单ID")
+    tech_id: int = Field(..., description="新的技术处理人ID")
+    comment: Optional[str] = Field(None, description="改派备注")
+
+
 class TicketResubmitIn(BaseModel):
     ticket_id: int = Field(..., description="工单ID")
     description: Optional[str] = Field(None, description="补充描述")
