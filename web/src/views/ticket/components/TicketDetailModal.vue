@@ -56,6 +56,10 @@ function openDescriptionImagePreview(event) {
   descriptionImagePreviewVisible.value = true
 }
 
+function openTimelineImagePreview(event) {
+  openDescriptionImagePreview(event)
+}
+
 watch(
   () => [props.visible, props.ticket?.id, imageAttachments.value.length],
   async ([visible]) => {
@@ -276,7 +280,7 @@ function getActionIconClass(action) {
             </span>
           </template>
           <div class="timeline-content">
-            <div class="timeline-comment" v-html="renderActionContent(item)"></div>
+            <div class="timeline-comment" @dblclick="openTimelineImagePreview" v-html="renderActionContent(item)"></div>
             <div class="timeline-meta">操作者：{{ item.operator_display || item.operator_name || item.operator_id || '-' }}</div>
             <div v-if="item.created_at" class="timeline-meta">时间：{{ item.created_at }}</div>
           </div>
@@ -440,6 +444,7 @@ function getActionIconClass(action) {
   border: 1px solid #e5e7eb;
   display: block;
   margin-top: 6px;
+  cursor: zoom-in;
 }
 
 .timeline-meta {

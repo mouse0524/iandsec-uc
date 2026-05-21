@@ -90,6 +90,27 @@ class SkillKnowOpenAIClient:
         content = (data.get("message") or {}).get("content") or data.get("response") or ""
         return {"choices": [{"message": {"content": content}}], "raw": data}
 
+    @staticmethod
+    def _message_content(result: dict[str, Any]) -> str:
+        choices = result.get("choices") if isinstance(result, dict) else None
+        if isinstance(choices, list) and choices:
+            first = choices[0] if isinstance(choices[0], dict) else {}
+            message = first.get("message") if isinstance(first, dict) else {}
+            if isinstance(message, dict):
+                return str(message.get("content") or "")
+            if isinstance(message, str):
+                return message
+            text = first.get("text") if isinstance(first, dict) else ""
+            return str(text or "")
+        if isinstance(result, dict):
+            message = result.get("message")
+            if isinstance(message, dict):
+                return str(message.get("content") or "")
+            if isinstance(message, str):
+                return message
+            return str(result.get("content") or result.get("response") or "")
+        return ""
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -248,7 +269,7 @@ class SkillKnowOpenAIClient:
                 [{"role": "user", "content": "Reply with OK."}],
                 override=override,
             )
-            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = self._message_content(result)
             model = result.get("model")
             suffix = f"（模型：{model}）" if model else ""
             return {"success": True, "message": f"{content or '连接成功'}{suffix}"}

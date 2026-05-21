@@ -59,6 +59,12 @@ class SecurityControlsTestCase(unittest.TestCase):
 
         self.assertEqual(models, ["m1", "m2", "m3", "m4", "m5"])
 
+    def test_message_content_handles_null_choices(self):
+        self.assertEqual(SkillKnowOpenAIClient._message_content({"choices": None}), "")
+
+    def test_message_content_handles_top_level_message_object(self):
+        self.assertEqual(SkillKnowOpenAIClient._message_content({"message": {"content": "OK"}}), "OK")
+
     def test_private_hostname_checks_all_resolved_addresses(self):
         resolved = [
             (None, None, None, None, ("8.8.8.8", 0)),
