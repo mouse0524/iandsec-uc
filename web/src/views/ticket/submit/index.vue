@@ -279,8 +279,8 @@ function submit() {
               <NButton v-if="isAuthed" quaternary type="primary" @click="quickFill">一键填充</NButton>
             </div>
             <div class="form-grid two-col">
-              <NFormItem label="公司名称" path="company_name">
-                <NInput v-model:value="form.company_name" placeholder="请输入公司名称" />
+              <NFormItem label="项目名称" path="company_name">
+                <NInput v-model:value="form.company_name" placeholder="请输入项目名称" />
               </NFormItem>
               <NFormItem label="联系人" path="contact_name">
                 <NInput v-model:value="form.contact_name" placeholder="请输入联系人" />

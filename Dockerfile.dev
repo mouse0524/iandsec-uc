@@ -13,10 +13,15 @@ ENV PATH=${PNPM_HOME}:${PATH}
 # 复制官方 Node 20 运行时，避免通过 apt/nodesource 下载 Node。
 COPY --from=node /usr/local /usr/local
 
-# 启用 pnpm。开发镜像不安装 apt 包，避免构建卡在 Debian 包下载。
+# 启用 pnpm。
 RUN corepack enable pnpm \
     && corepack prepare pnpm@9.15.9 --activate \
     && pnpm config set registry https://registry.npmmirror.com
+
+RUN sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并安装后端依赖。源码运行时通过 compose bind mount 覆盖。
 COPY requirements.txt .

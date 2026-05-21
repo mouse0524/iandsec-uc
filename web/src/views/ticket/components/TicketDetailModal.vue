@@ -165,7 +165,7 @@ function getActionIconClass(action) {
 
     <div class="detail-grid">
       <div class="detail-card">
-        <span>公司名称</span>
+        <span>项目名称</span>
         <strong>{{ ticket.company_name || '-' }}</strong>
       </div>
       <div class="detail-card">
