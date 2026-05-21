@@ -11,6 +11,7 @@ from app.log import logger
 from app.core.redis_client import execute_redis
 from app.models.admin import SystemSettingItem
 from app.services.security import validate_external_service_url
+from app.services.time_sync_service import time_sync_service
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
 
@@ -22,6 +23,7 @@ class SystemSettingController:
         "site",
         "ticket",
         "login_security",
+        "time_sync",
         "ticket_notify",
         "mail",
         "mail_template",
@@ -59,6 +61,13 @@ class SystemSettingController:
             "user_token_expire_minutes": 60,
             "password_min_length": 8,
             "password_required_categories": ["letter", "digit"],
+        },
+        "time_sync": {
+            "time_sync_enabled": True,
+            "time_sync_server": "ntp.aliyun.com",
+            "time_sync_interval_minutes": 60,
+            "time_sync_max_offset_seconds": 5,
+            "time_sync_timezone": "Asia/Shanghai",
         },
         "ticket_notify": {
             "ticket_notify_by_role": {
@@ -202,6 +211,14 @@ class SystemSettingController:
     async def get_full_dict(self) -> dict:
         return await self._get_merged_raw()
 
+    async def get_time_sync_status(self) -> dict:
+        data = await self._get_merged_raw()
+        return time_sync_service.status(data)
+
+    async def sync_time(self) -> dict:
+        data = await self._get_merged_raw()
+        return time_sync_service.sync(data)
+
     async def test_webdav_connection(self, payload: dict | None = None) -> dict:
         db_data = await self._get_merged_raw()
         req_data = payload or {}
@@ -309,6 +326,13 @@ class SystemSettingController:
             "password_min_length",
             "password_required_categories",
         }
+        time_sync_keys = {
+            "time_sync_enabled",
+            "time_sync_server",
+            "time_sync_interval_minutes",
+            "time_sync_max_offset_seconds",
+            "time_sync_timezone",
+        }
         ticket_notify_keys = {"ticket_notify_by_role"}
         mail_keys = {
             "smtp_host",
@@ -354,6 +378,7 @@ class SystemSettingController:
             "site": site_keys,
             "ticket": ticket_keys,
             "login_security": login_keys,
+            "time_sync": time_sync_keys,
             "ticket_notify": ticket_notify_keys,
             "mail": mail_keys,
             "mail_template": mail_template_keys,

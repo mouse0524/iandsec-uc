@@ -13,6 +13,7 @@ RUN cd /opt/iandsec-uc/web \
 FROM python:3.11-slim-bookworm
 
 WORKDIR /opt/iandsec-uc
+ENV TZ=Asia/Shanghai
 COPY requirements.txt run.py ./
 COPY app ./app
 COPY deploy/entrypoint.sh .
@@ -24,7 +25,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \
     && apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple

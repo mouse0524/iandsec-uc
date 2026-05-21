@@ -26,6 +26,11 @@ class SystemSettingUpdateIn(BaseModel):
     user_token_expire_minutes: int = Field(default=60, description="用户Token失效时间(分钟)")
     password_min_length: int = Field(default=8, description="密码最小长度")
     password_required_categories: list[str] = Field(default_factory=lambda: ["letter", "digit"], description="密码必选类别")
+    time_sync_enabled: bool = Field(default=True, description="是否启用时间同步配置")
+    time_sync_server: str = Field(default="ntp.aliyun.com", description="时间服务器")
+    time_sync_interval_minutes: int = Field(default=60, description="时间同步间隔(分钟)")
+    time_sync_max_offset_seconds: int = Field(default=5, description="最大允许偏差(秒)")
+    time_sync_timezone: str = Field(default="Asia/Shanghai", description="系统时区")
 
     ticket_notify_by_role: dict[str, list[str]] = Field(default_factory=dict, description="按角色配置工单提醒节点")
 
@@ -129,6 +134,23 @@ class SystemSettingUpdateIn(BaseModel):
         if not normalized:
             raise ValueError("密码类别至少选择一项")
         return normalized
+
+    @field_validator("time_sync_server", "time_sync_timezone")
+    @classmethod
+    def validate_time_sync_text(cls, value: str, info):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError(f"{info.field_name} 不能为空")
+        if len(text) > 128:
+            raise ValueError(f"{info.field_name} 不能超过128个字符")
+        return text
+
+    @field_validator("time_sync_interval_minutes", "time_sync_max_offset_seconds")
+    @classmethod
+    def validate_positive_time_sync_numbers(cls, value: int, info):
+        if value < 1:
+            raise ValueError(f"{info.field_name} 必须大于等于 1")
+        return value
 
     @field_validator("ticket_notify_by_role")
     @classmethod

@@ -23,10 +23,24 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
     for key in ("allow_channel_register", "allow_user_register"):
         if key not in payload.model_fields_set:
             data.pop(key, None)
-    setting = await system_setting_controller.update(data)
+    await system_setting_controller.update(data)
     data = await system_setting_controller.get_safe_dict()
     logger.info("[api.settings.update] success setting_id={}", data.get("id"))
     return Success(msg="保存成功", data=data)
+
+
+@router.get("/time-sync/status", summary="检测时间同步状态")
+async def get_time_sync_status():
+    logger.info("[api.settings.time_sync.status] request")
+    data = await system_setting_controller.get_time_sync_status()
+    return Success(data=data)
+
+
+@router.post("/time-sync/sync", summary="执行时间同步")
+async def sync_system_time():
+    logger.info("[api.settings.time_sync.sync] request")
+    data = await system_setting_controller.sync_time()
+    return Success(msg="时间同步完成", data=data)
 
 
 @router.post("/upload_logo", summary="上传站点Logo")

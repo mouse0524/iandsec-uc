@@ -126,6 +126,8 @@ export default {
   // settings
   getSystemSettings: () => request.get('/settings/get'),
   updateSystemSettings: (data = {}) => request.post('/settings/update', data),
+  getTimeSyncStatus: () => request.get('/settings/time-sync/status'),
+  syncSystemTime: () => request.post('/settings/time-sync/sync'),
   testWebdavConnection: (data = {}) => request.post('/settings/webdav/test', data),
   uploadSiteLogo: (file) => {
     const formData = new FormData()

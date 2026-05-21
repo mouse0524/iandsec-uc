@@ -367,6 +367,7 @@ function getActionIconClass(action) {
   margin-top: 10px;
   color: #374151;
   line-height: 1.8;
+  white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
 }

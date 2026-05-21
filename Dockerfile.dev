@@ -6,7 +6,8 @@ WORKDIR /opt/iandsec-uc
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PNPM_HOME=/root/.local/share/pnpm
+    PNPM_HOME=/root/.local/share/pnpm \
+    TZ=Asia/Shanghai
 
 ENV PATH=${PNPM_HOME}:${PATH}
 
@@ -20,7 +21,9 @@ RUN corepack enable pnpm \
 
 RUN sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/sources.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并安装后端依赖。源码运行时通过 compose bind mount 覆盖。

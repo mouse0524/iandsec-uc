@@ -704,6 +704,14 @@ async def init_roles():
                 await admin_role.menus.add(*await Menu.all())
                 await admin_role.apis.add(*await Api.filter(path__in=_monitor_api_paths()))
                 await admin_role.apis.add(*await Api.filter(path__in=_terminal_api_paths()))
+                await admin_role.apis.add(
+                    *await Api.filter(
+                        path__in=[
+                            "/api/v1/settings/time-sync/status",
+                            "/api/v1/settings/time-sync/sync",
+                        ]
+                    )
+                )
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
                 await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
@@ -736,7 +744,14 @@ async def init_roles():
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
     )
-    settings_apis = await Api.filter(path__in=["/api/v1/settings/get", "/api/v1/settings/update"])
+    settings_apis = await Api.filter(
+        path__in=[
+            "/api/v1/settings/get",
+            "/api/v1/settings/update",
+            "/api/v1/settings/time-sync/status",
+            "/api/v1/settings/time-sync/sync",
+        ]
+    )
     webdav_apis = await Api.filter(
         path__in=[
             "/api/v1/webdav/list",

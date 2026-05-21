@@ -30,6 +30,9 @@ const formRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const webdavTesting = ref(false)
+const timeSyncChecking = ref(false)
+const timeSyncSyncing = ref(false)
+const timeSyncStatus = ref(null)
 const logoUploading = ref(false)
 const previewVisible = ref(false)
 const appStore = useAppStore()
@@ -56,6 +59,11 @@ const form = ref({
   user_token_expire_minutes: 60,
   password_min_length: 8,
   password_required_categories: ['letter', 'digit'],
+  time_sync_enabled: true,
+  time_sync_server: 'ntp.aliyun.com',
+  time_sync_interval_minutes: 60,
+  time_sync_max_offset_seconds: 5,
+  time_sync_timezone: 'Asia/Shanghai',
   ticket_notify_by_role: {
     用户: ['cs_rejected', 'tech_rejected', 'done'],
     代理商: ['cs_rejected', 'tech_rejected', 'done'],
@@ -305,6 +313,30 @@ const rules = {
     },
     trigger: ['change', 'blur'],
   },
+  time_sync_server: {
+    required: true,
+    message: '请输入时间服务器地址',
+    trigger: ['input', 'blur'],
+  },
+  time_sync_interval_minutes: {
+    required: true,
+    type: 'number',
+    min: 1,
+    message: '请输入正确的同步间隔',
+    trigger: ['blur', 'change'],
+  },
+  time_sync_max_offset_seconds: {
+    required: true,
+    type: 'number',
+    min: 1,
+    message: '请输入正确的最大允许偏差',
+    trigger: ['blur', 'change'],
+  },
+  time_sync_timezone: {
+    required: true,
+    message: '请输入系统时区',
+    trigger: ['input', 'blur'],
+  },
 }
 
 onMounted(() => {
@@ -382,6 +414,32 @@ async function testWebdavConnection() {
     $message.success(res?.msg || 'WebDAV连接成功')
   } finally {
     webdavTesting.value = false
+  }
+}
+
+async function checkTimeSyncStatus() {
+  try {
+    timeSyncChecking.value = true
+    const res = await api.getTimeSyncStatus()
+    timeSyncStatus.value = res?.data || null
+    if (timeSyncStatus.value?.within_tolerance) {
+      $message.success('时间偏差在允许范围内')
+    } else {
+      $message.warning('时间偏差超过允许范围')
+    }
+  } finally {
+    timeSyncChecking.value = false
+  }
+}
+
+async function syncSystemTime() {
+  try {
+    timeSyncSyncing.value = true
+    const res = await api.syncSystemTime()
+    timeSyncStatus.value = res?.data || null
+    $message.success(res?.msg || '时间同步完成')
+  } finally {
+    timeSyncSyncing.value = false
   }
 }
 
@@ -613,6 +671,37 @@ function applyPresetHtmlTemplates() {
                     >
                   </NSpace>
                 </NCheckboxGroup>
+              </NFormItem>
+            </NCard>
+          </NTabPane>
+
+          <NTabPane name="time-sync" tab="时间同步">
+            <NCard size="small" title="时间服务器同步配置">
+              <NAlert type="info" class="mb-12">
+                容器默认共享宿主机系统时钟；这里用于统一配置时间服务器、同步间隔和时区，部署脚本或具备权限的同步服务可读取该配置执行校时。
+              </NAlert>
+              <NFormItem label="启用时间同步">
+                <NSwitch v-model:value="form.time_sync_enabled" />
+              </NFormItem>
+              <NFormItem label="时间服务器" path="time_sync_server">
+                <NInput v-model:value="form.time_sync_server" placeholder="例如 ntp.aliyun.com" />
+              </NFormItem>
+              <NFormItem label="同步间隔(分钟)" path="time_sync_interval_minutes">
+                <NInputNumber
+                  v-model:value="form.time_sync_interval_minutes"
+                  :min="1"
+                  :max="1440"
+                />
+              </NFormItem>
+              <NFormItem label="允许偏差(秒)" path="time_sync_max_offset_seconds">
+                <NInputNumber
+                  v-model:value="form.time_sync_max_offset_seconds"
+                  :min="1"
+                  :max="3600"
+                />
+              </NFormItem>
+              <NFormItem label="系统时区" path="time_sync_timezone">
+                <NInput v-model:value="form.time_sync_timezone" placeholder="例如 Asia/Shanghai" />
               </NFormItem>
             </NCard>
           </NTabPane>
