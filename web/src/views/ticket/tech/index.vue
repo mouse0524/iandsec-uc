@@ -20,6 +20,7 @@ const summaryStats = ref({
   tech_rejected: 0,
 })
 const detailVisible = ref(false)
+const detailLoading = ref(false)
 const currentTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
@@ -127,9 +128,21 @@ async function takeAction(row, action) {
 }
 
 async function openDetail(row) {
-  const res = await api.getTicketById({ ticket_id: row.id })
-  currentTicket.value = res.data
+  currentTicket.value = row
+  detailLoading.value = true
   detailVisible.value = true
+  try {
+    const res = await api.getTicketById({ ticket_id: row.id })
+    if (currentTicket.value?.id === row.id) {
+      currentTicket.value = res.data
+    }
+  } catch (error) {
+    $message.error('加载工单详情失败')
+  } finally {
+    if (currentTicket.value?.id === row.id) {
+      detailLoading.value = false
+    }
+  }
 }
 
 function applyQuickFilter(status) {
@@ -330,7 +343,7 @@ const columns = [
         </CrudTable>
       </NCard>
 
-      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" />
+      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
       <NModal v-model:show="commentVisible" preset="card" style="width: 760px; max-width: 92vw" :title="pendingActionType === 'finish' ? '完成备注' : '驳回备注'">
         <NSelect

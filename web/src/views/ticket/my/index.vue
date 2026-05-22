@@ -23,6 +23,7 @@ const queryItems = ref({
   finished_end: route.query.finished_end || undefined,
 })
 const detailVisible = ref(false)
+const detailLoading = ref(false)
 const currentTicket = ref({})
 const tableData = ref([])
 const editVisible = ref(false)
@@ -170,9 +171,21 @@ async function loadTicketMetaOptions() {
 }
 
 async function openDetail(row) {
-  const res = await api.getTicketById({ ticket_id: row.id })
-  currentTicket.value = res.data
+  currentTicket.value = row
+  detailLoading.value = true
   detailVisible.value = true
+  try {
+    const res = await api.getTicketById({ ticket_id: row.id })
+    if (currentTicket.value?.id === row.id) {
+      currentTicket.value = res.data
+    }
+  } catch (error) {
+    $message.error('加载工单详情失败')
+  } finally {
+    if (currentTicket.value?.id === row.id) {
+      detailLoading.value = false
+    }
+  }
 }
 
 async function openEdit(row) {
@@ -371,7 +384,7 @@ const columns = [
         </CrudTable>
       </NCard>
 
-      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" />
+      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
       <NModal v-model:show="editVisible" preset="card" title="编辑工单" style="width: 920px">
         <div class="edit-shell">

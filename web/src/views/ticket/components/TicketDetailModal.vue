@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NEmpty, NModal, NTag } from 'naive-ui'
+import { NButton, NEmpty, NModal, NSpin, NTag } from 'naive-ui'
 import CrudModal from '@/components/table/CrudModal.vue'
 import api from '@/api'
-import { htmlToPlainText, isImageName, sanitizeHtml } from '@/utils'
+import { isImageName, sanitizeHtml } from '@/utils'
 import { mapTicketActionText, ticketStatusTextMap, ticketStatusTypeMap } from './ticket-meta'
 
 defineEmits(['update:visible'])
@@ -19,6 +19,10 @@ const props = defineProps({
       return {}
     },
   },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const attachments = computed(() => props.ticket?.attachments || [])
@@ -28,6 +32,7 @@ const descriptionImagePreviewVisible = ref(false)
 const descriptionImagePreviewSrc = ref('')
 const descriptionImagePreviewAlt = ref('')
 const safeDescription = computed(() => sanitizeHtml(props.ticket?.description || '-'))
+const hasActions = computed(() => Array.isArray(props.ticket?.actions) && props.ticket.actions.length > 0)
 
 function revokeImagePreviewUrls() {
   Object.values(imagePreviewMap.value || {}).forEach((url) => {
@@ -104,12 +109,6 @@ async function openAttachment(item) {
   window.URL.revokeObjectURL(url)
 }
 
-async function copyText(text, successText) {
-  if (!text) return
-  await navigator.clipboard.writeText(String(text))
-  $message.success(successText)
-}
-
 async function copyImage(item) {
   const res = await api.downloadTicketAttachment({ attachment_id: item.id })
   const blob = res instanceof Blob ? res : new Blob([res])
@@ -158,11 +157,6 @@ function getActionIconClass(action) {
       <div>
         <div class="detail-no">{{ ticket.ticket_no }}</div>
         <div class="detail-title">{{ ticket.title }}</div>
-        <div class="detail-actions">
-          <NButton size="tiny" quaternary type="primary" @click="copyText(ticket.ticket_no, '工单编号已复制')">复制编号</NButton>
-          <NButton size="tiny" quaternary type="primary" @click="copyText(htmlToPlainText(ticket.description), '描述文本已复制')">复制文本</NButton>
-          <NButton size="tiny" quaternary type="primary" @click="copyText(ticket.description, '描述HTML已复制')">复制HTML</NButton>
-        </div>
       </div>
       <NTag :type="ticketStatusTypeMap[ticket.status] || 'default'">{{ ticketStatusTextMap[ticket.status] || '-' }}</NTag>
     </div>
@@ -175,6 +169,10 @@ function getActionIconClass(action) {
       <div class="detail-card">
         <span>联系人</span>
         <strong>{{ ticket.contact_name || '-' }}</strong>
+      </div>
+      <div class="detail-card">
+        <span>联系方式</span>
+        <strong>{{ ticket.phone || '-' }}</strong>
       </div>
       <div class="detail-card">
         <span>项目阶段</span>
@@ -216,13 +214,21 @@ function getActionIconClass(action) {
 
     <div class="description-card">
       <div class="section-title">问题描述</div>
-      <div class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
+      <div v-if="loading" class="detail-loading">
+        <NSpin size="small" />
+        <span>详情加载中...</span>
+      </div>
+      <div v-else class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
     </div>
 
     <div class="detail-secondary-grid">
     <div class="attachment-card">
       <div class="section-title">附件列表</div>
-      <div v-if="imageAttachments.length" class="image-preview-grid">
+      <div v-if="loading" class="detail-loading">
+        <NSpin size="small" />
+        <span>附件加载中...</span>
+      </div>
+      <div v-else-if="imageAttachments.length" class="image-preview-grid">
         <a
           v-for="item in imageAttachments"
           :key="`img-${item.id}`"
@@ -234,7 +240,7 @@ function getActionIconClass(action) {
           <img :src="getImagePreviewUrl(item)" :alt="item.origin_name || `image-${item.id}`" />
         </a>
       </div>
-      <div v-if="attachments.length" class="attachment-list">
+      <div v-if="!loading && attachments.length" class="attachment-list">
         <div v-for="item in attachments" :key="item.id" class="attachment-item">
           <div>
             <div class="attachment-name">{{ item.origin_name || item.file_path }}</div>
@@ -246,12 +252,16 @@ function getActionIconClass(action) {
           </div>
         </div>
       </div>
-      <NEmpty v-else description="暂无附件" size="small" />
+      <NEmpty v-else-if="!loading" description="暂无附件" size="small" />
     </div>
 
     <div class="timeline-card">
       <div class="section-title">流转日志</div>
-      <n-timeline class="ticket-timeline">
+      <div v-if="loading" class="detail-loading">
+        <NSpin size="small" />
+        <span>流转日志加载中...</span>
+      </div>
+      <n-timeline v-else-if="hasActions" class="ticket-timeline">
         <n-timeline-item
           v-for="item in ticket.actions || []"
           :key="item.id"
@@ -287,6 +297,7 @@ function getActionIconClass(action) {
           </div>
         </n-timeline-item>
       </n-timeline>
+      <NEmpty v-else description="暂无流转日志" size="small" />
     </div>
     </div>
   </CrudModal>
@@ -316,13 +327,6 @@ function getActionIconClass(action) {
   font-size: 22px;
   font-weight: 700;
   color: #111827;
-}
-
-.detail-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 12px;
-  flex-wrap: wrap;
 }
 
 .detail-grid {
@@ -374,6 +378,16 @@ function getActionIconClass(action) {
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
   gap: 12px;
   align-items: start;
+}
+
+.detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 72px;
+  margin-top: 10px;
+  color: #6b7280;
+  font-size: 13px;
 }
 
 .description-content {
