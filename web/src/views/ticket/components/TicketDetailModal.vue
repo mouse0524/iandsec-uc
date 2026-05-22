@@ -153,7 +153,7 @@ function getActionIconClass(action) {
 </script>
 
 <template>
-  <CrudModal :visible="visible" title="工单详情" width="880px" :show-footer="false" @update:visible="$emit('update:visible', $event)">
+  <CrudModal :visible="visible" title="工单详情" width="min(96vw, 1280px)" :show-footer="false" @update:visible="$emit('update:visible', $event)">
     <div class="detail-header">
       <div>
         <div class="detail-no">{{ ticket.ticket_no }}</div>
@@ -219,6 +219,7 @@ function getActionIconClass(action) {
       <div class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
     </div>
 
+    <div class="detail-secondary-grid">
     <div class="attachment-card">
       <div class="section-title">附件列表</div>
       <div v-if="imageAttachments.length" class="image-preview-grid">
@@ -287,6 +288,7 @@ function getActionIconClass(action) {
         </n-timeline-item>
       </n-timeline>
     </div>
+    </div>
   </CrudModal>
   <NModal v-model:show="descriptionImagePreviewVisible" preset="card" title="图片预览" class="description-image-modal">
     <div class="description-image-preview">
@@ -325,9 +327,9 @@ function getActionIconClass(action) {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .detail-card,
@@ -358,13 +360,20 @@ function getActionIconClass(action) {
 }
 
 .detail-card-wide {
-  grid-column: span 2;
+  grid-column: span 1;
 }
 
 .description-card,
 .attachment-card,
 .timeline-card {
-  margin-top: 14px;
+  margin-top: 10px;
+}
+
+.detail-secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  align-items: start;
 }
 
 .description-content {
@@ -631,11 +640,21 @@ function getActionIconClass(action) {
 
 @media (max-width: 960px) {
   .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-secondary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .detail-card-wide {
     grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>
