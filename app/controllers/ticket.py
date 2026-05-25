@@ -453,7 +453,12 @@ class TicketController:
         if ticket.status != TicketStatus.TECH_PROCESSING:
             raise HTTPException(status_code=400, detail="当前状态不可进行技术处理")
 
-        if action not in {TicketActionType.TECH_START, TicketActionType.TECH_REJECT, TicketActionType.FINISH}:
+        if action not in {
+            TicketActionType.TECH_START,
+            TicketActionType.TECH_PROGRESS,
+            TicketActionType.TECH_REJECT,
+            TicketActionType.FINISH,
+        }:
             raise HTTPException(status_code=400, detail="不支持的技术操作")
 
         if action == TicketActionType.FINISH:
@@ -476,9 +481,11 @@ class TicketController:
             ticket.reject_reason = None
             ticket.root_cause = normalized_root_cause
             ticket.finished_at = datetime.now()
-        else:
+        elif action == TicketActionType.TECH_START:
             ticket.status = TicketStatus.TECH_PROCESSING
             ticket.reject_reason = None
+        elif action == TicketActionType.TECH_PROGRESS:
+            ticket.status = TicketStatus.TECH_PROCESSING
 
         ticket.tech_id = tech_id
         await ticket.save()

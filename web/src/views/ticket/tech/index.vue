@@ -115,10 +115,10 @@ async function takeAction(row, action) {
   await api.techActionTicket({
     ticket_id: row.id,
     action,
-    comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成' : action === 'tech_reject' ? '技术驳回' : '处理中'),
+    comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
     root_cause: action === 'finish' ? selectedRootCause.value : null,
   })
-  $message.success('处理操作已完成')
+  $message.success(action === 'tech_progress' ? '处理备注已记录' : '处理操作已完成')
   commentVisible.value = false
   pendingActionRow.value = null
   actionComment.value = ''
@@ -153,13 +153,17 @@ function applyQuickFilter(status) {
 function openTechAction(row, action) {
   pendingActionRow.value = row
   pendingActionType.value = action
-  actionComment.value = action === 'finish' ? '技术处理完成' : '技术驳回'
+  actionComment.value = action === 'finish' ? '技术处理完成' : action === 'tech_reject' ? '技术驳回' : ''
   selectedRootCause.value = null
   commentVisible.value = true
 }
 
 async function submitTechAction() {
   if (!pendingActionRow.value) return
+  if (pendingActionType.value === 'tech_progress' && !actionComment.value?.trim()) {
+    $message.warning('请填写当前问题处理进度')
+    return
+  }
   if (pendingActionType.value === 'finish' && !selectedRootCause.value) {
     $message.warning('处理完成时必须选择问题根因')
     return
@@ -248,6 +252,17 @@ const columns = [
         ),
       ]
       if (row.status === 'tech_processing') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'primary',
+              onClick: () => openTechAction(row, 'tech_progress'),
+            },
+            { default: () => '备注' }
+          )
+        )
         buttons.push(
           h(
             NButton,
@@ -345,7 +360,12 @@ const columns = [
 
       <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
-      <NModal v-model:show="commentVisible" preset="card" style="width: 760px; max-width: 92vw" :title="pendingActionType === 'finish' ? '完成备注' : '驳回备注'">
+      <NModal
+        v-model:show="commentVisible"
+        preset="card"
+        style="width: 760px; max-width: 92vw"
+        :title="pendingActionType === 'finish' ? '完成备注' : pendingActionType === 'tech_progress' ? '处理进度备注' : '驳回备注'"
+      >
         <NSelect
           v-if="pendingActionType === 'finish'"
           v-model:value="selectedRootCause"
@@ -356,11 +376,18 @@ const columns = [
         />
         <RichTextEditor
           v-model="actionComment"
-          :placeholder="pendingActionType === 'finish' ? '填写处理结果摘要，可直接粘贴图片' : '请填写驳回原因，可直接粘贴图片'"
+          :placeholder="
+            pendingActionType === 'finish'
+              ? '填写处理结果摘要，可直接粘贴图片'
+              : pendingActionType === 'tech_progress'
+                ? '填写当前处理进度、排查结论或下一步计划，可直接粘贴图片'
+                : '请填写驳回原因，可直接粘贴图片'
+          "
           :min-height="180"
           :max-height="320"
         />
         <div class="upload-tip" v-if="pendingActionType === 'finish'">技术完成时必须选择问题根因，备注框支持直接粘贴图片。</div>
+        <div class="upload-tip" v-else-if="pendingActionType === 'tech_progress'">备注会记录到流转日志，不改变工单状态，支持直接粘贴图片。</div>
         <div class="upload-tip" v-else>备注框支持直接粘贴图片（与提交工单一致）。</div>
         <div class="modal-actions">
           <NButton @click="commentVisible = false">取消</NButton>
