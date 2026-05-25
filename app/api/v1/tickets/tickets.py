@@ -309,7 +309,7 @@ async def export_tickets(
         TicketActionType.CS_REJECT.value: "CS reject",
         TicketActionType.TECH_START.value: "Tech start",
         TicketActionType.TECH_ASSIGN.value: "Tech assign",
-        TicketActionType.TECH_PROGRESS.value: "Tech progress",
+        TicketActionType.TECH_NOTE.value: "Tech note",
         TicketActionType.TECH_REJECT.value: "Tech reject",
         TicketActionType.FINISH.value: "Finish",
     }

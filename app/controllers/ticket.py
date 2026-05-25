@@ -455,7 +455,7 @@ class TicketController:
 
         if action not in {
             TicketActionType.TECH_START,
-            TicketActionType.TECH_PROGRESS,
+            TicketActionType.TECH_NOTE,
             TicketActionType.TECH_REJECT,
             TicketActionType.FINISH,
         }:
@@ -484,7 +484,7 @@ class TicketController:
         elif action == TicketActionType.TECH_START:
             ticket.status = TicketStatus.TECH_PROCESSING
             ticket.reject_reason = None
-        elif action == TicketActionType.TECH_PROGRESS:
+        elif action == TicketActionType.TECH_NOTE:
             ticket.status = TicketStatus.TECH_PROCESSING
 
         ticket.tech_id = tech_id

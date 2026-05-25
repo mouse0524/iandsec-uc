@@ -27,7 +27,7 @@ export function mapTicketActionText(action) {
     cs_reject: '客服驳回',
     tech_start: '技术接手',
     tech_assign: '改派技术',
-    tech_progress: '处理备注',
+    tech_note: '处理备注',
     tech_reject: '技术驳回',
     finish: '处理完成',
   }
