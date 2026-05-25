@@ -32,6 +32,8 @@ export const useAppStore = defineStore('app', {
       loginIpLockMinutes: 60,
       loginFailWindowMinutes: 60,
       loginGenericErrorEnabled: true,
+      inactiveUserAutoDisableEnabled: true,
+      inactiveUserAutoDisableDays: 30,
       passwordMinLength: 8,
       passwordRequiredCategories: ['letter', 'digit'],
     }
@@ -97,6 +99,12 @@ export const useAppStore = defineStore('app', {
         typeof config.login_generic_error_enabled === 'boolean'
           ? config.login_generic_error_enabled
           : this.loginGenericErrorEnabled
+      this.inactiveUserAutoDisableEnabled =
+        typeof config.inactive_user_auto_disable_enabled === 'boolean'
+          ? config.inactive_user_auto_disable_enabled
+          : this.inactiveUserAutoDisableEnabled
+      this.inactiveUserAutoDisableDays =
+        config.inactive_user_auto_disable_days || this.inactiveUserAutoDisableDays
       this.passwordMinLength = config.password_min_length || this.passwordMinLength
       if (Array.isArray(config.password_required_categories) && config.password_required_categories.length > 0) {
         this.passwordRequiredCategories = config.password_required_categories

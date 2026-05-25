@@ -13,6 +13,7 @@ from app.models.admin import User
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.webdav import WebDavShareCreateIn, WebDavShareDeleteIn
 from app.utils.http_headers import build_download_content_disposition
+from app.utils.ops_password import generate_replace_decrypt_password, generate_server_ops_password
 from app.utils.request import get_client_ip
 
 router = APIRouter(dependencies=[DependAuth])
@@ -33,6 +34,26 @@ async def download_webdav_file(path: str = Query(..., description="文件路径"
     sign_data = await webdav_controller.build_direct_download_signature(path=path)
     query = urlencode({"path": path, "ts": sign_data["ts"], "sig": sign_data["sig"]})
     return Success(data={"download_url": f"/api/v1/public/webdav/download?{query}"})
+
+
+@router.get("/ops-password", summary="获取服务器运维工具密码")
+async def get_server_ops_password():
+    return Success(
+        data={
+            "password": generate_server_ops_password(),
+            "description": "密码每天变更",
+        }
+    )
+
+
+@router.get("/replace-decrypt-password", summary="获取替换/解密工具密码")
+async def get_replace_decrypt_password():
+    return Success(
+        data={
+            "password": generate_replace_decrypt_password(),
+            "description": "密码每月变更",
+        }
+    )
 
 
 @public_router.get("/download", summary="公开直接下载WebDAV文件")

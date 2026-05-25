@@ -24,6 +24,8 @@ class SystemSettingUpdateIn(BaseModel):
     login_fail_window_minutes: int = Field(default=60, description="登录失败统计窗口(分钟)")
     login_generic_error_enabled: bool = Field(default=True, description="是否启用统一登录错误提示")
     user_token_expire_minutes: int = Field(default=60, description="用户Token失效时间(分钟)")
+    inactive_user_auto_disable_enabled: bool = Field(default=True, description="是否启用未登录用户自动禁用")
+    inactive_user_auto_disable_days: int = Field(default=30, description="未登录用户自动禁用天数")
     password_min_length: int = Field(default=8, description="密码最小长度")
     password_required_categories: list[str] = Field(default_factory=lambda: ["letter", "digit"], description="密码必选类别")
     time_sync_enabled: bool = Field(default=True, description="是否启用时间同步配置")
@@ -102,6 +104,7 @@ class SystemSettingUpdateIn(BaseModel):
         "login_ip_lock_minutes",
         "login_fail_window_minutes",
         "user_token_expire_minutes",
+        "inactive_user_auto_disable_days",
     )
     @classmethod
     def validate_positive_security_numbers(cls, value: int, info):
@@ -109,6 +112,8 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError(f"{info.field_name} 必须大于等于 1")
         if info.field_name == "user_token_expire_minutes" and value > 30 * 24 * 60:
             raise ValueError("用户Token失效时间不能超过30天")
+        if info.field_name == "inactive_user_auto_disable_days" and value > 3650:
+            raise ValueError("未登录自动禁用天数不能超过3650天")
         return value
 
     @field_validator("password_min_length")
@@ -200,6 +205,8 @@ class PublicSiteConfigOut(BaseModel):
     login_fail_window_minutes: int
     login_generic_error_enabled: bool
     user_token_expire_minutes: int
+    inactive_user_auto_disable_enabled: bool
+    inactive_user_auto_disable_days: int
     password_min_length: int
     password_required_categories: list[str]
     ticket_notify_by_role: dict[str, list[str]]

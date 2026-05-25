@@ -57,6 +57,13 @@ def _terminal_api_paths() -> list[str]:
     ]
 
 
+def _webdav_password_api_paths() -> list[str]:
+    return [
+        "/api/v1/webdav/ops-password",
+        "/api/v1/webdav/replace-decrypt-password",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -465,6 +472,33 @@ async def init_menus():
             redirect="",
         )
 
+    password_menu = await Menu.filter(
+        Q(component="/system/webdav-password") | Q(path="webdav-password", parent_id=outbound_parent.id) | Q(name="密码获取")
+    ).first()
+    if password_menu:
+        password_menu.name = "密码获取"
+        password_menu.path = "webdav-password"
+        password_menu.order = 3
+        password_menu.parent_id = outbound_parent.id
+        password_menu.icon = "material-symbols:key-outline-rounded"
+        password_menu.is_hidden = False
+        password_menu.keepalive = False
+        password_menu.redirect = ""
+        await password_menu.save()
+    else:
+        await Menu.create(
+            menu_type=MenuType.MENU,
+            name="密码获取",
+            path="webdav-password",
+            order=3,
+            parent_id=outbound_parent.id,
+            icon="material-symbols:key-outline-rounded",
+            is_hidden=False,
+            component="/system/webdav-password",
+            keepalive=False,
+            redirect="",
+        )
+
     skill_know_parent = await Menu.filter(path="/skill-know").first()
     if not skill_know_parent:
         skill_know_parent = await Menu.create(
@@ -668,6 +702,38 @@ async def ensure_security_columns():
                 logger.warning("[init_db] ensure column {} skipped error={}", label, exc)
 
 
+async def _ensure_webdav_password_admin_only(admin_role_name: str = "管理员") -> None:
+    password_apis = await Api.filter(path__in=_webdav_password_api_paths())
+    password_menus = await Menu.filter(Q(component="/system/webdav-password"))
+    if not password_apis and not password_menus:
+        return
+
+    from app.controllers.role import role_controller
+
+    changed_role_ids = []
+    non_admin_roles = await Role.exclude(name=admin_role_name).all()
+    for role in non_admin_roles:
+        removed = False
+        if password_apis:
+            granted_api = await role.apis.filter(id__in=[api.id for api in password_apis]).first()
+            if granted_api:
+                await role.apis.remove(*password_apis)
+                removed = True
+        if password_menus:
+            granted_menu = await role.menus.filter(id__in=[menu.id for menu in password_menus]).first()
+            if granted_menu:
+                await role.menus.remove(*password_menus)
+                removed = True
+        if removed:
+            changed_role_ids.append(role.id)
+
+    for role_id in changed_role_ids:
+        await role_controller.clear_permission_cache_by_role(role_id)
+    if changed_role_ids:
+        await role_controller.clear_role_dict_cache()
+        logger.info("[init_roles] scrubbed webdav password grants from non-admin roles count={}", len(changed_role_ids))
+
+
 async def init_roles():
     old_partner_role = await Role.filter(name="代理商").first()
     if old_partner_role:
@@ -687,6 +753,7 @@ async def init_roles():
     existing_roles = await Role.filter(name__in=role_names).all()
     existing_role_names = {role.name for role in existing_roles}
     missing_roles = [name for name in role_names if name not in existing_role_names]
+    await _ensure_webdav_password_admin_only()
 
     if not missing_roles:
         has_role_bindings = False
@@ -709,10 +776,12 @@ async def init_roles():
                         path__in=[
                             "/api/v1/settings/time-sync/status",
                             "/api/v1/settings/time-sync/sync",
+                            *_webdav_password_api_paths(),
                         ]
                     )
                 )
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
+                await admin_role.menus.add(*await Menu.filter(Q(component="/system/webdav-password")))
                 await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
@@ -762,6 +831,9 @@ async def init_roles():
             "/api/v1/webdav/share/delete",
         ]
     )
+    webdav_password_apis = await Api.filter(
+        path__in=_webdav_password_api_paths()
+    )
     notice_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/create",
@@ -793,8 +865,11 @@ async def init_roles():
     monitor_menus = await Menu.filter(Q(component="/system/monitor"))
     terminal_menus = await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
     webdav_menus = await Menu.filter(
-        Q(path="/outbound") | Q(component="/system/webdav") | Q(component="/system/webdav-share")
+        Q(path="/outbound")
+        | Q(component="/system/webdav")
+        | Q(component="/system/webdav-share")
     )
+    webdav_password_menus = await Menu.filter(Q(component="/system/webdav-password"))
 
     for role_name in ["用户", "渠道商", "技术", "客服"]:
         role_obj = role_map[role_name]
@@ -823,12 +898,14 @@ async def init_roles():
     await role_map["管理员"].apis.add(*monitor_apis)
     await role_map["管理员"].apis.add(*terminal_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
+    await role_map["管理员"].apis.add(*webdav_password_apis)
     await role_map["管理员"].apis.add(*notice_apis)
     await role_map["管理员"].menus.add(*settings_menus)
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
+    await role_map["管理员"].menus.add(*webdav_password_menus)
 
 
 async def init_skill_know_config_defaults():

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from typing import List, Optional
 
@@ -111,6 +111,63 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         await user.save()
         logger.info("[user.login] update_last_login user_id={} username={}", user.id, user.username)
 
+    @staticmethod
+    def inactive_auto_disable_enabled(config: dict) -> bool:
+        return bool(config.get("inactive_user_auto_disable_enabled", True))
+
+    @staticmethod
+    def inactive_auto_disable_days(config: dict) -> int:
+        try:
+            days = int(config.get("inactive_user_auto_disable_days", 30) or 30)
+        except (TypeError, ValueError):
+            days = 30
+        return min(3650, max(1, days))
+
+    @staticmethod
+    def _login_inactivity_reference(user: User) -> datetime | None:
+        return getattr(user, "last_login", None) or getattr(user, "created_at", None)
+
+    def is_login_inactive(self, user: User, *, config: dict, now: datetime | None = None) -> bool:
+        if not self.inactive_auto_disable_enabled(config):
+            return False
+        if not getattr(user, "is_active", True) or getattr(user, "is_superuser", False):
+            return False
+
+        reference = self._login_inactivity_reference(user)
+        if reference is None:
+            return False
+
+        now = now or datetime.now(tz=reference.tzinfo)
+        if reference.tzinfo is not None and now.tzinfo is None:
+            now = now.replace(tzinfo=reference.tzinfo)
+        elif reference.tzinfo is None and now.tzinfo is not None:
+            reference = reference.replace(tzinfo=now.tzinfo)
+
+        cutoff = now - timedelta(days=self.inactive_auto_disable_days(config))
+        return reference < cutoff
+
+    async def disable_if_login_inactive(
+        self,
+        user: User,
+        *,
+        config: dict,
+        now: datetime | None = None,
+    ) -> bool:
+        if not self.is_login_inactive(user, config=config, now=now):
+            return False
+
+        user.is_active = False
+        user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+        await user.save()
+        await self.clear_auth_cache(user.id)
+        logger.warning(
+            "[user.inactive] auto_disabled user_id={} username={} days={}",
+            user.id,
+            user.username,
+            self.inactive_auto_disable_days(config),
+        )
+        return True
+
     async def authenticate(self, credentials: CredentialsSchema) -> Optional["User"]:
         logger.info("[user.auth] start username={}", credentials.username)
         user = await self.model.filter(username=credentials.username).first()
@@ -124,6 +181,10 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         if not user.is_active:
             logger.warning("[user.auth] disabled username={} user_id={}", user.username, user.id)
             raise HTTPException(status_code=400, detail="用户已被禁用")
+        config = await system_setting_controller.get_public_config()
+        if await self.disable_if_login_inactive(user, config=config):
+            days = self.inactive_auto_disable_days(config)
+            raise HTTPException(status_code=400, detail=f"用户超过{days}天未登录，已自动禁用")
         logger.info("[user.auth] success username={} user_id={}", user.username, user.id)
         return user
 

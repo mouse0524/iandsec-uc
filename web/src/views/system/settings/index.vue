@@ -57,6 +57,8 @@ const form = ref({
   login_fail_window_minutes: 60,
   login_generic_error_enabled: true,
   user_token_expire_minutes: 60,
+  inactive_user_auto_disable_enabled: true,
+  inactive_user_auto_disable_days: 30,
   password_min_length: 8,
   password_required_categories: ['letter', 'digit'],
   time_sync_enabled: true,
@@ -295,6 +297,14 @@ const rules = {
     type: 'number',
     min: 1,
     message: '请输入正确的Token失效时间',
+    trigger: ['blur', 'change'],
+  },
+  inactive_user_auto_disable_days: {
+    required: true,
+    type: 'number',
+    min: 1,
+    max: 3650,
+    message: '请输入正确的未登录禁用天数',
     trigger: ['blur', 'change'],
   },
   password_min_length: {
@@ -627,7 +637,7 @@ function applyPresetHtmlTemplates() {
           <NTabPane name="login-security" tab="登录安全">
             <NCard size="small" title="登录失败锁定策略">
               <NAlert type="info" class="mb-12">
-                推荐开启双层锁定：账号+IP 连续失败达到阈值后锁定，同时对异常来源 IP 做更高阈值拦截。
+                推荐开启双层锁定：账号+IP 连续失败达到阈值后锁定，同时对异常来源 IP 做更高阈值拦截；普通用户超过配置天数未登录会自动禁用。
               </NAlert>
               <NFormItem label="启用登录安全">
                 <NSwitch v-model:value="form.login_security_enabled" />
@@ -656,6 +666,17 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="Token失效(分钟)" path="user_token_expire_minutes">
                 <NInputNumber v-model:value="form.user_token_expire_minutes" :min="1" :max="43200" />
+              </NFormItem>
+              <NFormItem label="未登录自动禁用">
+                <NSwitch v-model:value="form.inactive_user_auto_disable_enabled" />
+              </NFormItem>
+              <NFormItem label="未登录禁用天数" path="inactive_user_auto_disable_days">
+                <NInputNumber
+                  v-model:value="form.inactive_user_auto_disable_days"
+                  :min="1"
+                  :max="3650"
+                  :disabled="!form.inactive_user_auto_disable_enabled"
+                />
               </NFormItem>
               <NFormItem label="密码最小长度" path="password_min_length">
                 <NInputNumber v-model:value="form.password_min_length" :min="8" :max="64" />

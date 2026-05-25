@@ -10,6 +10,7 @@ from app.core.init_app import (
     register_exceptions,
     register_routers,
 )
+from app.services.inactive_user_service import inactive_user_auto_disable_scheduler
 from app.services.skill_know.evolution_scheduler import skill_know_evolution_scheduler
 
 try:
@@ -21,10 +22,12 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_data()
+    inactive_user_auto_disable_scheduler.start()
     skill_know_evolution_scheduler.start()
     try:
         yield
     finally:
+        await inactive_user_auto_disable_scheduler.stop()
         await skill_know_evolution_scheduler.stop()
         await Tortoise.close_connections()
 
