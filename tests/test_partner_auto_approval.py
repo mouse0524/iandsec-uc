@@ -213,3 +213,59 @@ def test_settings_update_preserves_legacy_register_toggle_when_new_fields_missin
     assert payload["allow_partner_register"] is False
     assert "allow_channel_register" not in payload
     assert "allow_user_register" not in payload
+
+
+def test_settings_update_preserves_database_backup_fields_when_missing():
+    legacy_payload = {
+        "site_title": "Demo",
+        "allow_partner_register": True,
+        "customer_service_auto_approve_register": False,
+        "ticket_attachment_extensions": ["zip"],
+        "ticket_project_phases": ["after-sales"],
+        "ticket_categories": ["other"],
+        "customer_service_auto_approve_ticket": False,
+        "ticket_root_causes": ["config"],
+        "ticket_description_templates": ["desc"],
+    }
+    with (
+        patch.object(settings_module.system_setting_controller, "update", AsyncMock()) as mock_update,
+        patch.object(settings_module.system_setting_controller, "get_safe_dict", AsyncMock(return_value={})),
+    ):
+        response = _settings_client().post("/api/v1/settings/update", json=legacy_payload)
+
+    assert response.status_code == 200
+    payload = mock_update.await_args.args[0]
+    assert "db_backup_enabled" not in payload
+    assert "db_backup_directory" not in payload
+    assert "db_backup_run_at" not in payload
+    assert "db_backup_retention_days" not in payload
+
+
+def test_database_backup_run_uses_scheduler_lock():
+    with (
+        patch.object(
+            settings_module.system_setting_controller,
+            "get_full_dict",
+            AsyncMock(return_value={"db_backup_directory": "D:/nas/backups"}),
+        ),
+        patch.object(
+            settings_module.database_backup_scheduler,
+            "run_once",
+            AsyncMock(return_value=None),
+        ) as mock_run_once,
+        patch.object(
+            settings_module.database_backup_service,
+            "run_once",
+            AsyncMock(side_effect=AssertionError("manual backup must use scheduler lock")),
+        ),
+    ):
+        response = _settings_client().post(
+            "/api/v1/settings/database-backup/run",
+            json={"db_backup_directory": "D:/nas/backups"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"] == {"ok": True, "skipped": True, "reason": "locked"}
+    mock_run_once.assert_awaited_once()
+    assert mock_run_once.await_args.kwargs["force"] is True

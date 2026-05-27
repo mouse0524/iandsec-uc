@@ -15,37 +15,7 @@ def test_generate_replace_decrypt_password_matches_existing_tool_for_2026_05():
     assert generate_replace_decrypt_password(now) == "2997"
 
 
-def test_generate_server_ops_password_is_stable_for_same_secret():
-    now = datetime(2026, 5, 25, 9, 30)
+def test_generate_replace_decrypt_password_preserves_existing_october_behavior():
+    now = datetime(2026, 10, 1, 9, 30)
 
-    assert generate_server_ops_password(now, secret="ops-secret-a") == generate_server_ops_password(
-        now,
-        secret="ops-secret-a",
-    )
-
-
-def test_generate_server_ops_password_depends_on_secret():
-    now = datetime(2026, 5, 25, 9, 30)
-
-    assert generate_server_ops_password(now, secret="ops-secret-a") != generate_server_ops_password(
-        now,
-        secret="ops-secret-b",
-    )
-
-
-def test_generate_replace_decrypt_password_is_stable_for_same_secret():
-    now = datetime(2026, 5, 25, 9, 30)
-
-    assert generate_replace_decrypt_password(now, secret="ops-secret-a") == generate_replace_decrypt_password(
-        now,
-        secret="ops-secret-a",
-    )
-
-
-def test_generate_replace_decrypt_password_depends_on_secret():
-    now = datetime(2026, 5, 25, 9, 30)
-
-    assert generate_replace_decrypt_password(now, secret="ops-secret-a") != generate_replace_decrypt_password(
-        now,
-        secret="ops-secret-b",
-    )
+    assert generate_replace_decrypt_password(now) == "2886"

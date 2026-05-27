@@ -776,6 +776,9 @@ async def init_roles():
                         path__in=[
                             "/api/v1/settings/time-sync/status",
                             "/api/v1/settings/time-sync/sync",
+                            "/api/v1/settings/database-backup/status",
+                            "/api/v1/settings/database-backup/test",
+                            "/api/v1/settings/database-backup/run",
                             *_webdav_password_api_paths(),
                         ]
                     )
@@ -820,6 +823,9 @@ async def init_roles():
             "/api/v1/settings/update",
             "/api/v1/settings/time-sync/status",
             "/api/v1/settings/time-sync/sync",
+            "/api/v1/settings/database-backup/status",
+            "/api/v1/settings/database-backup/test",
+            "/api/v1/settings/database-backup/run",
         ]
     )
     webdav_apis = await Api.filter(

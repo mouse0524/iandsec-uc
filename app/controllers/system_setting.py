@@ -16,6 +16,13 @@ from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
 
 
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 class SystemSettingController:
     PUBLIC_CONFIG_CACHE_KEY = "config:public:v1"
     PUBLIC_CONFIG_CACHE_TTL_SECONDS = 300
@@ -28,6 +35,7 @@ class SystemSettingController:
         "mail",
         "mail_template",
         "webdav",
+        "database_backup",
     }
 
     _DEFAULTS = {
@@ -115,9 +123,18 @@ class SystemSettingController:
             "webdav_username": None,
             "webdav_password": None,
             "webdav_share_default_expire_hours": 168,
-            "webdav_signature_ttl": 600,
+            "webdav_signature_ttl": 24,
             "webdav_max_upload_size": 52428800,
             "webdav_signature_secret": None,
+        },
+        "database_backup": {
+            "db_backup_enabled": False,
+            "db_backup_directory": os.getenv(
+                "DB_BACKUP_DIRECTORY",
+                os.path.join(settings.BASE_DIR, "storage", "db_backups"),
+            ),
+            "db_backup_run_at": os.getenv("DB_BACKUP_RUN_AT", "02:30"),
+            "db_backup_retention_days": _int_env("DB_BACKUP_RETENTION_DAYS", 7),
         },
     }
 
@@ -380,6 +397,12 @@ class SystemSettingController:
             "webdav_max_upload_size",
             "webdav_signature_secret",
         }
+        database_backup_keys = {
+            "db_backup_enabled",
+            "db_backup_directory",
+            "db_backup_run_at",
+            "db_backup_retention_days",
+        }
         mapping = {
             "site": site_keys,
             "ticket": ticket_keys,
@@ -389,6 +412,7 @@ class SystemSettingController:
             "mail": mail_keys,
             "mail_template": mail_template_keys,
             "webdav": webdav_keys,
+            "database_backup": database_backup_keys,
         }
 
         for section, keys in mapping.items():

@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     INITIAL_ADMIN_USERNAME: str = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@admin.com")
     INITIAL_ADMIN_PASSWORD: str | None = os.getenv("INITIAL_ADMIN_PASSWORD")
-    OPS_PASSWORD_SECRET: str | None = os.getenv("OPS_PASSWORD_SECRET")
     SKILL_KNOW_SQL_SEARCH_ENABLED: bool = os.getenv("SKILL_KNOW_SQL_SEARCH_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
     EXTERNAL_URL_ALLOWED_HOSTS: typing.List[str] = [
         item.strip().lower()

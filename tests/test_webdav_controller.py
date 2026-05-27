@@ -44,6 +44,12 @@ class WebDavControllerTestCase(unittest.TestCase):
     def test_download_stream_follows_redirects(self):
         asyncio.run(self._assert_download_stream_follows_redirects())
 
+    def test_verify_share_signature_treats_ttl_as_hours(self):
+        asyncio.run(self._assert_verify_share_signature_treats_ttl_as_hours())
+
+    def test_verify_share_signature_rejects_after_configured_hours(self):
+        asyncio.run(self._assert_verify_share_signature_rejects_after_configured_hours())
+
     async def _assert_list_shares_filters_by_file_name(self):
         controller = WebDavController()
         q = MagicMock()
@@ -100,6 +106,41 @@ class WebDavControllerTestCase(unittest.TestCase):
 
         self.assertEqual(b"".join(chunks), b"real file")
         self.assertEqual(headers.get("content-type"), "text/plain")
+
+    async def _assert_verify_share_signature_treats_ttl_as_hours(self):
+        controller = WebDavController()
+        now = datetime.now(timezone.utc)
+        ts = int((now - timedelta(minutes=30)).timestamp())
+        sig = controller._sign("secret", "share-code", ts)
+        conf = {
+            "webdav_enabled": True,
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_username": "user",
+            "webdav_password": "pass",
+            "webdav_signature_secret": "secret",
+            "webdav_signature_ttl": 1,
+        }
+
+        with patch.object(controller, "_get_config", AsyncMock(return_value=conf)):
+            await controller.verify_share_signature(code="share-code", ts=ts, sig=sig)
+
+    async def _assert_verify_share_signature_rejects_after_configured_hours(self):
+        controller = WebDavController()
+        now = datetime.now(timezone.utc)
+        ts = int((now - timedelta(hours=2)).timestamp())
+        sig = controller._sign("secret", "share-code", ts)
+        conf = {
+            "webdav_enabled": True,
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_username": "user",
+            "webdav_password": "pass",
+            "webdav_signature_secret": "secret",
+            "webdav_signature_ttl": 1,
+        }
+
+        with patch.object(controller, "_get_config", AsyncMock(return_value=conf)):
+            with self.assertRaises(Exception):
+                await controller.verify_share_signature(code="share-code", ts=ts, sig=sig)
 
 
 if __name__ == "__main__":

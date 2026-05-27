@@ -30,6 +30,9 @@ const formRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const webdavTesting = ref(false)
+const dbBackupTesting = ref(false)
+const dbBackupRunning = ref(false)
+const dbBackupStatus = ref(null)
 const timeSyncChecking = ref(false)
 const timeSyncSyncing = ref(false)
 const timeSyncStatus = ref(null)
@@ -108,9 +111,13 @@ const form = ref({
   webdav_username: '',
   webdav_password: '',
   webdav_share_default_expire_hours: 168,
-  webdav_signature_ttl: 600,
+  webdav_signature_ttl: 24,
   webdav_max_upload_size: 50 * 1024 * 1024,
   webdav_signature_secret: '',
+  db_backup_enabled: false,
+  db_backup_directory: '/opt/iandsec-uc/storage/db_backups',
+  db_backup_run_at: '02:30',
+  db_backup_retention_days: 7,
 })
 
 const previewParams = ref({
@@ -347,6 +354,25 @@ const rules = {
     message: '请输入系统时区',
     trigger: ['input', 'blur'],
   },
+  db_backup_directory: {
+    required: true,
+    message: '请输入数据库备份目录',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_run_at: {
+    required: true,
+    pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
+    message: '请输入 HH:mm 格式，例如 02:30',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_retention_days: {
+    required: true,
+    type: 'number',
+    min: 1,
+    max: 365,
+    message: '请输入 1-365 天',
+    trigger: ['blur', 'change'],
+  },
 }
 
 onMounted(() => {
@@ -384,6 +410,7 @@ async function loadData() {
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
     }
+    await loadDatabaseBackupStatus()
     const publicRes = await api.getPublicConfig()
     appStore.setSiteConfig(publicRes.data || {})
   } finally {
@@ -424,6 +451,42 @@ async function testWebdavConnection() {
     $message.success(res?.msg || 'WebDAV连接成功')
   } finally {
     webdavTesting.value = false
+  }
+}
+
+function dbBackupPayload() {
+  return {
+    db_backup_enabled: form.value.db_backup_enabled,
+    db_backup_directory: form.value.db_backup_directory,
+    db_backup_run_at: form.value.db_backup_run_at,
+    db_backup_retention_days: form.value.db_backup_retention_days,
+  }
+}
+
+async function loadDatabaseBackupStatus() {
+  const res = await api.getDatabaseBackupStatus()
+  dbBackupStatus.value = res?.data || null
+}
+
+async function testDatabaseBackupDirectory() {
+  try {
+    dbBackupTesting.value = true
+    const res = await api.testDatabaseBackupDirectory(dbBackupPayload())
+    $message.success(res?.msg || '备份目录可用')
+    await loadDatabaseBackupStatus()
+  } finally {
+    dbBackupTesting.value = false
+  }
+}
+
+async function runDatabaseBackup() {
+  try {
+    dbBackupRunning.value = true
+    const res = await api.runDatabaseBackup(dbBackupPayload())
+    $message.success(res?.msg || '数据库备份完成')
+    await loadDatabaseBackupStatus()
+  } finally {
+    dbBackupRunning.value = false
   }
 }
 
@@ -792,8 +855,8 @@ function applyPresetHtmlTemplates() {
                   :max="8760"
                 />
               </NFormItem>
-              <NFormItem label="签名有效期(秒)">
-                <NInputNumber v-model:value="form.webdav_signature_ttl" :min="1" :max="86400" />
+              <NFormItem label="签名有效期(小时)">
+                <NInputNumber v-model:value="form.webdav_signature_ttl" :min="1" :max="9999" />
               </NFormItem>
               <NFormItem label="最大上传大小(Byte)">
                 <NInputNumber
@@ -812,6 +875,49 @@ function applyPresetHtmlTemplates() {
                 <NButton type="primary" ghost :loading="webdavTesting" @click="testWebdavConnection"
                   >测试连接</NButton
                 >
+              </NFormItem>
+            </NCard>
+          </NTabPane>
+
+          <NTabPane name="database-backup" tab="数据库备份">
+            <NCard size="small" title="异地备份到 NAS">
+              <NAlert type="info" class="mb-12">
+                先把 NAS 挂载到应用容器内目录，再把这里的备份目录配置为该挂载路径；系统会按时间每天生成一个 .sql.gz 备份。
+              </NAlert>
+              <NFormItem label="启用自动备份">
+                <NSwitch v-model:value="form.db_backup_enabled" />
+              </NFormItem>
+              <NFormItem label="NAS备份目录" path="db_backup_directory">
+                <NInput
+                  v-model:value="form.db_backup_directory"
+                  placeholder="例如 /mnt/nas/iandsec-db-backups"
+                />
+              </NFormItem>
+              <NFormItem label="每日执行时间" path="db_backup_run_at">
+                <NInput v-model:value="form.db_backup_run_at" placeholder="02:30" />
+              </NFormItem>
+              <NFormItem label="保留天数" path="db_backup_retention_days">
+                <NInputNumber v-model:value="form.db_backup_retention_days" :min="1" :max="365" />
+              </NFormItem>
+              <NFormItem label="目录状态">
+                <div class="status-lines">
+                  <span>存在：{{ dbBackupStatus?.directory_exists ? '是' : '否' }}</span>
+                  <span>可写：{{ dbBackupStatus?.directory_writable ? '是' : '否' }}</span>
+                  <span v-if="dbBackupStatus?.latest_backup">
+                    最近备份：{{ dbBackupStatus.latest_backup.filename }}
+                  </span>
+                  <span v-if="dbBackupStatus?.error">错误：{{ dbBackupStatus.error }}</span>
+                </div>
+              </NFormItem>
+              <NFormItem>
+                <NSpace>
+                  <NButton ghost :loading="dbBackupTesting" @click="testDatabaseBackupDirectory">
+                    测试目录
+                  </NButton>
+                  <NButton type="primary" ghost :loading="dbBackupRunning" @click="runDatabaseBackup">
+                    立即备份
+                  </NButton>
+                </NSpace>
               </NFormItem>
             </NCard>
           </NTabPane>
@@ -1108,6 +1214,13 @@ function applyPresetHtmlTemplates() {
   border: 1px solid #dcdfe6;
   border-radius: 6px;
   background: #fafafa;
+}
+
+.status-lines {
+  display: grid;
+  gap: 6px;
+  line-height: 1.6;
+  color: #4b5563;
 }
 
 .model-grid {

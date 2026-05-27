@@ -71,10 +71,14 @@ class SystemSettingUpdateIn(BaseModel):
     webdav_username: str | None = None
     webdav_password: str | None = None
     webdav_share_default_expire_hours: int = 168
-    webdav_signature_ttl: int = 600
+    webdav_signature_ttl: int = 24
     webdav_max_upload_size: int = 50 * 1024 * 1024
     webdav_signature_secret: str | None = None
 
+    db_backup_enabled: bool = False
+    db_backup_directory: str = "/opt/iandsec-uc/storage/db_backups"
+    db_backup_run_at: str = "02:30"
+    db_backup_retention_days: int = 7
 
     @field_validator("ticket_attachment_extensions")
     @classmethod
@@ -183,7 +187,41 @@ class SystemSettingUpdateIn(BaseModel):
     def validate_positive_webdav_numbers(cls, value: int, info):
         if value < 1:
             raise ValueError(f"{info.field_name} 必须大于等于 1")
+        if info.field_name == "webdav_signature_ttl" and value > 9999:
+            raise ValueError("WebDAV signature ttl must be less than or equal to 9999 hours")
         return value
+
+    @field_validator("db_backup_directory")
+    @classmethod
+    def validate_db_backup_directory(cls, value: str):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("数据库备份目录不能为空")
+        if len(text) > 500:
+            raise ValueError("数据库备份目录不能超过500个字符")
+        return text
+
+    @field_validator("db_backup_run_at")
+    @classmethod
+    def validate_db_backup_run_at(cls, value: str):
+        text = str(value or "").strip()
+        try:
+            hour_text, minute_text = text.split(":", 1)
+            hour = int(hour_text)
+            minute = int(minute_text)
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                raise ValueError("out of range")
+        except Exception:
+            raise ValueError("数据库备份执行时间格式必须为 HH:mm")
+        return f"{hour:02d}:{minute:02d}"
+
+    @field_validator("db_backup_retention_days")
+    @classmethod
+    def validate_db_backup_retention_days(cls, value: int):
+        if value < 1 or value > 365:
+            raise ValueError("数据库备份保留天数必须在1到365之间")
+        return value
+
 
 class PublicSiteConfigOut(BaseModel):
     site_title: str
@@ -217,3 +255,10 @@ class WebDavTestIn(BaseModel):
     webdav_base_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
+
+
+class DatabaseBackupConfigIn(BaseModel):
+    db_backup_enabled: bool = False
+    db_backup_directory: str | None = None
+    db_backup_run_at: str | None = None
+    db_backup_retention_days: int | None = None

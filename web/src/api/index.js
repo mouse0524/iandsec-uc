@@ -135,6 +135,9 @@ export default {
   getTimeSyncStatus: () => request.get('/settings/time-sync/status'),
   syncSystemTime: () => request.post('/settings/time-sync/sync'),
   testWebdavConnection: (data = {}) => request.post('/settings/webdav/test', data),
+  getDatabaseBackupStatus: () => request.get('/settings/database-backup/status'),
+  testDatabaseBackupDirectory: (data = {}) => request.post('/settings/database-backup/test', data),
+  runDatabaseBackup: (data = {}) => request.post('/settings/database-backup/run', data, { timeout: 300000 }),
   uploadSiteLogo: (file) => {
     const formData = new FormData()
     formData.append('file', file)

@@ -136,6 +136,10 @@ class WebDavController:
         msg = f"{code}:{ts}".encode("utf-8")
         return hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
+    @staticmethod
+    def _signature_ttl_seconds(conf: dict) -> int:
+        return int(conf.get("webdav_signature_ttl") or 24) * 60 * 60
+
     async def build_share_signature(self, *, code: str) -> dict[str, int | str]:
         conf = await self._get_config()
         secret = self._get_signature_secret(conf)
@@ -154,7 +158,7 @@ class WebDavController:
     async def verify_share_signature(self, *, code: str, ts: int, sig: str) -> None:
         conf = await self._get_config()
         secret = self._get_signature_secret(conf)
-        signature_ttl = int(conf.get("webdav_signature_ttl") or 600)
+        signature_ttl = self._signature_ttl_seconds(conf)
         now_ts = int(datetime.now(timezone.utc).timestamp())
         if abs(now_ts - int(ts)) > signature_ttl:
             raise HTTPException(status_code=401, detail="签名已过期")
@@ -165,7 +169,7 @@ class WebDavController:
     async def verify_direct_download_signature(self, *, path: str, ts: int, sig: str) -> None:
         conf = await self._get_config()
         secret = self._get_signature_secret(conf)
-        signature_ttl = int(conf.get("webdav_signature_ttl") or 600)
+        signature_ttl = self._signature_ttl_seconds(conf)
         now_ts = int(datetime.now(timezone.utc).timestamp())
         if abs(now_ts - int(ts)) > signature_ttl:
             raise HTTPException(status_code=401, detail="签名已过期")
