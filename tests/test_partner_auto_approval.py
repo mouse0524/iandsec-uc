@@ -239,6 +239,7 @@ def test_settings_update_preserves_database_backup_fields_when_missing():
     assert "db_backup_directory" not in payload
     assert "db_backup_run_at" not in payload
     assert "db_backup_retention_days" not in payload
+    assert "webdav_public_base_url" not in payload
 
 
 def test_database_backup_run_uses_scheduler_lock():

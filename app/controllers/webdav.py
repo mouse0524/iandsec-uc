@@ -120,6 +120,12 @@ class WebDavController:
             label="WebDAV Base URL",
             enforce_allowed_hosts=False,
         )
+        if data.get("webdav_public_base_url"):
+            data["webdav_public_base_url"] = validate_external_service_url(
+                data.get("webdav_public_base_url"),
+                label="WebDAV Public Base URL",
+                enforce_allowed_hosts=False,
+            )
         if not data.get("webdav_username") or not data.get("webdav_password"):
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
         return data
@@ -183,6 +189,17 @@ class WebDavController:
         base = base_url.rstrip("/")
         safe_path = quote(path, safe="/()[]-_.~")
         return f"{base}{safe_path}"
+
+    def build_public_download_url(self, conf: dict, file_path: str) -> str:
+        base_url = str(conf.get("webdav_public_base_url") or "").strip()
+        if not base_url:
+            raise HTTPException(status_code=400, detail="WebDAV公开下载地址未配置")
+        norm_path = self._normalize_path(file_path)
+        return self._build_url(base_url, norm_path)
+
+    async def get_public_download_url(self, file_path: str) -> str:
+        conf = await self._get_config()
+        return self.build_public_download_url(conf, file_path)
 
     @classmethod
     def _build_list_url(cls, base_url: str, path: str) -> str:

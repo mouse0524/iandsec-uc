@@ -120,6 +120,7 @@ class SystemSettingController:
         "webdav": {
             "webdav_enabled": False,
             "webdav_base_url": None,
+            "webdav_public_base_url": None,
             "webdav_username": None,
             "webdav_password": None,
             "webdav_share_default_expire_hours": 168,
@@ -246,6 +247,11 @@ class SystemSettingController:
 
         enabled = req_data.get("webdav_enabled", db_data.get("webdav_enabled"))
         base_url = req_data.get("webdav_base_url") if req_data.get("webdav_base_url") is not None else db_data.get("webdav_base_url")
+        public_base_url = (
+            req_data.get("webdav_public_base_url")
+            if req_data.get("webdav_public_base_url") is not None
+            else db_data.get("webdav_public_base_url")
+        )
         username = req_data.get("webdav_username") if req_data.get("webdav_username") is not None else db_data.get("webdav_username")
         pwd_input = req_data.get("webdav_password")
         if pwd_input == "******":
@@ -264,6 +270,12 @@ class SystemSettingController:
             label="WebDAV Base URL",
             enforce_allowed_hosts=False,
         )
+        if public_base_url:
+            validate_external_service_url(
+                public_base_url,
+                label="WebDAV Public Base URL",
+                enforce_allowed_hosts=False,
+            )
         if not username or not password:
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
 
@@ -301,6 +313,12 @@ class SystemSettingController:
             payload["webdav_base_url"] = validate_external_service_url(
                 payload.get("webdav_base_url"),
                 label="WebDAV Base URL",
+                enforce_allowed_hosts=False,
+            )
+        if payload.get("webdav_public_base_url"):
+            payload["webdav_public_base_url"] = validate_external_service_url(
+                payload.get("webdav_public_base_url"),
+                label="WebDAV Public Base URL",
                 enforce_allowed_hosts=False,
             )
 
@@ -390,6 +408,7 @@ class SystemSettingController:
         webdav_keys = {
             "webdav_enabled",
             "webdav_base_url",
+            "webdav_public_base_url",
             "webdav_username",
             "webdav_password",
             "webdav_share_default_expire_hours",

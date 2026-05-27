@@ -519,10 +519,14 @@ async function handleLogin() {
     }
   } catch (e) {
     // ignore login error detail in production logs
-    await fetchLoginCaptcha()
-    loginInfo.value.captcha_code = ''
+    await refreshLoginCaptcha()
   }
   loading.value = false
+}
+
+async function refreshLoginCaptcha() {
+  loginInfo.value.captcha_code = ''
+  await fetchLoginCaptcha()
 }
 
 async function fetchLoginCaptcha() {
@@ -573,6 +577,7 @@ watch(showPartnerModal, async (v) => {
     await fetchPartnerCaptcha()
   } else {
     resetPartnerRegisterState()
+    await refreshLoginCaptcha()
   }
 })
 

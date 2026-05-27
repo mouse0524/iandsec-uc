@@ -2,7 +2,7 @@ from urllib.parse import urlencode
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse
 
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
@@ -12,7 +12,6 @@ from app.log import logger
 from app.models.admin import User
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.webdav import WebDavShareCreateIn, WebDavShareDeleteIn
-from app.utils.http_headers import build_download_content_disposition
 from app.utils.ops_password import generate_replace_decrypt_password, generate_server_ops_password
 from app.utils.request import get_client_ip
 
@@ -68,16 +67,9 @@ async def public_download_webdav_file(
 
     client_ip = get_client_ip(request)
     await webdav_controller.verify_direct_download_signature(path=path, ts=ts, sig=sig)
-    iterator, headers = await webdav_controller.download_stream(path)
-    content_type = headers.get("content-type") or "application/octet-stream"
-    file_name = path.rstrip("/").split("/")[-1] or "download"
-    disposition = build_download_content_disposition(file_name)
-    logger.info("[webdav.direct.download] success ip={} path={}", client_ip, path)
-    return StreamingResponse(
-        iterator(),
-        media_type=content_type,
-        headers={"Content-Disposition": disposition},
-    )
+    download_url = await webdav_controller.get_public_download_url(path)
+    logger.info("[webdav.direct.download] redirect ip={} path={}", client_ip, path)
+    return RedirectResponse(download_url, status_code=302)
 
 
 @router.post("/share/create", summary="创建WebDAV分享")
@@ -185,12 +177,6 @@ async def webdav_share_download(
         raise
 
     share = await webdav_controller.get_share(code)
-    iterator, headers = await webdav_controller.download_stream(share.file_path)
-    content_type = headers.get("content-type") or "application/octet-stream"
-    disposition = build_download_content_disposition(share.file_name)
-    logger.info("[webdav.share.download] success ip={} code={} file_path={}", client_ip, code, share.file_path)
-    return StreamingResponse(
-        iterator(),
-        media_type=content_type,
-        headers={"Content-Disposition": disposition},
-    )
+    download_url = await webdav_controller.get_public_download_url(share.file_path)
+    logger.info("[webdav.share.download] redirect ip={} code={} file_path={}", client_ip, code, share.file_path)
+    return RedirectResponse(download_url, status_code=302)

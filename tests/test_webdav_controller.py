@@ -27,6 +27,28 @@ class WebDavControllerTestCase(unittest.TestCase):
             "https://dav.example.com/webdav/6.0.8/demo.txt",
         )
 
+    def test_public_download_url_uses_public_base_when_configured(self):
+        controller = WebDavController()
+        conf = {
+            "webdav_base_url": "https://internal.example.com/webdav",
+            "webdav_public_base_url": "https://files.example.com/public",
+        }
+
+        self.assertEqual(
+            controller.build_public_download_url(conf, "/6.0.8/demo file.txt"),
+            "https://files.example.com/public/6.0.8/demo%20file.txt",
+        )
+
+    def test_public_download_url_requires_public_base_url(self):
+        controller = WebDavController()
+        conf = {
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_public_base_url": "",
+        }
+
+        with self.assertRaises(Exception):
+            controller.build_public_download_url(conf, "/demo.txt")
+
     def test_share_dict_marks_expired_active_share_as_inactive(self):
         controller = WebDavController()
         expired = datetime.now(timezone.utc) - timedelta(seconds=1)

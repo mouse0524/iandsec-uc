@@ -3,6 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from app.controllers.captcha import captcha_controller
+from app.controllers.system_setting import system_setting_controller
 from app.core.init_app import _default_basic_api_filter, _default_basic_api_paths
 from app.controllers.ticket import TicketController
 from app.services.security import validate_external_service_url
@@ -39,6 +40,30 @@ class SecurityRegressionTestCase(unittest.TestCase):
             ),
             "https://dav.example.com/webdav",
         )
+
+    def test_webdav_connection_test_validates_public_download_base_url(self):
+        async def run():
+            with patch.object(
+                system_setting_controller,
+                "_get_merged_raw",
+                AsyncMock(
+                    return_value={
+                        "webdav_enabled": True,
+                        "webdav_base_url": "https://dav.example.com/webdav",
+                        "webdav_username": "user",
+                        "webdav_password": "pass",
+                    }
+                ),
+            ), patch("app.controllers.system_setting.httpx.AsyncClient") as mock_client:
+                with self.assertRaises(Exception):
+                    await system_setting_controller.test_webdav_connection(
+                        {
+                            "webdav_public_base_url": "http://files.example.com/public",
+                        }
+                    )
+                mock_client.assert_not_called()
+
+        asyncio.run(run())
 
     def test_openai_compatible_model_url_rejects_private_hosts(self):
         with self.assertRaises(RuntimeError):
