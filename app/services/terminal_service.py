@@ -1,6 +1,5 @@
-import re
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+import re
 
 from fastapi import HTTPException
 
@@ -101,16 +100,7 @@ class TerminalService:
         except Exception as exc:
             logger.warning("[terminal.upgrade.download.cache_get_failed] key={} error={}", cache_key, str(exc))
 
-        file_name = row.webdav_path.rstrip("/").split("/")[-1] or "upgrade.bin"
-        data = await webdav_controller.create_share(
-            file_path=row.webdav_path,
-            file_name=file_name,
-            created_by=0,
-            expire_hours=row.download_expire_hours,
-        )
-        sign_data = await webdav_controller.build_share_signature(code=str(data.get("code") or ""))
-        query = urlencode({"code": data.get("code"), "ts": sign_data["ts"], "sig": sign_data["sig"]})
-        url = f"/api/v1/public/webdav/share/download?{query}"
+        url = await webdav_controller.get_direct_download_url(row.webdav_path)
         ttl_seconds = max(60, min(int(row.download_expire_hours or 1) * 3600, 24 * 3600))
         try:
             await execute_redis("setex", cache_key, ttl_seconds, url)

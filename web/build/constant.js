@@ -19,5 +19,6 @@ export const PROXY_CONFIG = {
   '/api/v1': {
     target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:9999',
     changeOrigin: true,
+    xfwd: true,
   },
 }

@@ -28,7 +28,6 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "db_backup_directory",
         "db_backup_run_at",
         "db_backup_retention_days",
-        "webdav_public_base_url",
     )
     for key in optional_preserve_keys:
         if key not in payload.model_fields_set:

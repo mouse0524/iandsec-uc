@@ -17,6 +17,12 @@ from app.utils.request import get_client_ip
 
 router = APIRouter(dependencies=[DependAuth])
 public_router = APIRouter()
+PUBLIC_SHARE_DOWNLOAD_PATH = "/public/webdav/share/download"
+
+
+def _build_public_share_download_url(code: str, sign_data: dict) -> str:
+    query = urlencode({"code": code, "ts": sign_data["ts"], "sig": sign_data["sig"]})
+    return f"{PUBLIC_SHARE_DOWNLOAD_PATH}?{query}"
 
 
 @router.get("/list", summary="WebDAV文件列表")
@@ -67,9 +73,9 @@ async def public_download_webdav_file(
 
     client_ip = get_client_ip(request)
     await webdav_controller.verify_direct_download_signature(path=path, ts=ts, sig=sig)
-    download_url = await webdav_controller.get_public_download_url(path)
+    download_url = await webdav_controller.get_direct_download_url(path)
     logger.info("[webdav.direct.download] redirect ip={} path={}", client_ip, path)
-    return RedirectResponse(download_url, status_code=302)
+    return RedirectResponse(download_url, status_code=307)
 
 
 @router.post("/share/create", summary="创建WebDAV分享")
@@ -82,8 +88,7 @@ async def create_webdav_share(payload: WebDavShareCreateIn):
         expire_hours=payload.expire_hours,
     )
     sign_data = await webdav_controller.build_share_signature(code=str(data.get("code") or ""))
-    query = urlencode({"code": data.get("code"), "ts": sign_data["ts"], "sig": sign_data["sig"]})
-    data["download_url"] = f"/api/v1/public/webdav/share/download?{query}"
+    data["download_url"] = _build_public_share_download_url(str(data.get("code") or ""), sign_data)
     return Success(msg="分享创建成功", data=data)
 
 
@@ -114,12 +119,11 @@ async def list_webdav_shares(
     for item in rows:
         item_dict = await item.to_dict()
         sign_data = await webdav_controller.build_share_signature(code=str(item_dict.get("code") or ""))
-        query = urlencode({"code": item_dict.get("code"), "ts": sign_data["ts"], "sig": sign_data["sig"]})
         data.append(
             webdav_controller._share_to_dict(
                 item,
                 creator_name=user_map.get(item.created_by, ""),
-                download_url=f"/api/v1/public/webdav/share/download?{query}",
+                download_url=_build_public_share_download_url(str(item_dict.get("code") or ""), sign_data),
                 data=item_dict,
             )
         )
@@ -177,6 +181,6 @@ async def webdav_share_download(
         raise
 
     share = await webdav_controller.get_share(code)
-    download_url = await webdav_controller.get_public_download_url(share.file_path)
+    download_url = await webdav_controller.get_direct_download_url(share.file_path)
     logger.info("[webdav.share.download] redirect ip={} code={} file_path={}", client_ip, code, share.file_path)
-    return RedirectResponse(download_url, status_code=302)
+    return RedirectResponse(download_url, status_code=307)

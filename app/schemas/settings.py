@@ -68,7 +68,6 @@ class SystemSettingUpdateIn(BaseModel):
 
     webdav_enabled: bool = False
     webdav_base_url: str | None = None
-    webdav_public_base_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
     webdav_share_default_expire_hours: int = 168
@@ -254,7 +253,6 @@ class PublicSiteConfigOut(BaseModel):
 class WebDavTestIn(BaseModel):
     webdav_enabled: bool = True
     webdav_base_url: str | None = None
-    webdav_public_base_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
 

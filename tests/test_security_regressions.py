@@ -3,7 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from app.controllers.captcha import captcha_controller
-from app.controllers.system_setting import system_setting_controller
+from app.controllers.system_setting import normalize_webdav_base_url, system_setting_controller
 from app.core.init_app import _default_basic_api_filter, _default_basic_api_paths
 from app.controllers.ticket import TicketController
 from app.services.security import validate_external_service_url
@@ -31,17 +31,27 @@ class SecurityRegressionTestCase(unittest.TestCase):
     def test_external_service_url_accepts_https_public_host(self):
         self.assertEqual(validate_external_service_url("https://api.openai.com/v1", label="LLM"), "https://api.openai.com/v1")
 
-    def test_webdav_url_can_skip_allowed_host_list(self):
+    def test_webdav_base_url_allows_http_and_https(self):
         self.assertEqual(
-            validate_external_service_url(
-                "https://dav.example.com/webdav",
-                label="WebDAV Base URL",
-                enforce_allowed_hosts=False,
-            ),
+            normalize_webdav_base_url("http://103.85.173.242:20000/webdav/"),
+            "http://103.85.173.242:20000/webdav",
+        )
+        self.assertEqual(
+            normalize_webdav_base_url("https://dav.example.com/webdav"),
             "https://dav.example.com/webdav",
         )
 
-    def test_webdav_connection_test_validates_public_download_base_url(self):
+    def test_webdav_base_url_rejects_credentials_query_fragment_and_invalid_scheme(self):
+        for base_url in (
+            "ftp://dav.example.com/webdav",
+            "https://user:pass@dav.example.com/webdav",
+            "https://dav.example.com/webdav?token=abc",
+            "https://dav.example.com/webdav#downloads",
+        ):
+            with self.assertRaises(Exception):
+                normalize_webdav_base_url(base_url)
+
+    def test_webdav_connection_test_rejects_invalid_base_url_before_request(self):
         async def run():
             with patch.object(
                 system_setting_controller,
@@ -58,10 +68,38 @@ class SecurityRegressionTestCase(unittest.TestCase):
                 with self.assertRaises(Exception):
                     await system_setting_controller.test_webdav_connection(
                         {
-                            "webdav_public_base_url": "http://files.example.com/public",
+                            "webdav_base_url": "https://user:pass@dav.example.com/webdav",
                         }
                     )
                 mock_client.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_webdav_connection_test_allows_http_webdav_base_url(self):
+        async def run():
+            mock_response = AsyncMock()
+            mock_response.status_code = 207
+            with patch.object(
+                system_setting_controller,
+                "_get_merged_raw",
+                AsyncMock(
+                    return_value={
+                        "webdav_enabled": True,
+                        "webdav_base_url": "https://dav.example.com/webdav",
+                        "webdav_username": "user",
+                        "webdav_password": "pass",
+                    }
+                ),
+            ), patch("app.controllers.system_setting.httpx.AsyncClient") as mock_client:
+                mock_client.return_value.__aenter__.return_value.request = AsyncMock(return_value=mock_response)
+                result = await system_setting_controller.test_webdav_connection(
+                    {
+                        "webdav_base_url": "http://103.85.173.242:20000/webdav",
+                    }
+                )
+
+            self.assertTrue(result["ok"])
+            mock_client.return_value.__aenter__.return_value.request.assert_awaited_once()
 
         asyncio.run(run())
 

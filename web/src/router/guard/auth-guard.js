@@ -1,20 +1,22 @@
 import { getToken, isNullOrWhitespace } from '@/utils'
 import { usePermissionStore, useUserStore } from '@/store'
 
-const WHITE_LIST = ['/login', '/404', '/403', '/ticket/public-submit']
+export const WHITE_LIST = ['/login', '/404', '/403', '/ticket/public-submit', '/public/webdav/share/download']
 const BASIC_AUTH_PATHS = ['/profile']
 export function createAuthGuard(router) {
   router.beforeEach(async (to) => {
     const token = getToken()
+    const isWhiteListed = WHITE_LIST.includes(to.path)
 
     /** 没有token的情况 */
     if (isNullOrWhitespace(token)) {
-      if (WHITE_LIST.includes(to.path)) return true
+      if (isWhiteListed) return true
       return { path: '/login', query: { ...to.query, redirect: to.path } }
     }
 
     /** 有token的情况 */
     if (to.path === '/login') return { path: '/' }
+    if (isWhiteListed) return true
 
     const userStore = useUserStore()
     const roleNames = (userStore.role || []).map((item) => item?.name).filter(Boolean)

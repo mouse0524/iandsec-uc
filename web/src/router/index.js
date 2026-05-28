@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import { setupRouterGuard } from './guard'
+import { WHITE_LIST } from './guard/auth-guard'
 import { basicRoutes, EMPTY_ROUTE, NOT_FOUND_ROUTE } from './routes'
 import { getToken, isNullOrWhitespace } from '@/utils'
 import { useUserStore, usePermissionStore } from '@/store'
@@ -12,7 +13,7 @@ export const router = createRouter({
 })
 
 export async function setupRouter(app) {
-  await addDynamicRoutes()
+  await addDynamicRoutes(window.location.pathname)
   setupRouterGuard(router)
   app.use(router)
 }
@@ -27,11 +28,12 @@ export async function resetRouter() {
   })
 }
 
-export async function addDynamicRoutes() {
+export async function addDynamicRoutes(currentPath = window.location.pathname) {
   const token = getToken()
 
   // 没有token情况
   if (isNullOrWhitespace(token)) {
+    if (WHITE_LIST.includes(currentPath)) return
     router.addRoute(EMPTY_ROUTE)
     return
   }

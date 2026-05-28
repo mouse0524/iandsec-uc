@@ -27,20 +27,8 @@ def test_webdav_signature_ttl_rejects_values_above_9999_hours():
         SystemSettingUpdateIn(**payload)
 
 
-def test_webdav_public_base_url_is_optional():
-    payload = minimal_settings_payload()
-
-    data = SystemSettingUpdateIn(**payload)
-
-    assert data.webdav_public_base_url is None
-
-
-def test_webdav_public_base_url_can_be_set():
-    payload = minimal_settings_payload(webdav_public_base_url="https://files.example.com/public")
-
-    data = SystemSettingUpdateIn(**payload)
-
-    assert data.webdav_public_base_url == "https://files.example.com/public"
+def test_webdav_public_base_url_is_not_exposed():
+    assert "webdav_public_base_url" not in SystemSettingUpdateIn.model_fields
 
 
 def minimal_settings_payload(**overrides):

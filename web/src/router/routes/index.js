@@ -126,6 +126,15 @@ export const basicRoutes = [
       title: '游客工单提交',
     },
   },
+  {
+    name: 'PublicWebdavShareDownload',
+    path: '/public/webdav/share/download',
+    component: () => import('@/views/public/webdav-share-download/index.vue'),
+    isHidden: true,
+    meta: {
+      title: '公开下载',
+    },
+  },
 ]
 
 export const NOT_FOUND_ROUTE = {

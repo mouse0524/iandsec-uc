@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 import json
 
 import httpx
@@ -10,7 +10,6 @@ from fastapi import HTTPException, UploadFile
 from app.log import logger
 from app.core.redis_client import execute_redis
 from app.models.admin import SystemSettingItem
-from app.services.security import validate_external_service_url
 from app.services.time_sync_service import time_sync_service
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
@@ -21,6 +20,18 @@ def _int_env(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         return default
+
+
+def normalize_webdav_base_url(url: str | None) -> str:
+    raw = str(url or "").strip().rstrip("/")
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="WebDAV Base URL 地址必须使用 HTTP 或 HTTPS")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="WebDAV Base URL 地址不能包含认证信息")
+    if parsed.query or parsed.fragment or "?" in raw or "#" in raw:
+        raise HTTPException(status_code=400, detail="WebDAV Base URL 地址不能包含查询参数或片段")
+    return raw
 
 
 class SystemSettingController:
@@ -120,7 +131,6 @@ class SystemSettingController:
         "webdav": {
             "webdav_enabled": False,
             "webdav_base_url": None,
-            "webdav_public_base_url": None,
             "webdav_username": None,
             "webdav_password": None,
             "webdav_share_default_expire_hours": 168,
@@ -161,6 +171,8 @@ class SystemSettingController:
             item = await self._get_or_create_section(section)
             data = dict(self._DEFAULTS[section])
             data.update(item.data or {})
+            if section == "webdav":
+                data.pop("webdav_public_base_url", None)
             merged[section] = data
         return merged
 
@@ -247,11 +259,6 @@ class SystemSettingController:
 
         enabled = req_data.get("webdav_enabled", db_data.get("webdav_enabled"))
         base_url = req_data.get("webdav_base_url") if req_data.get("webdav_base_url") is not None else db_data.get("webdav_base_url")
-        public_base_url = (
-            req_data.get("webdav_public_base_url")
-            if req_data.get("webdav_public_base_url") is not None
-            else db_data.get("webdav_public_base_url")
-        )
         username = req_data.get("webdav_username") if req_data.get("webdav_username") is not None else db_data.get("webdav_username")
         pwd_input = req_data.get("webdav_password")
         if pwd_input == "******":
@@ -265,17 +272,7 @@ class SystemSettingController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先开启")
         if not base_url:
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
-        base_url = validate_external_service_url(
-            base_url,
-            label="WebDAV Base URL",
-            enforce_allowed_hosts=False,
-        )
-        if public_base_url:
-            validate_external_service_url(
-                public_base_url,
-                label="WebDAV Public Base URL",
-                enforce_allowed_hosts=False,
-            )
+        base_url = normalize_webdav_base_url(base_url)
         if not username or not password:
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
 
@@ -310,17 +307,7 @@ class SystemSettingController:
         if payload.get("webdav_password") == "******":
             payload["webdav_password"] = sections["webdav"].get("webdav_password")
         if payload.get("webdav_base_url"):
-            payload["webdav_base_url"] = validate_external_service_url(
-                payload.get("webdav_base_url"),
-                label="WebDAV Base URL",
-                enforce_allowed_hosts=False,
-            )
-        if payload.get("webdav_public_base_url"):
-            payload["webdav_public_base_url"] = validate_external_service_url(
-                payload.get("webdav_public_base_url"),
-                label="WebDAV Public Base URL",
-                enforce_allowed_hosts=False,
-            )
+            payload["webdav_base_url"] = normalize_webdav_base_url(payload.get("webdav_base_url"))
 
         if "allow_channel_register" not in payload and "allow_user_register" not in payload and "allow_partner_register" in payload:
             payload["allow_channel_register"] = payload["allow_partner_register"]
@@ -408,7 +395,6 @@ class SystemSettingController:
         webdav_keys = {
             "webdav_enabled",
             "webdav_base_url",
-            "webdav_public_base_url",
             "webdav_username",
             "webdav_password",
             "webdav_share_default_expire_hours",
@@ -438,6 +424,8 @@ class SystemSettingController:
             item = await self._get_or_create_section(section)
             merged = dict(self._DEFAULTS[section])
             merged.update(item.data or {})
+            if section == "webdav":
+                merged.pop("webdav_public_base_url", None)
             for key in keys:
                 if key in payload:
                     merged[key] = payload[key]

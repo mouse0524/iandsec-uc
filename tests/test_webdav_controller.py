@@ -27,27 +27,57 @@ class WebDavControllerTestCase(unittest.TestCase):
             "https://dav.example.com/webdav/6.0.8/demo.txt",
         )
 
-    def test_public_download_url_uses_public_base_when_configured(self):
-        controller = WebDavController()
-        conf = {
-            "webdav_base_url": "https://internal.example.com/webdav",
-            "webdav_public_base_url": "https://files.example.com/public",
-        }
-
-        self.assertEqual(
-            controller.build_public_download_url(conf, "/6.0.8/demo file.txt"),
-            "https://files.example.com/public/6.0.8/demo%20file.txt",
-        )
-
-    def test_public_download_url_requires_public_base_url(self):
+    def test_direct_download_url_uses_webdav_base_with_credentials(self):
         controller = WebDavController()
         conf = {
             "webdav_base_url": "https://dav.example.com/webdav",
-            "webdav_public_base_url": "",
+            "webdav_username": "user",
+            "webdav_password": "pass",
         }
 
-        with self.assertRaises(Exception):
-            controller.build_public_download_url(conf, "/demo.txt")
+        self.assertEqual(
+            controller.build_direct_download_url(conf, "/6.0.8/demo file.txt"),
+            "https://user:pass@dav.example.com/webdav/6.0.8/demo%20file.txt",
+        )
+
+    def test_direct_download_url_supports_http_webdav_base(self):
+        controller = WebDavController()
+        conf = {
+            "webdav_base_url": "http://103.85.173.242:20000/webdav",
+            "webdav_username": "user",
+            "webdav_password": "pass",
+        }
+
+        self.assertEqual(
+            controller.build_direct_download_url(conf, "/demo.txt"),
+            "http://user:pass@103.85.173.242:20000/webdav/demo.txt",
+        )
+
+    def test_direct_download_url_percent_encodes_credentials(self):
+        controller = WebDavController()
+        conf = {
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_username": "a@b",
+            "webdav_password": "p:ss",
+        }
+
+        self.assertEqual(
+            controller.build_direct_download_url(conf, "/demo.txt"),
+            "https://a%40b:p%3Ass@dav.example.com/webdav/demo.txt",
+        )
+
+    def test_direct_download_url_can_omit_credentials(self):
+        controller = WebDavController()
+        conf = {
+            "webdav_base_url": "https://dav.example.com/webdav",
+            "webdav_username": "user",
+            "webdav_password": "pass",
+        }
+
+        self.assertEqual(
+            controller.build_direct_download_url(conf, "/demo.txt", include_credentials=False),
+            "https://dav.example.com/webdav/demo.txt",
+        )
 
     def test_share_dict_marks_expired_active_share_as_inactive(self):
         controller = WebDavController()

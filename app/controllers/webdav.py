@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, quote_from_bytes, unquote, urlparse, urlunparse
 from xml.etree import ElementTree as ET
 import json
 
@@ -16,8 +16,7 @@ from fastapi import HTTPException, UploadFile
 from app.core.redis_client import execute_redis
 from app.log import logger
 from app.models.admin import WebDavShareLink
-from app.controllers.system_setting import system_setting_controller
-from app.services.security import validate_external_service_url
+from app.controllers.system_setting import normalize_webdav_base_url, system_setting_controller
 from app.settings import settings
 
 
@@ -115,17 +114,7 @@ class WebDavController:
             raise HTTPException(status_code=400, detail="WebDAV未启用，请先在系统设置中启用")
         if not data.get("webdav_base_url"):
             raise HTTPException(status_code=400, detail="WebDAV Base URL 未配置")
-        data["webdav_base_url"] = validate_external_service_url(
-            data.get("webdav_base_url"),
-            label="WebDAV Base URL",
-            enforce_allowed_hosts=False,
-        )
-        if data.get("webdav_public_base_url"):
-            data["webdav_public_base_url"] = validate_external_service_url(
-                data.get("webdav_public_base_url"),
-                label="WebDAV Public Base URL",
-                enforce_allowed_hosts=False,
-            )
+        data["webdav_base_url"] = normalize_webdav_base_url(data.get("webdav_base_url"))
         if not data.get("webdav_username") or not data.get("webdav_password"):
             raise HTTPException(status_code=400, detail="WebDAV账号或密码未配置")
         return data
@@ -190,16 +179,20 @@ class WebDavController:
         safe_path = quote(path, safe="/()[]-_.~")
         return f"{base}{safe_path}"
 
-    def build_public_download_url(self, conf: dict, file_path: str) -> str:
-        base_url = str(conf.get("webdav_public_base_url") or "").strip()
-        if not base_url:
-            raise HTTPException(status_code=400, detail="WebDAV公开下载地址未配置")
+    def build_direct_download_url(self, conf: dict, file_path: str, *, include_credentials: bool = True) -> str:
+        base_url = normalize_webdav_base_url(conf.get("webdav_base_url"))
         norm_path = self._normalize_path(file_path)
-        return self._build_url(base_url, norm_path)
+        url = self._build_url(base_url, norm_path)
+        if not include_credentials:
+            return url
+        username, password = self._auth(conf)
+        parsed = urlparse(url)
+        credentials = f"{quote_from_bytes(str(username).encode('utf-8'))}:{quote_from_bytes(str(password).encode('utf-8'))}@"
+        return urlunparse(parsed._replace(netloc=f"{credentials}{parsed.netloc}"))
 
-    async def get_public_download_url(self, file_path: str) -> str:
+    async def get_direct_download_url(self, file_path: str, *, include_credentials: bool = True) -> str:
         conf = await self._get_config()
-        return self.build_public_download_url(conf, file_path)
+        return self.build_direct_download_url(conf, file_path, include_credentials=include_credentials)
 
     @classmethod
     def _build_list_url(cls, base_url: str, path: str) -> str:

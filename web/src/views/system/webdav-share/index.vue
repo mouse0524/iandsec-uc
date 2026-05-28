@@ -26,6 +26,16 @@ async function getShareTableData(params = {}) {
 
 function buildDownloadUrl(apiUrl) {
   if (!apiUrl) return ''
+  const publicShareApiPath = '/api/v1/public/webdav/share/download'
+  let parsedUrl = null
+  try {
+    parsedUrl = new URL(apiUrl, window.location.origin)
+  } catch {
+    parsedUrl = null
+  }
+  if (parsedUrl?.pathname === publicShareApiPath) {
+    return `${window.location.origin}/public/webdav/share/download${parsedUrl.search}`
+  }
   if (/^https?:\/\//i.test(apiUrl)) return apiUrl
   const path = apiUrl.startsWith('/') ? apiUrl : `/${apiUrl}`
   return `${window.location.origin}${path}`

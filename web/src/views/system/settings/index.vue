@@ -108,7 +108,6 @@ const form = ref({
     '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
   webdav_enabled: false,
   webdav_base_url: '',
-  webdav_public_base_url: '',
   webdav_username: '',
   webdav_password: '',
   webdav_share_default_expire_hours: 168,
@@ -446,7 +445,6 @@ async function testWebdavConnection() {
     const res = await api.testWebdavConnection({
       webdav_enabled: form.value.webdav_enabled,
       webdav_base_url: form.value.webdav_base_url,
-      webdav_public_base_url: form.value.webdav_public_base_url,
       webdav_username: form.value.webdav_username,
       webdav_password: form.value.webdav_password,
     })
@@ -837,12 +835,6 @@ function applyPresetHtmlTemplates() {
                 <NInput
                   v-model:value="form.webdav_base_url"
                   placeholder="例如 https://webdav.example.com/webdav"
-                />
-              </NFormItem>
-              <NFormItem label="公开下载 Base URL">
-                <NInput
-                  v-model:value="form.webdav_public_base_url"
-                  placeholder="例如 https://files.example.com/public"
                 />
               </NFormItem>
               <NFormItem label="用户名">
