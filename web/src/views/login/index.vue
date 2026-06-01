@@ -488,7 +488,17 @@ async function handleLogin() {
     return
   }
   if (!loginAgree.value) {
-    $message.warning('请先同意服务协议与隐私政策')
+    $dialog.confirm({
+      title: '协议确认',
+      type: 'warning',
+      content: '请阅读并同意用户服务协议与隐私政策后继续登录',
+      positiveText: '同意并登录',
+      negativeText: '取消',
+      confirm() {
+        loginAgree.value = true
+        return handleLogin()
+      },
+    })
     return
   }
   if (!loginInfo.value.captcha_id) {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import io
 import os
 import re
 import shutil
@@ -10,8 +11,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+import httpx
 from fastapi import HTTPException
 
+from app.controllers.system_setting import normalize_webdav_base_url
 from app.controllers.system_setting import system_setting_controller
 from app.core.redis_client import execute_redis
 from app.log import logger
@@ -20,6 +23,7 @@ from app.settings import settings
 
 RedisExecutor = Callable[..., Awaitable[Any]]
 RunCommand = Callable[..., subprocess.CompletedProcess]
+RemoteUploader = Callable[[dict, str, bytes], Awaitable[dict]]
 
 
 def _int_env(name: str, default: int) -> int:
@@ -32,10 +36,11 @@ def _int_env(name: str, default: int) -> int:
 class DatabaseBackupService:
     DEFAULT_DIRECTORY = os.getenv(
         "DB_BACKUP_DIRECTORY",
-        os.path.join(settings.BASE_DIR, "storage", "db_backups"),
+        "/iandsec-db-backups",
     )
     DEFAULT_RUN_AT = os.getenv("DB_BACKUP_RUN_AT", "02:30")
     DEFAULT_RETENTION_DAYS = _int_env("DB_BACKUP_RETENTION_DAYS", 7)
+    DEFAULT_MYSQL_CONTAINER = os.getenv("DB_BACKUP_MYSQL_CONTAINER", "iandsec-uc-mysql")
 
     def __init__(
         self,
@@ -43,42 +48,44 @@ class DatabaseBackupService:
         config_controller: Any | None = None,
         now_factory: Callable[[], datetime] | None = None,
         run_command: RunCommand | None = None,
+        upload_remote: RemoteUploader | None = None,
     ) -> None:
         self.config_controller = config_controller or system_setting_controller
         self.now_factory = now_factory or datetime.now
         self.run_command = run_command or subprocess.run
+        self.upload_remote = upload_remote or self.upload_to_webdav
 
     async def run_once(self, *, config: dict | None = None, force: bool = False) -> dict:
         config = self.normalize_config(config or await self.config_controller.get_full_dict())
         if not force and not config["db_backup_enabled"]:
             return {"ok": True, "skipped": True, "reason": "disabled", "enabled": False}
 
-        directory = self.ensure_backup_directory(config["db_backup_directory"])
         now = self.now_factory()
         filename = self.build_filename(now)
-        final_path = directory / filename
-        temp_path = directory / f".{filename}.tmp"
 
-        logger.info("[database_backup] start directory={} database={}", str(directory), settings.MYSQL_DATABASE)
+        logger.info(
+            "[database_backup] start remote_dir={} database={} mysql_container={}",
+            config["db_backup_directory"],
+            settings.MYSQL_DATABASE,
+            config["db_backup_mysql_container"],
+        )
         try:
-            await asyncio.to_thread(self.dump_database, temp_path)
-            os.replace(temp_path, final_path)
-            deleted = self.cleanup_retention(directory, config["db_backup_retention_days"], now=now)
+            payload = await asyncio.to_thread(self.dump_database, config["db_backup_mysql_container"])
+            upload_result = await self.upload_remote(config, filename, payload)
+            deleted = 0
         except Exception:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            logger.exception("[database_backup] failed directory={}", str(directory))
+            logger.exception("[database_backup] failed remote_dir={}", config["db_backup_directory"])
             raise
 
-        size = final_path.stat().st_size
-        logger.info("[database_backup] success path={} size={} deleted={}", str(final_path), size, deleted)
+        size = len(payload)
+        remote_path = str(upload_result.get("remote_path") or "")
+        logger.info("[database_backup] success remote_path={} size={} deleted={}", remote_path, size, deleted)
         return {
             "ok": True,
             "skipped": False,
-            "path": str(final_path),
-            "filename": final_path.name,
+            "path": remote_path,
+            "remote_path": remote_path,
+            "filename": filename,
             "size": size,
             "deleted": deleted,
             "created_at": now.strftime(settings.DATETIME_FORMAT),
@@ -93,41 +100,38 @@ class DatabaseBackupService:
         error = ""
 
         try:
-            directory = Path(directory_text)
-            exists = directory.exists() and directory.is_dir()
-            writable = self.is_writable_directory(directory) if exists else False
-            latest_path = self.latest_backup(directory) if exists else None
-            if latest_path:
-                stat = latest_path.stat()
-                latest = {
-                    "filename": latest_path.name,
-                    "path": str(latest_path),
-                    "size": stat.st_size,
-                    "created_at": datetime.fromtimestamp(stat.st_mtime).strftime(settings.DATETIME_FORMAT),
-                }
+            exists = bool(directory_text)
+            writable = bool(
+                normalized.get("db_backup_webdav_base_url")
+                and normalized.get("db_backup_webdav_username")
+                and normalized.get("db_backup_webdav_password")
+            )
         except Exception as exc:
             error = str(exc)
 
-        return {
+        result = {
             **normalized,
             "directory_exists": exists,
             "directory_writable": writable,
             "latest_backup": latest,
             "error": error,
         }
+        if result.get("db_backup_webdav_password"):
+            result["db_backup_webdav_password"] = "******"
+        return result
 
-    def test_directory(self, config: dict | None = None) -> dict:
+    async def test_directory(self, config: dict | None = None) -> dict:
         normalized = self.normalize_config(config or {})
-        directory = self.ensure_backup_directory(normalized["db_backup_directory"])
-        if not self.is_writable_directory(directory):
-            raise HTTPException(status_code=400, detail="备份目录不可写，请检查 NAS 挂载和权限")
-        usage = shutil.disk_usage(directory)
+        self.ensure_remote_directory(normalized["db_backup_directory"])
+        marker = f".write-test-{os.getpid()}-{id(self)}.txt"
+        result = await self.upload_remote(normalized, marker, b"ok")
+        remote_path = result.get("remote_path") or self.remote_path(normalized["db_backup_directory"], marker)
+        if self.upload_remote == self.upload_to_webdav:
+            await self.delete_from_webdav(normalized, remote_path)
         return {
             "ok": True,
-            "path": str(directory),
-            "free": usage.free,
-            "total": usage.total,
-            "used": usage.used,
+            "path": remote_path,
+            "remote_path": remote_path,
         }
 
     def normalize_config(self, config: dict) -> dict:
@@ -140,12 +144,32 @@ class DatabaseBackupService:
             minimum=1,
             maximum=365,
         )
+        mysql_container = str(config.get("db_backup_mysql_container") or self.DEFAULT_MYSQL_CONTAINER).strip()
+        if not mysql_container:
+            raise HTTPException(status_code=400, detail="MySQL容器名不能为空")
+        webdav_base_url = str(config.get("db_backup_webdav_base_url") or "").strip()
+        if webdav_base_url:
+            webdav_base_url = normalize_webdav_base_url(webdav_base_url)
         return {
             "db_backup_enabled": enabled,
             "db_backup_directory": directory,
             "db_backup_run_at": run_at,
             "db_backup_retention_days": retention_days,
+            "db_backup_mysql_container": mysql_container,
+            "db_backup_webdav_base_url": webdav_base_url,
+            "db_backup_webdav_username": str(config.get("db_backup_webdav_username") or "").strip(),
+            "db_backup_webdav_password": str(config.get("db_backup_webdav_password") or ""),
         }
+
+    def ensure_remote_directory(self, directory_text: str) -> str:
+        text = str(directory_text or "").strip().replace("\\", "/")
+        if not text:
+            raise HTTPException(status_code=400, detail="NAS远端目录不能为空")
+        if not text.startswith("/"):
+            raise HTTPException(status_code=400, detail="NAS远端目录必须以 / 开头")
+        if ".." in [part for part in text.split("/") if part]:
+            raise HTTPException(status_code=400, detail="NAS远端目录非法")
+        return "/" + text.strip("/")
 
     def ensure_backup_directory(self, directory_text: str) -> Path:
         directory = Path(str(directory_text or "").strip())
@@ -161,11 +185,19 @@ class DatabaseBackupService:
             raise HTTPException(status_code=400, detail="备份路径不是目录")
         return directory
 
-    def dump_database(self, target_path: Path) -> None:
+    def dump_database(self, mysql_container: str | None = None) -> bytes:
+        container = str(mysql_container or self.DEFAULT_MYSQL_CONTAINER).strip()
+        if not container:
+            raise HTTPException(status_code=400, detail="MySQL容器名不能为空")
         command = [
+            "docker",
+            "exec",
+            "-e",
+            f"MYSQL_PWD={settings.MYSQL_PASSWORD}",
+            container,
             "mysqldump",
-            f"--host={settings.MYSQL_HOST}",
-            f"--port={settings.MYSQL_PORT}",
+            "--host=127.0.0.1",
+            "--port=3306",
             f"--user={settings.MYSQL_USER}",
             "--single-transaction",
             "--routines",
@@ -174,49 +206,103 @@ class DatabaseBackupService:
             "--default-character-set=utf8mb4",
             settings.MYSQL_DATABASE,
         ]
-        env = os.environ.copy()
-        env["MYSQL_PWD"] = settings.MYSQL_PASSWORD
-
-        plain_path = target_path.with_name(f"{target_path.name}.sql")
         try:
-            with plain_path.open("wb") as output:
-                result = self.run_command(
-                    command,
-                    stdout=output,
-                    stderr=subprocess.PIPE,
-                    env=env,
-                    check=False,
-                    timeout=60 * 60,
-                )
+            result = self.run_command(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=60 * 60,
+            )
         except FileNotFoundError as exc:
-            raise HTTPException(status_code=500, detail="未找到 mysqldump，请在运行环境安装 MySQL client") from exc
+            raise HTTPException(status_code=500, detail="未找到 docker 命令，无法进入 MySQL 容器执行备份") from exc
         except subprocess.TimeoutExpired as exc:
             raise HTTPException(status_code=500, detail="数据库备份超时") from exc
         except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"写入备份文件失败: {exc}") from exc
-        finally:
-            if "result" not in locals():
-                try:
-                    plain_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            raise HTTPException(status_code=500, detail=f"执行 MySQL 容器备份失败: {exc}") from exc
 
         if result.returncode != 0:
             stderr = self.decode_stderr(result.stderr)
-            try:
-                plain_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise HTTPException(status_code=500, detail=f"数据库备份失败: {stderr or 'mysqldump 执行失败'}")
+            raise HTTPException(status_code=500, detail=f"数据库备份失败: {stderr or 'docker exec mysqldump 执行失败'}")
 
+        buffer = io.BytesIO()
+        with gzip.GzipFile(fileobj=buffer, mode="wb") as output:
+            output.write(result.stdout or b"")
+        return buffer.getvalue()
+
+    async def upload_to_webdav(self, config: dict, filename: str, payload: bytes) -> dict:
+        if not config.get("db_backup_webdav_base_url"):
+            raise HTTPException(status_code=400, detail="备份 NAS 地址未配置")
+        if not config.get("db_backup_webdav_username") or not config.get("db_backup_webdav_password"):
+            raise HTTPException(status_code=400, detail="备份 NAS 账号或密码未配置")
+
+        remote_path = self.remote_path(config["db_backup_directory"], filename)
+        await self.ensure_webdav_directory(config, config["db_backup_directory"])
+        url = self.webdav_url(config["db_backup_webdav_base_url"], remote_path)
         try:
-            with plain_path.open("rb") as source, gzip.open(target_path, "wb") as output:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
-        finally:
-            try:
-                plain_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            async with httpx.AsyncClient(timeout=60 * 60, follow_redirects=True) as client:
+                response = await client.put(
+                    url,
+                    content=payload,
+                    auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+                    headers={"Content-Type": "application/gzip"},
+                )
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=502, detail=f"上传 NAS 远端失败: {exc}") from exc
+        if response.status_code not in {200, 201, 204}:
+            raise HTTPException(status_code=502, detail=f"上传 NAS 远端失败，状态码 {response.status_code}")
+        return {"remote_path": remote_path, "status_code": response.status_code}
+
+    async def ensure_webdav_directory(self, config: dict, directory_text: str) -> None:
+        directory = self.ensure_remote_directory(directory_text)
+        parts = [part for part in directory.strip("/").split("/") if part]
+        current = ""
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                for part in parts:
+                    current = f"{current}/{part}"
+                    response = await client.request(
+                        "MKCOL",
+                        self.webdav_url(config["db_backup_webdav_base_url"], current),
+                        auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+                    )
+                    if response.status_code not in {200, 201, 204, 405}:
+                        raise HTTPException(
+                            status_code=502,
+                            detail=f"创建 NAS 远端目录失败，状态码 {response.status_code}",
+                        )
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=502, detail=f"创建 NAS 远端目录失败: {exc}") from exc
+
+    async def delete_from_webdav(self, config: dict, remote_path: str) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.delete(
+                    self.webdav_url(config["db_backup_webdav_base_url"], remote_path),
+                    auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+                )
+        except httpx.RequestError:
+            logger.warning("[database_backup] cleanup_test_file_failed path={}", remote_path)
+            return
+        if response.status_code not in {200, 202, 204, 404}:
+            logger.warning(
+                "[database_backup] cleanup_test_file_failed path={} status={}",
+                remote_path,
+                response.status_code,
+            )
+
+    def remote_path(self, directory_text: str, filename: str) -> str:
+        directory = self.ensure_remote_directory(directory_text)
+        clean_name = str(filename or "").strip()
+        if not clean_name or "/" in clean_name or "\\" in clean_name:
+            raise HTTPException(status_code=400, detail="备份文件名非法")
+        return f"{directory.rstrip('/')}/{clean_name}"
+
+    def webdav_url(self, base_url: str, remote_path: str) -> str:
+        from urllib.parse import quote
+
+        base = normalize_webdav_base_url(base_url)
+        return f"{base}{quote(remote_path, safe='/')}"
 
     def cleanup_retention(self, directory: Path, retention_days: int, *, now: datetime | None = None) -> int:
         cutoff = (now or self.now_factory()) - timedelta(days=retention_days)

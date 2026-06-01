@@ -19,7 +19,11 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-dev_redis_password_change_me}
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-me}
-      DB_BACKUP_DIRECTORY: ${DB_BACKUP_DIRECTORY:-/opt/iandsec-uc/storage/db_backups}
+      DB_BACKUP_DIRECTORY: ${DB_BACKUP_DIRECTORY:-/iandsec-db-backups}
+      DB_BACKUP_MYSQL_CONTAINER: ${DB_BACKUP_MYSQL_CONTAINER:-iandsec-uc-mysql}
+      DB_BACKUP_WEBDAV_BASE_URL: ${DB_BACKUP_WEBDAV_BASE_URL:-}
+      DB_BACKUP_WEBDAV_USERNAME: ${DB_BACKUP_WEBDAV_USERNAME:-}
+      DB_BACKUP_WEBDAV_PASSWORD: ${DB_BACKUP_WEBDAV_PASSWORD:-}
       DB_BACKUP_RUN_AT: ${DB_BACKUP_RUN_AT:-02:30}
       DB_BACKUP_RETENTION_DAYS: ${DB_BACKUP_RETENTION_DAYS:-7}
       INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
@@ -39,6 +43,7 @@ services:
       - app_logs:/opt/iandsec-uc/app/logs
       - web_node_modules:/opt/iandsec-uc/web/node_modules
       - pnpm_store:/root/.local/share/pnpm/store
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     stdin_open: true
     tty: true

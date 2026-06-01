@@ -19,7 +19,11 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
-      DB_BACKUP_DIRECTORY: ${DB_BACKUP_DIRECTORY:-/opt/iandsec-uc/storage/db_backups}
+      DB_BACKUP_DIRECTORY: ${DB_BACKUP_DIRECTORY:-/iandsec-db-backups}
+      DB_BACKUP_MYSQL_CONTAINER: ${DB_BACKUP_MYSQL_CONTAINER:-iandsec-uc-mysql}
+      DB_BACKUP_WEBDAV_BASE_URL: ${DB_BACKUP_WEBDAV_BASE_URL:-}
+      DB_BACKUP_WEBDAV_USERNAME: ${DB_BACKUP_WEBDAV_USERNAME:-}
+      DB_BACKUP_WEBDAV_PASSWORD: ${DB_BACKUP_WEBDAV_PASSWORD:-}
       DB_BACKUP_RUN_AT: ${DB_BACKUP_RUN_AT:-02:30}
       DB_BACKUP_RETENTION_DAYS: ${DB_BACKUP_RETENTION_DAYS:-7}
       INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
@@ -31,8 +35,8 @@ services:
     volumes:
       - app_storage:/opt/iandsec-uc/storage
       - app_logs:/opt/iandsec-uc/app/logs
-      # Mount NAS backup directory here in production, for example:
-      # - /mnt/nas/iandsec-db-backups:/mnt/nas/iandsec-db-backups
+      # Database backup uses docker exec to run mysqldump inside the MySQL container.
+      - /var/run/docker.sock:/var/run/docker.sock
     cap_drop:
       - ALL
     security_opt:

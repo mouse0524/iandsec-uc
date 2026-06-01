@@ -12,6 +12,20 @@ from app.schemas.tickets import TicketCreate
 router = APIRouter()
 
 
+def _resolve_ticket_issue_type(payload_issue_type: str | None, issue_types: list[str]) -> str:
+    issue_type = str(payload_issue_type or "").strip()
+    if not issue_type:
+        issue_type = issue_types[0] if issue_types else "现网问题"
+    return issue_type
+
+
+def _resolve_ticket_impact_scope(payload_impact_scope: str | None, impact_scopes: list[str]) -> str:
+    impact_scope = str(payload_impact_scope or "").strip()
+    if not impact_scope:
+        impact_scope = impact_scopes[0] if impact_scopes else "全部"
+    return impact_scope
+
+
 @router.post("/upload", summary="游客上传工单附件")
 async def upload_public_ticket_attachment(
     file: UploadFile = File(...),
@@ -49,13 +63,23 @@ async def create_public_ticket(payload: TicketCreate):
 
     config = await system_setting_controller.get_public_config()
     project_phases = config.get("ticket_project_phases") or []
+    issue_types = config.get("ticket_issue_types") or []
+    impact_scopes = config.get("ticket_impact_scopes") or []
     categories = config.get("ticket_categories") or []
+    issue_type = _resolve_ticket_issue_type(payload.issue_type, issue_types)
+    impact_scope = _resolve_ticket_impact_scope(payload.impact_scope, impact_scopes)
     if project_phases and payload.project_phase not in project_phases:
         return Fail(code=400, msg="项目阶段不合法，请刷新页面后重试")
+    if issue_types and issue_type not in issue_types:
+        return Fail(code=400, msg="跟踪不合法，请刷新页面后重试")
+    if impact_scopes and impact_scope not in impact_scopes:
+        return Fail(code=400, msg="影响范围不合法，请刷新页面后重试")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类不合法，请刷新页面后重试")
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
+    body["issue_type"] = issue_type
+    body["impact_scope"] = impact_scope
     await ticket_controller.validate_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])
     ticket = await ticket_controller.create_ticket_with_optional_auto_review(submitter_id=0, payload=body)
     await ticket_controller.consume_guest_attachment_ids(captcha_id=payload.captcha_id, attachment_ids=body.get("attachment_ids") or [])

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NCard, NForm, NFormItem, NInput, NModal, NSelect, NTag, NUpload } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
@@ -22,6 +22,21 @@ const queryItems = ref({
   finished_start: route.query.finished_start || undefined,
   finished_end: route.query.finished_end || undefined,
 })
+
+watch(
+  () => route.query,
+  (query) => {
+    queryItems.value = {
+      ...queryItems.value,
+      status: query.status || undefined,
+      created_start: query.created_start || undefined,
+      created_end: query.created_end || undefined,
+      finished_start: query.finished_start || undefined,
+      finished_end: query.finished_end || undefined,
+    }
+    $table.value?.handleSearch()
+  }
+)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const currentTicket = ref({})
@@ -38,6 +53,8 @@ const editForm = ref({
   email: '',
   phone: '',
   project_phase: '',
+  issue_type: '',
+  impact_scope: '',
   category: '',
   title: '',
   description: '',
@@ -47,8 +64,12 @@ const editForm = ref({
 })
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
+const issueTypeOptions = ref([])
+const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const fallbackProjectPhases = ['售前', '实施', '售后']
+const fallbackIssueTypes = ['现网问题', '现网需求', '产品建议']
+const fallbackImpactScopes = ['全部', '偶现', '单台必现', '单台偶现']
 const fallbackCategories = ['登录问题', '权限问题', '系统异常', '其他']
 const fallbackRootCauses = ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖']
 
@@ -158,14 +179,20 @@ async function loadTicketMetaOptions() {
     const res = await api.getPublicConfig()
     const config = res?.data || {}
     const projectPhases = config.ticket_project_phases?.length ? config.ticket_project_phases : fallbackProjectPhases
+    const issueTypes = config.ticket_issue_types?.length ? config.ticket_issue_types : fallbackIssueTypes
+    const impactScopes = config.ticket_impact_scopes?.length ? config.ticket_impact_scopes : fallbackImpactScopes
     const categories = config.ticket_categories?.length ? config.ticket_categories : fallbackCategories
     const rootCauses = config.ticket_root_causes?.length ? config.ticket_root_causes : fallbackRootCauses
     projectPhaseOptions.value = projectPhases.map((item) => ({ label: item, value: item }))
+    issueTypeOptions.value = issueTypes.map((item) => ({ label: item, value: item }))
+    impactScopeOptions.value = impactScopes.map((item) => ({ label: item, value: item }))
     categoryOptions.value = categories.map((item) => ({ label: item, value: item }))
     rootCauseOptions.value = rootCauses.map((item) => ({ label: item, value: item }))
   } catch (error) {
     rootCauseOptions.value = fallbackRootCauses.map((item) => ({ label: item, value: item }))
     categoryOptions.value = fallbackCategories.map((item) => ({ label: item, value: item }))
+    issueTypeOptions.value = fallbackIssueTypes.map((item) => ({ label: item, value: item }))
+    impactScopeOptions.value = fallbackImpactScopes.map((item) => ({ label: item, value: item }))
     projectPhaseOptions.value = fallbackProjectPhases.map((item) => ({ label: item, value: item }))
   }
 }
@@ -200,6 +227,8 @@ async function openEdit(row) {
     email: source.email || '',
     phone: source.phone || '',
     project_phase: source.project_phase || '',
+    issue_type: source.issue_type || issueTypeOptions.value[0]?.value || '',
+    impact_scope: source.impact_scope || impactScopeOptions.value[0]?.value || '',
     category: source.category || '',
     title: source.title || '',
     description: source.description || '',
@@ -291,6 +320,8 @@ function closeEditModal() {
 const columns = [
   { title: '工单编号', key: 'ticket_no', align: 'center' },
   { title: '项目阶段', key: 'project_phase', align: 'center' },
+  { title: '跟踪', key: 'issue_type', align: 'center' },
+  { title: '影响范围', key: 'impact_scope', align: 'center' },
   { title: '问题分类', key: 'category', align: 'center' },
   { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
@@ -356,6 +387,24 @@ const columns = [
             <QueryBarItem label="分类" :label-width="40">
               <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" />
             </QueryBarItem>
+            <QueryBarItem label="跟踪" :label-width="40">
+              <NSelect
+                v-model:value="queryItems.issue_type"
+                :options="issueTypeOptions"
+                clearable
+                placeholder="选择跟踪"
+                style="width: 180px"
+              />
+            </QueryBarItem>
+            <QueryBarItem label="影响" :label-width="40">
+              <NSelect
+                v-model:value="queryItems.impact_scope"
+                :options="impactScopeOptions"
+                clearable
+                placeholder="选择影响范围"
+                style="width: 180px"
+              />
+            </QueryBarItem>
             <QueryBarItem label="阶段" :label-width="40">
               <NSelect
                 v-model:value="queryItems.project_phase"
@@ -419,6 +468,12 @@ const columns = [
               <div class="edit-grid single-col">
                 <NFormItem label="项目阶段">
                   <NSelect v-model:value="editForm.project_phase" :options="projectPhaseOptions" placeholder="请选择项目阶段" />
+                </NFormItem>
+                <NFormItem label="跟踪">
+                  <NSelect v-model:value="editForm.issue_type" :options="issueTypeOptions" placeholder="请选择跟踪" />
+                </NFormItem>
+                <NFormItem label="影响范围">
+                  <NSelect v-model:value="editForm.impact_scope" :options="impactScopeOptions" placeholder="请选择影响范围" />
                 </NFormItem>
                 <NFormItem label="问题分类">
                   <NSelect v-model:value="editForm.category" :options="categoryOptions" placeholder="请选择问题分类" />

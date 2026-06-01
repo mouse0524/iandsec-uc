@@ -108,6 +108,8 @@ class Ticket(BaseModel, TimestampMixin):
     email = fields.CharField(max_length=255, description="邮箱", index=True)
     phone = fields.CharField(max_length=20, description="手机号", index=True)
     project_phase = fields.CharField(max_length=30, description="项目阶段", index=True)
+    issue_type = fields.CharField(max_length=30, default="现网问题", description="跟踪", index=True)
+    impact_scope = fields.CharField(max_length=30, default="全部", description="影响范围", index=True)
     category = fields.CharField(max_length=60, description="问题分类", index=True)
     title = fields.CharField(max_length=200, description="问题标题", index=True)
     description = fields.TextField(description="问题描述")

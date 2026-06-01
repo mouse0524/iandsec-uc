@@ -200,9 +200,11 @@ class TicketController:
 
     async def create_ticket(self, *, submitter_id: int, payload: dict, notify_pending_review: bool = True) -> Ticket:
         logger.info(
-            "[ticket.create] start submitter_id={} project_phase={} category={} title={}",
+            "[ticket.create] start submitter_id={} project_phase={} issue_type={} impact_scope={} category={} title={}",
             submitter_id,
             payload.get("project_phase"),
+            payload.get("issue_type"),
+            payload.get("impact_scope"),
             payload.get("category"),
             payload.get("title"),
         )
@@ -242,15 +244,36 @@ class TicketController:
     async def create_ticket_with_optional_auto_review(self, *, submitter_id: int, payload: dict) -> Ticket:
         config = await system_setting_controller.get_public_config()
         auto_approve = config.get("customer_service_auto_approve_ticket", False)
+        needs_cs_review = self._needs_customer_service_review(payload.get("project_phase"), config)
         ticket = await self.create_ticket(
             submitter_id=submitter_id,
             payload=payload,
-            notify_pending_review=not auto_approve,
+            notify_pending_review=not auto_approve and needs_cs_review,
         )
+        if not needs_cs_review:
+            tech_user = await self._get_first_active_tech_user()
+            if not tech_user:
+                logger.warning("[ticket.auto_review] skipped ticket_id={} reason=no_active_tech_user", ticket.id)
+                await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+                return ticket
+            ticket.status = TicketStatus.TECH_PROCESSING
+            ticket.tech_id = tech_user.id
+            await ticket.save()
+            await self._write_action(
+                ticket_id=ticket.id,
+                action=TicketActionType.TECH_START,
+                from_status=TicketStatus.PENDING_REVIEW,
+                to_status=TicketStatus.TECH_PROCESSING,
+                operator_id=submitter_id,
+                comment="无需客服审核，自动进入技术处理",
+            )
+            await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+            return ticket
+
         if not auto_approve:
             return ticket
 
-        tech_user = await User.filter(is_active=True, roles__name="技术").order_by("id").first()
+        tech_user = await self._get_first_active_tech_user()
         if not tech_user:
             logger.warning("[ticket.auto_review] skipped ticket_id={} reason=no_active_tech_user", ticket.id)
             await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
@@ -274,6 +297,14 @@ class TicketController:
             await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
             return ticket
 
+    @staticmethod
+    def _needs_customer_service_review(project_phase: str | None, config: dict) -> bool:
+        review_phases = set(config.get("ticket_cs_review_project_phases") or [])
+        return not review_phases or project_phase in review_phases
+
+    async def _get_first_active_tech_user(self) -> User | None:
+        return await User.filter(is_active=True, roles__name="技术").order_by("id").first()
+
     async def get_ticket(self, ticket_id: int) -> Ticket:
         return await Ticket.get(id=ticket_id)
 
@@ -285,6 +316,8 @@ class TicketController:
             "id",
             "ticket_no",
             "project_phase",
+            "issue_type",
+            "impact_scope",
             "category",
             "contact_name",
             "phone",
@@ -536,9 +569,23 @@ class TicketController:
             action = TicketActionType.TECH_START
             action_comment = "提交者编辑后重新流转技术处理"
         elif old_status_value == TicketStatus.CS_REJECTED.value:
-            ticket.status = TicketStatus.PENDING_REVIEW
-            action = TicketActionType.RESUBMIT
-            action_comment = "提交者编辑后重新提交客服审核"
+            config = await system_setting_controller.get_public_config()
+            if self._needs_customer_service_review(ticket.project_phase, config):
+                ticket.status = TicketStatus.PENDING_REVIEW
+                action = TicketActionType.RESUBMIT
+                action_comment = "提交者编辑后重新提交客服审核"
+            else:
+                tech_user = await self._get_first_active_tech_user()
+                if tech_user:
+                    ticket.status = TicketStatus.TECH_PROCESSING
+                    ticket.tech_id = tech_user.id
+                    action = TicketActionType.TECH_START
+                    action_comment = "提交者编辑后无需客服审核，重新流转技术处理"
+                else:
+                    logger.warning("[ticket.update] skip_cs_review_failed ticket_id={} reason=no_active_tech_user", ticket.id)
+                    ticket.status = TicketStatus.PENDING_REVIEW
+                    action = TicketActionType.RESUBMIT
+                    action_comment = "提交者编辑后重新提交客服审核"
         else:
             ticket.status = old_status
             action = TicketActionType.RESUBMIT
@@ -578,10 +625,28 @@ class TicketController:
             raise HTTPException(status_code=400, detail="当前状态不可重提")
 
         old_status = ticket.status
-        ticket.status = TicketStatus.PENDING_REVIEW
         if description:
             ticket.description = self._sanitize_rich_html(description)
         ticket.reject_reason = None
+        action = TicketActionType.RESUBMIT
+        action_comment = "重提工单"
+        if old_status == TicketStatus.TECH_REJECTED:
+            ticket.status = TicketStatus.TECH_PROCESSING
+            action = TicketActionType.TECH_START
+        else:
+            config = await system_setting_controller.get_public_config()
+            if self._needs_customer_service_review(ticket.project_phase, config):
+                ticket.status = TicketStatus.PENDING_REVIEW
+            else:
+                tech_user = await self._get_first_active_tech_user()
+                if tech_user:
+                    ticket.status = TicketStatus.TECH_PROCESSING
+                    ticket.tech_id = tech_user.id
+                    action = TicketActionType.TECH_START
+                    action_comment = "重提后无需客服审核，自动进入技术处理"
+                else:
+                    logger.warning("[ticket.resubmit] skip_cs_review_failed ticket_id={} reason=no_active_tech_user", ticket.id)
+                    ticket.status = TicketStatus.PENDING_REVIEW
         await ticket.save()
 
         if attachment_ids:
@@ -589,11 +654,11 @@ class TicketController:
 
         await self._write_action(
             ticket_id=ticket.id,
-            action=TicketActionType.RESUBMIT,
+            action=action,
             from_status=old_status,
             to_status=ticket.status,
             operator_id=submitter_id,
-            comment="重提工单",
+            comment=action_comment,
         )
         await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
         logger.info(

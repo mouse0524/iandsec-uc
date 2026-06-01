@@ -179,6 +179,14 @@ function getActionIconClass(action) {
         <strong>{{ ticket.project_phase || '-' }}</strong>
       </div>
       <div class="detail-card">
+        <span>跟踪</span>
+        <strong>{{ ticket.issue_type || '-' }}</strong>
+      </div>
+      <div class="detail-card">
+        <span>影响范围</span>
+        <strong>{{ ticket.impact_scope || '-' }}</strong>
+      </div>
+      <div class="detail-card">
         <span>问题分类</span>
         <strong>{{ ticket.category || '-' }}</strong>
       </div>

@@ -59,7 +59,7 @@ class TicketGetApiTestCase(unittest.TestCase):
         self.assertEqual(body.get("code"), 200)
         self.assertEqual(body.get("data", {}).get("id"), 1001)
 
-    def test_list_ticket_for_tech_role_applies_scope_filter(self):
+    def test_list_ticket_for_tech_role_includes_submitted_and_assigned_tickets(self):
         current_user = SimpleNamespace(id=10, is_superuser=False)
 
         with (
@@ -81,8 +81,10 @@ class TicketGetApiTestCase(unittest.TestCase):
         search_q = call_kwargs.get("search")
         self.assertEqual(getattr(search_q, "join_type", ""), "AND")
         scope_q = search_q.children[-1]
-        self.assertEqual(getattr(scope_q, "join_type", ""), "AND")
-        self.assertEqual(scope_q.filters.get("tech_id"), 10)
+        self.assertEqual(getattr(scope_q, "join_type", ""), "OR")
+        scope_filters = [getattr(child, "filters", {}) for child in getattr(scope_q, "children", [])]
+        self.assertIn({"submitter_id": 10}, scope_filters)
+        self.assertIn({"tech_id": 10}, scope_filters)
 
     def test_ticket_actions_forbidden(self):
         current_user = SimpleNamespace(id=10, is_superuser=False)
@@ -107,6 +109,8 @@ class TicketGetApiTestCase(unittest.TestCase):
             ticket_no="TK001",
             status="done",
             project_phase="售后",
+            issue_type="现网问题",
+            impact_scope="全部",
             category="系统异常",
             root_cause="配置错误",
             title="导出测试",
@@ -181,6 +185,10 @@ class TicketGetApiTestCase(unittest.TestCase):
         workbook = load_workbook(BytesIO(resp.content))
         sheet = workbook.active
         values = [cell.value for cell in sheet[2]]
+        self.assertIn("Tracking", [cell.value for cell in sheet[1]])
+        self.assertIn("Impact Scope", [cell.value for cell in sheet[1]])
+        self.assertIn("现网问题", values)
+        self.assertIn("全部", values)
         self.assertIn("安得", values)
         self.assertIn("张三", values)
         self.assertIn("第一行\n第二行", values)
@@ -195,6 +203,8 @@ class TicketGetApiTestCase(unittest.TestCase):
             ticket_no="TK001",
             status="done",
             project_phase="售后",
+            issue_type="建议",
+            impact_scope="单台偶现",
             category="系统异常",
             root_cause="配置错误",
             title="导出测试",
@@ -252,6 +262,140 @@ class TicketGetApiTestCase(unittest.TestCase):
         workbook = load_workbook(BytesIO(resp.content))
         values = [cell.value for cell in workbook.active[2]]
         self.assertTrue(any("/api/v1/ticket/attachment/download?attachment_id=99" in str(value) for value in values))
+
+    def test_list_ticket_filters_by_issue_type(self):
+        current_user = SimpleNamespace(id=10, is_superuser=True)
+
+        with (
+            patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
+            patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=["管理员"])),
+            patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(0, []))) as mock_list,
+        ):
+            resp = self.client.get("/api/v1/tickets/list", params={"issue_type": "需求"})
+
+        self.assertEqual(resp.status_code, 200)
+        search_q = mock_list.await_args.kwargs.get("search")
+        filters = {}
+        for child in getattr(search_q, "children", []):
+            filters.update(getattr(child, "filters", {}))
+        self.assertEqual(filters.get("issue_type"), "需求")
+
+    def test_list_ticket_filters_by_impact_scope(self):
+        current_user = SimpleNamespace(id=10, is_superuser=True)
+
+        with (
+            patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
+            patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=["管理员"])),
+            patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(0, []))) as mock_list,
+        ):
+            resp = self.client.get("/api/v1/tickets/list", params={"impact_scope": "单台必现"})
+
+        self.assertEqual(resp.status_code, 200)
+        search_q = mock_list.await_args.kwargs.get("search")
+        filters = {}
+        for child in getattr(search_q, "children", []):
+            filters.update(getattr(child, "filters", {}))
+        self.assertEqual(filters.get("impact_scope"), "单台必现")
+
+    def test_update_ticket_preserves_issue_type_when_omitted(self):
+        current_user = SimpleNamespace(id=10, is_superuser=False)
+        ticket = SimpleNamespace(
+            id=1001,
+            status="pending_review",
+            to_dict=AsyncMock(return_value={"id": 1001}),
+        )
+
+        with (
+            patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
+            patch.object(tickets_module.captcha_controller, "verify_captcha", AsyncMock(return_value=True)),
+            patch.object(
+                tickets_module.system_setting_controller,
+                "get_public_config",
+                AsyncMock(
+                    return_value={
+                        "ticket_project_phases": ["实施"],
+                        "ticket_issue_types": ["现网问题", "现网需求"],
+                        "ticket_impact_scopes": ["全部", "偶现"],
+                        "ticket_categories": ["系统异常"],
+                    }
+                ),
+            ),
+            patch.object(tickets_module.ticket_controller, "update_ticket", AsyncMock(return_value=ticket)) as mock_update,
+        ):
+            resp = self.client.post(
+                "/api/v1/tickets/update",
+                json={
+                    "ticket_id": 1001,
+                    "company_name": "安得",
+                    "contact_name": "张三",
+                    "email": "zhangsan@example.com",
+                    "phone": "13800000000",
+                    "project_phase": "实施",
+                    "category": "系统异常",
+                    "title": "标题",
+                    "description": "描述",
+                    "attachment_ids": [],
+                    "captcha_id": "cap-1",
+                    "captcha_code": "1234",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json().get("code"), 200)
+        payload = mock_update.await_args.kwargs["payload"]
+        self.assertNotIn("issue_type", payload)
+        self.assertNotIn("impact_scope", payload)
+
+    def test_update_ticket_writes_impact_scope_when_supplied(self):
+        current_user = SimpleNamespace(id=10, is_superuser=False)
+        ticket = SimpleNamespace(
+            id=1001,
+            status="pending_review",
+            to_dict=AsyncMock(return_value={"id": 1001}),
+        )
+
+        with (
+            patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
+            patch.object(tickets_module.captcha_controller, "verify_captcha", AsyncMock(return_value=True)),
+            patch.object(
+                tickets_module.system_setting_controller,
+                "get_public_config",
+                AsyncMock(
+                    return_value={
+                        "ticket_project_phases": ["实施"],
+                        "ticket_issue_types": ["现网问题", "现网需求"],
+                        "ticket_impact_scopes": ["全部", "偶现", "单台必现", "单台偶现"],
+                        "ticket_categories": ["系统异常"],
+                    }
+                ),
+            ),
+            patch.object(tickets_module.ticket_controller, "update_ticket", AsyncMock(return_value=ticket)) as mock_update,
+        ):
+            resp = self.client.post(
+                "/api/v1/tickets/update",
+                json={
+                    "ticket_id": 1001,
+                    "company_name": "安得",
+                    "contact_name": "张三",
+                    "email": "zhangsan@example.com",
+                    "phone": "13800000000",
+                    "project_phase": "实施",
+                    "issue_type": "现网需求",
+                    "impact_scope": "单台必现",
+                    "category": "系统异常",
+                    "title": "标题",
+                    "description": "描述",
+                    "attachment_ids": [],
+                    "captcha_id": "cap-1",
+                    "captcha_code": "1234",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json().get("code"), 200)
+        payload = mock_update.await_args.kwargs["payload"]
+        self.assertEqual(payload["issue_type"], "现网需求")
+        self.assertEqual(payload["impact_scope"], "单台必现")
 
     def test_export_ticket_rejects_too_many_rows_with_http_error(self):
         current_user = SimpleNamespace(id=10, is_superuser=True)

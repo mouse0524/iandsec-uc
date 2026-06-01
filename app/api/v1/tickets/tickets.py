@@ -58,6 +58,8 @@ def _build_ticket_search(
     role_names: list[str],
     status: TicketStatus | None = None,
     project_phase: str | None = None,
+    issue_type: str | None = None,
+    impact_scope: str | None = None,
     category: str | None = None,
     root_cause: str | None = None,
     title: str | None = None,
@@ -71,6 +73,10 @@ def _build_ticket_search(
         q &= Q(status=status)
     if project_phase:
         q &= Q(project_phase=project_phase)
+    if issue_type:
+        q &= Q(issue_type=issue_type)
+    if impact_scope:
+        q &= Q(impact_scope=impact_scope)
     if category:
         q &= Q(category=category)
     if root_cause:
@@ -88,7 +94,7 @@ def _build_ticket_search(
 
     if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
         if "技术" in role_names:
-            q &= Q(tech_id=user.id)
+            q &= Q(submitter_id=user.id) | Q(tech_id=user.id)
         else:
             q &= Q(submitter_id=user.id)
     return q
@@ -106,6 +112,20 @@ def _clean_export_text(value) -> str:
     if sources:
         text = "\n".join([item for item in [text, "图片：" + "；".join(sources)] if item])
     return text
+
+
+def _resolve_ticket_issue_type(payload_issue_type: str | None, issue_types: list[str]) -> str:
+    issue_type = str(payload_issue_type or "").strip()
+    if not issue_type:
+        issue_type = issue_types[0] if issue_types else "现网问题"
+    return issue_type
+
+
+def _resolve_ticket_impact_scope(payload_impact_scope: str | None, impact_scopes: list[str]) -> str:
+    impact_scope = str(payload_impact_scope or "").strip()
+    if not impact_scope:
+        impact_scope = impact_scopes[0] if impact_scopes else "全部"
+    return impact_scope
 
 
 @router.post("/upload", summary="上传工单附件", dependencies=[DependAuth])
@@ -141,13 +161,23 @@ async def create_ticket(payload: TicketCreate):
 
     config = await system_setting_controller.get_public_config()
     project_phases = config.get("ticket_project_phases") or []
+    issue_types = config.get("ticket_issue_types") or []
+    impact_scopes = config.get("ticket_impact_scopes") or []
     categories = config.get("ticket_categories") or []
+    issue_type = _resolve_ticket_issue_type(payload.issue_type, issue_types)
+    impact_scope = _resolve_ticket_impact_scope(payload.impact_scope, impact_scopes)
     if project_phases and payload.project_phase not in project_phases:
         return Fail(code=400, msg="项目阶段已更新，请刷新页面后重新选择")
+    if issue_types and issue_type not in issue_types:
+        return Fail(code=400, msg="跟踪已更新，请刷新页面后重新选择")
+    if impact_scopes and impact_scope not in impact_scopes:
+        return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
+    body["issue_type"] = issue_type
+    body["impact_scope"] = impact_scope
     ticket = await ticket_controller.create_ticket_with_optional_auto_review(submitter_id=user.id, payload=body)
     logger.info("[api.ticket.create] success user_id={} ticket_id={}", user.id, ticket.id)
     return Success(msg="提交成功", data=await ticket.to_dict())
@@ -183,6 +213,8 @@ async def list_ticket(
     page_size: int = Query(10, description="????"),
     status: TicketStatus | None = Query(None, description="??"),
     project_phase: str | None = Query(None, description="????"),
+    issue_type: str | None = Query(None, description="跟踪"),
+    impact_scope: str | None = Query(None, description="影响范围"),
     category: str | None = Query(None, description="??"),
     root_cause: str | None = Query(None, description="????"),
     title: str | None = Query(None, description="??"),
@@ -202,6 +234,8 @@ async def list_ticket(
         role_names=role_names,
         status=status,
         project_phase=project_phase,
+        issue_type=issue_type,
+        impact_scope=impact_scope,
         category=category,
         root_cause=root_cause,
         title=title,
@@ -235,6 +269,8 @@ async def list_ticket(
 async def export_tickets(
     status: TicketStatus | None = Query(None, description="Status"),
     project_phase: str | None = Query(None, description="Project phase"),
+    issue_type: str | None = Query(None, description="Tracking"),
+    impact_scope: str | None = Query(None, description="Impact scope"),
     category: str | None = Query(None, description="Category"),
     root_cause: str | None = Query(None, description="Root cause"),
     title: str | None = Query(None, description="Title"),
@@ -250,6 +286,8 @@ async def export_tickets(
         role_names=role_names,
         status=status,
         project_phase=project_phase,
+        issue_type=issue_type,
+        impact_scope=impact_scope,
         category=category,
         root_cause=root_cause,
         title=title,
@@ -321,6 +359,8 @@ async def export_tickets(
         "Ticket No",
         "Status",
         "Project Phase",
+        "Tracking",
+        "Impact Scope",
         "Category",
         "Root Cause",
         "Title",
@@ -374,6 +414,8 @@ async def export_tickets(
                 ticket.ticket_no,
                 status_text.get(str(ticket.status), str(ticket.status)),
                 ticket.project_phase,
+                ticket.issue_type or "",
+                ticket.impact_scope or "",
                 ticket.category,
                 ticket.root_cause or "",
                 ticket.title,
@@ -394,7 +436,7 @@ async def export_tickets(
             ]
         )
 
-    widths = [22, 14, 14, 16, 18, 30, 22, 14, 28, 18, 16, 16, 16, 56, 36, 36, 70, 20, 20, 20]
+    widths = [22, 14, 14, 14, 14, 16, 18, 30, 22, 14, 28, 18, 16, 16, 16, 56, 36, 36, 70, 20, 20, 20]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
     for row in sheet.iter_rows(min_row=2):
@@ -571,13 +613,29 @@ async def update_ticket(payload: TicketUpdateIn):
 
     config = await system_setting_controller.get_public_config()
     project_phases = config.get("ticket_project_phases") or []
+    issue_types = config.get("ticket_issue_types") or []
+    impact_scopes = config.get("ticket_impact_scopes") or []
     categories = config.get("ticket_categories") or []
+    issue_type = _resolve_ticket_issue_type(payload.issue_type, issue_types)
+    impact_scope = _resolve_ticket_impact_scope(payload.impact_scope, impact_scopes)
     if project_phases and payload.project_phase not in project_phases:
         return Fail(code=400, msg="项目阶段已更新，请刷新页面后重新选择")
+    if issue_types and issue_type not in issue_types:
+        return Fail(code=400, msg="跟踪已更新，请刷新页面后重新选择")
+    if impact_scopes and impact_scope not in impact_scopes:
+        return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
 
     body = payload.model_dump(exclude={"ticket_id", "attachment_ids", "captcha_id", "captcha_code"})
+    if "issue_type" in payload.model_fields_set:
+        body["issue_type"] = issue_type
+    else:
+        body.pop("issue_type", None)
+    if "impact_scope" in payload.model_fields_set:
+        body["impact_scope"] = impact_scope
+    else:
+        body.pop("impact_scope", None)
     ticket = await ticket_controller.update_ticket(
         ticket_id=payload.ticket_id,
         submitter_id=user.id,

@@ -23,6 +23,9 @@ export const useAppStore = defineStore('app', {
       allowUserRegister: true,
       ticketAttachmentExtensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
       ticketProjectPhases: ['售前', '实施', '售后'],
+      ticketCsReviewProjectPhases: ['实施', '售后'],
+      ticketIssueTypes: ['现网问题', '现网需求', '产品建议'],
+      ticketImpactScopes: ['全部', '偶现', '单台必现', '单台偶现'],
       ticketCategories: ['登录问题', '权限问题', '系统异常', '其他'],
       ticketDescriptionTemplates: ['问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：'],
       loginSecurityEnabled: true,
@@ -82,6 +85,15 @@ export const useAppStore = defineStore('app', {
       }
       if (Array.isArray(config.ticket_project_phases) && config.ticket_project_phases.length > 0) {
         this.ticketProjectPhases = config.ticket_project_phases
+      }
+      if (Array.isArray(config.ticket_cs_review_project_phases) && config.ticket_cs_review_project_phases.length > 0) {
+        this.ticketCsReviewProjectPhases = config.ticket_cs_review_project_phases
+      }
+      if (Array.isArray(config.ticket_issue_types) && config.ticket_issue_types.length > 0) {
+        this.ticketIssueTypes = config.ticket_issue_types
+      }
+      if (Array.isArray(config.ticket_impact_scopes) && config.ticket_impact_scopes.length > 0) {
+        this.ticketImpactScopes = config.ticket_impact_scopes
       }
       if (Array.isArray(config.ticket_categories) && config.ticket_categories.length > 0) {
         this.ticketCategories = config.ticket_categories

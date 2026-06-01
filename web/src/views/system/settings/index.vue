@@ -48,6 +48,9 @@ const form = ref({
   customer_service_auto_approve_register: false,
   ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
   ticket_project_phases: ['售前', '实施', '售后'],
+  ticket_cs_review_project_phases: ['实施', '售后'],
+  ticket_issue_types: ['现网问题', '现网需求', '产品建议'],
+  ticket_impact_scopes: ['全部', '偶现', '单台必现', '单台偶现'],
   ticket_categories: ['登录问题', '权限问题', '系统异常', '其他'],
   customer_service_auto_approve_ticket: false,
   ticket_root_causes: ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖'],
@@ -115,7 +118,11 @@ const form = ref({
   webdav_max_upload_size: 50 * 1024 * 1024,
   webdav_signature_secret: '',
   db_backup_enabled: false,
-  db_backup_directory: '/opt/iandsec-uc/storage/db_backups',
+  db_backup_directory: '/iandsec-db-backups',
+  db_backup_mysql_container: 'iandsec-uc-mysql',
+  db_backup_webdav_base_url: '',
+  db_backup_webdav_username: '',
+  db_backup_webdav_password: '',
   db_backup_run_at: '02:30',
   db_backup_retention_days: 7,
 })
@@ -220,6 +227,41 @@ const rules = {
     validator: () => {
       if (!form.value.ticket_project_phases || form.value.ticket_project_phases.length === 0) {
         return new Error('请至少配置一个项目阶段')
+      }
+      return true
+    },
+    trigger: ['change', 'blur'],
+  },
+  ticket_cs_review_project_phases: {
+    required: true,
+    validator: () => {
+      if (!form.value.ticket_cs_review_project_phases || form.value.ticket_cs_review_project_phases.length === 0) {
+        return new Error('请至少配置一个客服审核阶段')
+      }
+      const projectPhaseSet = new Set(form.value.ticket_project_phases || [])
+      const invalid = (form.value.ticket_cs_review_project_phases || []).filter((item) => !projectPhaseSet.has(item))
+      if (invalid.length) {
+        return new Error('客服审核阶段必须包含在项目阶段中')
+      }
+      return true
+    },
+    trigger: ['change', 'blur'],
+  },
+  ticket_issue_types: {
+    required: true,
+    validator: () => {
+      if (!form.value.ticket_issue_types || form.value.ticket_issue_types.length === 0) {
+        return new Error('请至少配置一个跟踪')
+      }
+      return true
+    },
+    trigger: ['change', 'blur'],
+  },
+  ticket_impact_scopes: {
+    required: true,
+    validator: () => {
+      if (!form.value.ticket_impact_scopes || form.value.ticket_impact_scopes.length === 0) {
+        return new Error('请至少配置一个影响范围')
       }
       return true
     },
@@ -356,7 +398,27 @@ const rules = {
   },
   db_backup_directory: {
     required: true,
-    message: '请输入数据库备份目录',
+    message: '请输入NAS远端目录',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_mysql_container: {
+    required: true,
+    message: '请输入MySQL容器名',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_webdav_base_url: {
+    required: true,
+    message: '请输入备份地址',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_webdav_username: {
+    required: true,
+    message: '请输入备份账号',
+    trigger: ['input', 'blur'],
+  },
+  db_backup_webdav_password: {
+    required: true,
+    message: '请输入备份密码',
     trigger: ['input', 'blur'],
   },
   db_backup_run_at: {
@@ -400,6 +462,15 @@ async function loadData() {
       ticket_project_phases: res.data?.ticket_project_phases?.length
         ? res.data.ticket_project_phases
         : form.value.ticket_project_phases,
+      ticket_cs_review_project_phases: res.data?.ticket_cs_review_project_phases?.length
+        ? res.data.ticket_cs_review_project_phases
+        : form.value.ticket_cs_review_project_phases,
+      ticket_issue_types: res.data?.ticket_issue_types?.length
+        ? res.data.ticket_issue_types
+        : form.value.ticket_issue_types,
+      ticket_impact_scopes: res.data?.ticket_impact_scopes?.length
+        ? res.data.ticket_impact_scopes
+        : form.value.ticket_impact_scopes,
       ticket_categories: res.data?.ticket_categories?.length
         ? res.data.ticket_categories
         : form.value.ticket_categories,
@@ -458,6 +529,10 @@ function dbBackupPayload() {
   return {
     db_backup_enabled: form.value.db_backup_enabled,
     db_backup_directory: form.value.db_backup_directory,
+    db_backup_mysql_container: form.value.db_backup_mysql_container,
+    db_backup_webdav_base_url: form.value.db_backup_webdav_base_url,
+    db_backup_webdav_username: form.value.db_backup_webdav_username,
+    db_backup_webdav_password: form.value.db_backup_webdav_password,
     db_backup_run_at: form.value.db_backup_run_at,
     db_backup_retention_days: form.value.db_backup_retention_days,
   }
@@ -472,7 +547,7 @@ async function testDatabaseBackupDirectory() {
   try {
     dbBackupTesting.value = true
     const res = await api.testDatabaseBackupDirectory(dbBackupPayload())
-    $message.success(res?.msg || '备份目录可用')
+    $message.success(res?.msg || 'NAS远端目录可用')
     await loadDatabaseBackupStatus()
   } finally {
     dbBackupTesting.value = false
@@ -638,6 +713,15 @@ function applyPresetHtmlTemplates() {
               <NFormItem label="项目阶段" path="ticket_project_phases">
                 <NDynamicTags v-model:value="form.ticket_project_phases" />
               </NFormItem>
+              <NFormItem label="客服审核阶段" path="ticket_cs_review_project_phases">
+                <NDynamicTags v-model:value="form.ticket_cs_review_project_phases" />
+              </NFormItem>
+              <NFormItem label="跟踪" path="ticket_issue_types">
+                <NDynamicTags v-model:value="form.ticket_issue_types" />
+              </NFormItem>
+              <NFormItem label="影响范围" path="ticket_impact_scopes">
+                <NDynamicTags v-model:value="form.ticket_impact_scopes" />
+              </NFormItem>
               <NFormItem label="问题分类" path="ticket_categories">
                 <NDynamicTags v-model:value="form.ticket_categories" />
               </NFormItem>
@@ -669,7 +753,7 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NDivider title-placement="left">工单提醒</NDivider>
               <NAlert type="info" class="mb-12">
-                按角色配置提醒节点：用户/代理商（客服驳回、技术驳回、处理完成），客服（提交后待客服审核），技术（通过后待技术处理）。
+                按角色配置提醒节点：用户/代理商（客服驳回、技术驳回、处理完成），客服（提交后待客服审核），技术（通过后待技术处理）。客服审核阶段决定哪些项目阶段会先进入客服审核，其余阶段会直接进入技术处理。
               </NAlert>
               <NFormItem
                 v-for="roleName in ticketNotifyRoles"
@@ -882,15 +966,38 @@ function applyPresetHtmlTemplates() {
           <NTabPane name="database-backup" tab="数据库备份">
             <NCard size="small" title="异地备份到 NAS">
               <NAlert type="info" class="mb-12">
-                先把 NAS 挂载到应用容器内目录，再把这里的备份目录配置为该挂载路径；系统会按时间每天生成一个 .sql.gz 备份。
+                数据库备份使用独立的 NAS/WebDAV 地址；系统会在 MySQL 容器内导出数据库，并直接上传 .sql.gz 备份。
               </NAlert>
               <NFormItem label="启用自动备份">
                 <NSwitch v-model:value="form.db_backup_enabled" />
               </NFormItem>
-              <NFormItem label="NAS备份目录" path="db_backup_directory">
+              <NFormItem label="NAS远端目录" path="db_backup_directory">
                 <NInput
                   v-model:value="form.db_backup_directory"
-                  placeholder="例如 /mnt/nas/iandsec-db-backups"
+                  placeholder="例如 /iandsec-db-backups"
+                />
+              </NFormItem>
+              <NFormItem label="MySQL容器名" path="db_backup_mysql_container">
+                <NInput
+                  v-model:value="form.db_backup_mysql_container"
+                  placeholder="例如 iandsec-uc-mysql"
+                />
+              </NFormItem>
+              <NFormItem label="备份地址" path="db_backup_webdav_base_url">
+                <NInput
+                  v-model:value="form.db_backup_webdav_base_url"
+                  placeholder="例如 https://nas.example.com/webdav"
+                />
+              </NFormItem>
+              <NFormItem label="备份账号" path="db_backup_webdav_username">
+                <NInput v-model:value="form.db_backup_webdav_username" placeholder="请输入备份账号" />
+              </NFormItem>
+              <NFormItem label="备份密码" path="db_backup_webdav_password">
+                <NInput
+                  v-model:value="form.db_backup_webdav_password"
+                  type="password"
+                  show-password-on="click"
+                  placeholder="请输入备份密码"
                 />
               </NFormItem>
               <NFormItem label="每日执行时间" path="db_backup_run_at">
@@ -899,7 +1006,7 @@ function applyPresetHtmlTemplates() {
               <NFormItem label="保留天数" path="db_backup_retention_days">
                 <NInputNumber v-model:value="form.db_backup_retention_days" :min="1" :max="365" />
               </NFormItem>
-              <NFormItem label="目录状态">
+              <NFormItem label="远端状态">
                 <div class="status-lines">
                   <span>存在：{{ dbBackupStatus?.directory_exists ? '是' : '否' }}</span>
                   <span>可写：{{ dbBackupStatus?.directory_writable ? '是' : '否' }}</span>
@@ -912,7 +1019,7 @@ function applyPresetHtmlTemplates() {
               <NFormItem>
                 <NSpace>
                   <NButton ghost :loading="dbBackupTesting" @click="testDatabaseBackupDirectory">
-                    测试目录
+                    测试远端上传
                   </NButton>
                   <NButton type="primary" ghost :loading="dbBackupRunning" @click="runDatabaseBackup">
                     立即备份

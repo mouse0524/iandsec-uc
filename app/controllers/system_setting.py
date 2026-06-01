@@ -61,6 +61,9 @@ class SystemSettingController:
         "ticket": {
             "ticket_attachment_extensions": ["zip", "rar", "png", "jpg", "gif"],
             "ticket_project_phases": ["售前", "实施", "售后"],
+            "ticket_cs_review_project_phases": ["实施", "售后"],
+            "ticket_issue_types": ["现网问题", "现网需求", "产品建议"],
+            "ticket_impact_scopes": ["全部", "偶现", "单台必现", "单台偶现"],
             "ticket_categories": ["登录问题", "权限问题", "系统异常", "其他"],
             "customer_service_auto_approve_ticket": False,
             "ticket_root_causes": ["代码缺陷", "配置错误", "环境异常", "数据问题", "操作不当", "第三方依赖"],
@@ -142,8 +145,12 @@ class SystemSettingController:
             "db_backup_enabled": False,
             "db_backup_directory": os.getenv(
                 "DB_BACKUP_DIRECTORY",
-                os.path.join(settings.BASE_DIR, "storage", "db_backups"),
+                "/iandsec-db-backups",
             ),
+            "db_backup_mysql_container": os.getenv("DB_BACKUP_MYSQL_CONTAINER", "iandsec-uc-mysql"),
+            "db_backup_webdav_base_url": os.getenv("DB_BACKUP_WEBDAV_BASE_URL") or None,
+            "db_backup_webdav_username": os.getenv("DB_BACKUP_WEBDAV_USERNAME") or None,
+            "db_backup_webdav_password": os.getenv("DB_BACKUP_WEBDAV_PASSWORD") or None,
             "db_backup_run_at": os.getenv("DB_BACKUP_RUN_AT", "02:30"),
             "db_backup_retention_days": _int_env("DB_BACKUP_RETENTION_DAYS", 7),
         },
@@ -183,6 +190,7 @@ class SystemSettingController:
             data.update(section_data)
         data["smtp_password"] = self._mask_secret(data.get("smtp_password"))
         data["webdav_password"] = self._mask_secret(data.get("webdav_password"))
+        data["db_backup_webdav_password"] = self._mask_secret(data.get("db_backup_webdav_password"))
         return data
 
     async def get_public_config(self) -> dict:
@@ -211,6 +219,9 @@ class SystemSettingController:
             "customer_service_auto_approve_register": site.get("customer_service_auto_approve_register", False),
             "ticket_attachment_extensions": ticket.get("ticket_attachment_extensions") or [],
             "ticket_project_phases": ticket.get("ticket_project_phases") or [],
+            "ticket_cs_review_project_phases": ticket.get("ticket_cs_review_project_phases") or [],
+            "ticket_issue_types": ticket.get("ticket_issue_types") or [],
+            "ticket_impact_scopes": ticket.get("ticket_impact_scopes") or [],
             "ticket_categories": ticket.get("ticket_categories") or [],
             "customer_service_auto_approve_ticket": ticket.get("customer_service_auto_approve_ticket", False),
             "ticket_root_causes": ticket.get("ticket_root_causes") or [],
@@ -306,8 +317,12 @@ class SystemSettingController:
             payload["smtp_password"] = sections["mail"].get("smtp_password")
         if payload.get("webdav_password") == "******":
             payload["webdav_password"] = sections["webdav"].get("webdav_password")
+        if payload.get("db_backup_webdav_password") == "******":
+            payload["db_backup_webdav_password"] = sections["database_backup"].get("db_backup_webdav_password")
         if payload.get("webdav_base_url"):
             payload["webdav_base_url"] = normalize_webdav_base_url(payload.get("webdav_base_url"))
+        if payload.get("db_backup_webdav_base_url"):
+            payload["db_backup_webdav_base_url"] = normalize_webdav_base_url(payload.get("db_backup_webdav_base_url"))
 
         if "allow_channel_register" not in payload and "allow_user_register" not in payload and "allow_partner_register" in payload:
             payload["allow_channel_register"] = payload["allow_partner_register"]
@@ -324,6 +339,13 @@ class SystemSettingController:
             )
             payload["allow_partner_register"] = bool(channel_enabled or user_enabled)
 
+        if "ticket_cs_review_project_phases" in payload:
+            current_ticket = sections["ticket"]
+            allowed_phases = set(payload.get("ticket_project_phases") or current_ticket.get("ticket_project_phases") or [])
+            invalid_phases = [item for item in payload.get("ticket_cs_review_project_phases") or [] if item not in allowed_phases]
+            if invalid_phases:
+                raise HTTPException(status_code=400, detail="客服审核项目阶段必须包含在项目阶段中")
+
         site_keys = {
             "site_title",
             "site_logo",
@@ -335,6 +357,9 @@ class SystemSettingController:
         ticket_keys = {
             "ticket_attachment_extensions",
             "ticket_project_phases",
+            "ticket_cs_review_project_phases",
+            "ticket_issue_types",
+            "ticket_impact_scopes",
             "ticket_categories",
             "customer_service_auto_approve_ticket",
             "ticket_root_causes",
@@ -405,6 +430,10 @@ class SystemSettingController:
         database_backup_keys = {
             "db_backup_enabled",
             "db_backup_directory",
+            "db_backup_mysql_container",
+            "db_backup_webdav_base_url",
+            "db_backup_webdav_username",
+            "db_backup_webdav_password",
             "db_backup_run_at",
             "db_backup_retention_days",
         }
@@ -429,6 +458,10 @@ class SystemSettingController:
             for key in keys:
                 if key in payload:
                     merged[key] = payload[key]
+            if section == "ticket":
+                project_phases = merged.get("ticket_project_phases") or []
+                review_phases = merged.get("ticket_cs_review_project_phases") or []
+                merged["ticket_cs_review_project_phases"] = [item for item in review_phases if item in project_phases]
             item.data = merged
             await item.save()
 

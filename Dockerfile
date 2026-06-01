@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \
     && apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core tzdata \
+    && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core tzdata docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -41,7 +41,5 @@ RUN rm -f /etc/nginx/sites-enabled/default \
 
 ENV LANG=zh_CN.UTF-8
 EXPOSE 8080
-
-USER app
 
 ENTRYPOINT [ "sh", "entrypoint.sh" ]

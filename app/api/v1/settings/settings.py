@@ -26,8 +26,15 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "allow_user_register",
         "db_backup_enabled",
         "db_backup_directory",
+        "db_backup_mysql_container",
+        "db_backup_webdav_base_url",
+        "db_backup_webdav_username",
+        "db_backup_webdav_password",
         "db_backup_run_at",
         "db_backup_retention_days",
+        "ticket_cs_review_project_phases",
+        "ticket_issue_types",
+        "ticket_impact_scopes",
     )
     for key in optional_preserve_keys:
         if key not in payload.model_fields_set:
@@ -77,8 +84,10 @@ async def get_database_backup_status():
 @router.post("/database-backup/test", summary="测试数据库备份目录")
 async def test_database_backup_directory(payload: DatabaseBackupConfigIn):
     logger.info("[api.settings.database_backup.test] request")
-    data = await database_backup_service.test_directory(payload.model_dump(exclude_none=True))
-    return Success(msg="备份目录可用", data=data)
+    config = await system_setting_controller.get_full_dict()
+    config.update(payload.model_dump(exclude_none=True))
+    data = await database_backup_service.test_directory(config)
+    return Success(msg="NAS远端目录可用", data=data)
 
 
 @router.post("/database-backup/run", summary="立即执行数据库备份")

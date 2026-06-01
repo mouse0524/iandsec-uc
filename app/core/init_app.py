@@ -689,6 +689,8 @@ async def ensure_security_columns():
         for sql, label in [
             ("ALTER TABLE `user` ADD COLUMN `token_version` INT NOT NULL DEFAULT 0", "user.token_version"),
             ("ALTER TABLE `auditlog` ADD COLUMN `is_archived` BOOL NOT NULL DEFAULT 0", "auditlog.is_archived"),
+            ("ALTER TABLE `ticket` ADD COLUMN `issue_type` VARCHAR(30) NOT NULL DEFAULT '现网问题'", "ticket.issue_type"),
+            ("ALTER TABLE `ticket` ADD COLUMN `impact_scope` VARCHAR(30) NOT NULL DEFAULT '全部'", "ticket.impact_scope"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
         ]:
@@ -700,38 +702,6 @@ async def ensure_security_columns():
                 if "duplicate" in message or "exists" in message:
                     continue
                 logger.warning("[init_db] ensure column {} skipped error={}", label, exc)
-
-
-async def _ensure_webdav_password_admin_only(admin_role_name: str = "管理员") -> None:
-    password_apis = await Api.filter(path__in=_webdav_password_api_paths())
-    password_menus = await Menu.filter(Q(component="/system/webdav-password"))
-    if not password_apis and not password_menus:
-        return
-
-    from app.controllers.role import role_controller
-
-    changed_role_ids = []
-    non_admin_roles = await Role.exclude(name=admin_role_name).all()
-    for role in non_admin_roles:
-        removed = False
-        if password_apis:
-            granted_api = await role.apis.filter(id__in=[api.id for api in password_apis]).first()
-            if granted_api:
-                await role.apis.remove(*password_apis)
-                removed = True
-        if password_menus:
-            granted_menu = await role.menus.filter(id__in=[menu.id for menu in password_menus]).first()
-            if granted_menu:
-                await role.menus.remove(*password_menus)
-                removed = True
-        if removed:
-            changed_role_ids.append(role.id)
-
-    for role_id in changed_role_ids:
-        await role_controller.clear_permission_cache_by_role(role_id)
-    if changed_role_ids:
-        await role_controller.clear_role_dict_cache()
-        logger.info("[init_roles] scrubbed webdav password grants from non-admin roles count={}", len(changed_role_ids))
 
 
 async def init_roles():
@@ -753,7 +723,6 @@ async def init_roles():
     existing_roles = await Role.filter(name__in=role_names).all()
     existing_role_names = {role.name for role in existing_roles}
     missing_roles = [name for name in role_names if name not in existing_role_names]
-    await _ensure_webdav_password_admin_only()
 
     if not missing_roles:
         has_role_bindings = False

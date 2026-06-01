@@ -197,6 +197,8 @@ def test_settings_update_preserves_legacy_register_toggle_when_new_fields_missin
         "customer_service_auto_approve_register": False,
         "ticket_attachment_extensions": ["zip"],
         "ticket_project_phases": ["售后"],
+        "ticket_issue_types": ["现网问题"],
+        "ticket_impact_scopes": ["全部"],
         "ticket_categories": ["其他"],
         "customer_service_auto_approve_ticket": False,
         "ticket_root_causes": ["配置错误"],
@@ -237,8 +239,14 @@ def test_settings_update_preserves_database_backup_fields_when_missing():
     payload = mock_update.await_args.args[0]
     assert "db_backup_enabled" not in payload
     assert "db_backup_directory" not in payload
+    assert "db_backup_mysql_container" not in payload
+    assert "db_backup_webdav_base_url" not in payload
+    assert "db_backup_webdav_username" not in payload
+    assert "db_backup_webdav_password" not in payload
     assert "db_backup_run_at" not in payload
     assert "db_backup_retention_days" not in payload
+    assert "ticket_issue_types" not in payload
+    assert "ticket_impact_scopes" not in payload
     assert "webdav_public_base_url" not in payload
 
 

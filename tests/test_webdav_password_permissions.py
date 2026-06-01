@@ -49,9 +49,14 @@ def test_regular_webdav_menus_do_not_include_password_page():
     assert "/system/webdav-password" not in webdav_menu_components
 
 
-def test_init_roles_scrubs_historical_password_permissions():
-    assert "_ensure_webdav_password_admin_only" in _called_names("init_roles")
+def test_init_roles_does_not_scrub_manually_assigned_password_permissions():
+    assert "_ensure_webdav_password_admin_only" not in _called_names("init_roles")
 
 
-def test_password_permission_cleanup_removes_non_admin_grants():
-    assert "remove" in _called_names("_ensure_webdav_password_admin_only")
+def test_password_permission_cleanup_is_not_registered():
+    tree = ast.parse(INIT_APP_PATH.read_text(encoding="utf-8"))
+
+    assert not any(
+        isinstance(node, ast.AsyncFunctionDef) and node.name == "_ensure_webdav_password_admin_only"
+        for node in ast.walk(tree)
+    )

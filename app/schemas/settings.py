@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import TicketStatus
 
@@ -12,6 +12,9 @@ class SystemSettingUpdateIn(BaseModel):
     customer_service_auto_approve_register: bool = Field(default=False, description="客服是否自动审批注册")
     ticket_attachment_extensions: list[str] = Field(default_factory=list, description="工单附件允许上传类型")
     ticket_project_phases: list[str] = Field(default_factory=list, description="工单项目阶段")
+    ticket_cs_review_project_phases: list[str] = Field(default_factory=list, description="工单客服审核项目阶段")
+    ticket_issue_types: list[str] = Field(default_factory=list, description="工单跟踪")
+    ticket_impact_scopes: list[str] = Field(default_factory=list, description="工单影响范围")
     ticket_categories: list[str] = Field(default_factory=list, description="工单分类")
     customer_service_auto_approve_ticket: bool = Field(default=False, description="客服是否自动审批工单")
     ticket_root_causes: list[str] = Field(default_factory=list, description="工单问题根因")
@@ -76,7 +79,11 @@ class SystemSettingUpdateIn(BaseModel):
     webdav_signature_secret: str | None = None
 
     db_backup_enabled: bool = False
-    db_backup_directory: str = "/opt/iandsec-uc/storage/db_backups"
+    db_backup_directory: str = "/iandsec-db-backups"
+    db_backup_mysql_container: str = "iandsec-uc-mysql"
+    db_backup_webdav_base_url: str | None = None
+    db_backup_webdav_username: str | None = None
+    db_backup_webdav_password: str | None = None
     db_backup_run_at: str = "02:30"
     db_backup_retention_days: int = 7
 
@@ -100,6 +107,37 @@ class SystemSettingUpdateIn(BaseModel):
         if not items:
             raise ValueError(f"{field_name}至少保留一项")
         return items
+
+    @field_validator("ticket_project_phases", "ticket_cs_review_project_phases", "ticket_issue_types", "ticket_impact_scopes")
+    @classmethod
+    def normalize_ticket_option_items(cls, value: list[str]):
+        items: list[str] = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if text and text not in items:
+                items.append(text)
+        return items
+
+    @model_validator(mode="after")
+    def validate_ticket_phase_relationships(self):
+        if "ticket_project_phases" in self.model_fields_set and not self.ticket_project_phases:
+            raise ValueError("项目阶段至少保留一项")
+        if "ticket_cs_review_project_phases" in self.model_fields_set and not self.ticket_cs_review_project_phases:
+            raise ValueError("客服审核项目阶段至少保留一项")
+        if "ticket_issue_types" in self.model_fields_set and not self.ticket_issue_types:
+            raise ValueError("跟踪至少保留一项")
+        if "ticket_impact_scopes" in self.model_fields_set and not self.ticket_impact_scopes:
+            raise ValueError("影响范围至少保留一项")
+        if (
+            "ticket_project_phases" in self.model_fields_set
+            and "ticket_cs_review_project_phases" in self.model_fields_set
+            and self.ticket_cs_review_project_phases
+        ):
+            project_phases = set(self.ticket_project_phases or [])
+            invalid = [item for item in self.ticket_cs_review_project_phases if item not in project_phases]
+            if invalid:
+                raise ValueError("客服审核项目阶段必须包含在项目阶段中")
+        return self
 
     @field_validator(
         "login_account_ip_fail_limit",
@@ -201,6 +239,28 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("数据库备份目录不能超过500个字符")
         return text
 
+    @field_validator("db_backup_mysql_container")
+    @classmethod
+    def validate_db_backup_mysql_container(cls, value: str):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("MySQL容器名不能为空")
+        if len(text) > 128:
+            raise ValueError("MySQL容器名不能超过128个字符")
+        return text
+
+    @field_validator("db_backup_webdav_base_url", "db_backup_webdav_username", "db_backup_webdav_password")
+    @classmethod
+    def validate_db_backup_webdav_text(cls, value: str | None, info):
+        if value is None:
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > 500:
+            raise ValueError(f"{info.field_name}不能超过500个字符")
+        return text
+
     @field_validator("db_backup_run_at")
     @classmethod
     def validate_db_backup_run_at(cls, value: str):
@@ -232,6 +292,9 @@ class PublicSiteConfigOut(BaseModel):
     customer_service_auto_approve_register: bool
     ticket_attachment_extensions: list[str]
     ticket_project_phases: list[str]
+    ticket_cs_review_project_phases: list[str]
+    ticket_issue_types: list[str]
+    ticket_impact_scopes: list[str]
     ticket_categories: list[str]
     customer_service_auto_approve_ticket: bool
     ticket_description_templates: list[str]
@@ -260,5 +323,9 @@ class WebDavTestIn(BaseModel):
 class DatabaseBackupConfigIn(BaseModel):
     db_backup_enabled: bool = False
     db_backup_directory: str | None = None
+    db_backup_mysql_container: str | None = None
+    db_backup_webdav_base_url: str | None = None
+    db_backup_webdav_username: str | None = None
+    db_backup_webdav_password: str | None = None
     db_backup_run_at: str | None = None
     db_backup_retention_days: int | None = None

@@ -320,6 +320,7 @@ function goByMetric(metric) {
     ticket_active: '',
     ticket_pending_review: 'pending_review',
     ticket_tech_processing: 'tech_processing',
+    ticket_done: 'done',
     ticket_today_done: 'done',
   }
   const query = {}

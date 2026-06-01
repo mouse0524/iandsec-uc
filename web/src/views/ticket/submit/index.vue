@@ -4,12 +4,14 @@ import { useRouter } from 'vue-router'
 import { NButton, NForm, NFormItem, NInput, NSelect, NUpload, NAlert, NSpace, NTag } from 'naive-ui'
 import { getToken, isImageName, isNullOrWhitespace } from '@/utils'
 import api from '@/api'
+import { useAppStore } from '@/store'
 import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 
 defineOptions({ name: '提交工单' })
 
 const isAuthed = computed(() => !isNullOrWhitespace(getToken()))
 const router = useRouter()
+const appStore = useAppStore()
 
 const formRef = ref(null)
 const uploadLoading = ref(false)
@@ -22,6 +24,17 @@ const projectPhaseOptions = ref([
   { label: '售前', value: '售前' },
   { label: '实施', value: '实施' },
   { label: '售后', value: '售后' },
+])
+const issueTypeOptions = ref([
+  { label: '现网问题', value: '现网问题' },
+  { label: '现网需求', value: '现网需求' },
+  { label: '产品建议', value: '产品建议' },
+])
+const impactScopeOptions = ref([
+  { label: '全部', value: '全部' },
+  { label: '偶现', value: '偶现' },
+  { label: '单台必现', value: '单台必现' },
+  { label: '单台偶现', value: '单台偶现' },
 ])
 const descriptionTemplateOptions = ref([])
 
@@ -39,6 +52,8 @@ const form = ref({
   email: '',
   phone: '',
   project_phase: '',
+  issue_type: '',
+  impact_scope: '',
   category: '',
   title: '',
   description: '',
@@ -59,6 +74,8 @@ const rules = {
   email: { required: true, message: '请输入邮箱', trigger: ['blur', 'input'] },
   phone: { required: true, message: '请输入手机号', trigger: ['blur', 'input'] },
   project_phase: { required: true, message: '请选择项目阶段', trigger: ['change'] },
+  issue_type: { required: true, message: '请选择跟踪', trigger: ['change'] },
+  impact_scope: { required: true, message: '请选择影响范围', trigger: ['change'] },
   category: { required: true, message: '请选择分类', trigger: ['change'] },
   title: { required: true, message: '请输入标题', trigger: ['blur', 'input'] },
   description: { required: true, message: '请输入问题描述', trigger: ['blur', 'input'] },
@@ -83,6 +100,8 @@ async function fetchPublicConfig() {
   try {
     const res = await api.getPublicConfig()
     const projectPhases = res.data?.ticket_project_phases || []
+    const issueTypes = res.data?.ticket_issue_types || []
+    const impactScopes = res.data?.ticket_impact_scopes || []
     const categories = res.data?.ticket_categories || []
     const descriptionTemplates = res.data?.ticket_description_templates || []
     const attachmentExtensions = res.data?.ticket_attachment_extensions || []
@@ -91,6 +110,22 @@ async function fetchPublicConfig() {
       if (!form.value.project_phase) {
         form.value.project_phase = projectPhaseOptions.value[0].value
       }
+    }
+    if (issueTypes.length > 0) {
+      issueTypeOptions.value = issueTypes.map((item) => ({ label: item, value: item }))
+      if (!form.value.issue_type) {
+        form.value.issue_type = issueTypeOptions.value[0].value
+      }
+    } else if (!form.value.issue_type) {
+      form.value.issue_type = issueTypeOptions.value[0]?.value || ''
+    }
+    if (impactScopes.length > 0) {
+      impactScopeOptions.value = impactScopes.map((item) => ({ label: item, value: item }))
+      if (!form.value.impact_scope) {
+        form.value.impact_scope = impactScopeOptions.value[0].value
+      }
+    } else if (!form.value.impact_scope) {
+      form.value.impact_scope = impactScopeOptions.value[0]?.value || ''
     }
     if (categories.length > 0) {
       categoryOptions.value = categories.map((item) => ({ label: item, value: item }))
@@ -116,10 +151,12 @@ async function fetchCaptcha() {
   captchaImage.value = `data:image/png;base64,${res.data.image_base64}`
 }
 
-async function fetchPrefill() {
+async function fetchPrefill(includeCompanyName = false) {
   try {
     const res = await api.getTicketPrefill()
-    form.value.company_name = res.data?.company_name || form.value.company_name
+    if (includeCompanyName) {
+      form.value.company_name = res.data?.company_name || form.value.company_name
+    }
     form.value.contact_name = res.data?.contact_name || form.value.contact_name
     form.value.email = res.data?.email || form.value.email
     form.value.phone = res.data?.phone || form.value.phone
@@ -129,7 +166,15 @@ async function fetchPrefill() {
 }
 
 function quickFill() {
-  fetchPrefill()
+  fetchPrefill(true)
+}
+
+function isCsReviewPhase(phase) {
+  const reviewSet = new Set((appStore.ticketCsReviewProjectPhases || []))
+  if (!reviewSet.size) {
+    return ['实施', '售后'].includes(phase)
+  }
+  return reviewSet.has(phase)
 }
 
 function applyDescriptionTemplate(value) {
@@ -218,6 +263,8 @@ function resetForm() {
     email: '',
     phone: '',
     project_phase: projectPhaseOptions.value[0]?.value || '',
+    issue_type: issueTypeOptions.value[0]?.value || '',
+    impact_scope: impactScopeOptions.value[0]?.value || '',
     category: categoryOptions.value[0]?.value || '',
     title: '',
     description: descriptionTemplateOptions.value[0]?.value || '',
@@ -244,7 +291,7 @@ function submit() {
       }
       $message.success('工单已提交，我们会尽快处理并反馈进度')
       if (isAuthed.value) {
-        await router.push({ path: '/ticket/my', query: { status: 'pending_review' } })
+        await router.push({ path: '/ticket/my' })
         return
       }
       resetForm()
@@ -280,7 +327,10 @@ function submit() {
             </div>
             <div class="form-grid two-col">
               <NFormItem label="项目名称" path="company_name">
-                <NInput v-model:value="form.company_name" placeholder="请输入项目名称" />
+                <div class="field-stack">
+                  <NInput v-model:value="form.company_name" placeholder="请输入客户公司名称" />
+                  <div class="field-note">备注：请填写客户公司名称，不是自己公司。</div>
+                </div>
               </NFormItem>
               <NFormItem label="联系人" path="contact_name">
                 <NInput v-model:value="form.contact_name" placeholder="请输入联系人" />
@@ -301,9 +351,18 @@ function submit() {
                 <p>清楚描述问题场景，能大幅减少来回确认时间。</p>
               </div>
             </div>
+            <NAlert v-if="form.project_phase" type="info" class="mb-12">
+              {{ isCsReviewPhase(form.project_phase) ? '当前项目阶段会先进入客服审核。' : '当前项目阶段会直接进入技术处理。' }}
+            </NAlert>
             <div class="form-grid single-col">
               <NFormItem label="项目阶段" path="project_phase">
                 <NSelect v-model:value="form.project_phase" :options="projectPhaseOptions" placeholder="请选择项目阶段" />
+              </NFormItem>
+              <NFormItem label="跟踪" path="issue_type">
+                <NSelect v-model:value="form.issue_type" :options="issueTypeOptions" placeholder="请选择跟踪" />
+              </NFormItem>
+              <NFormItem label="影响范围" path="impact_scope">
+                <NSelect v-model:value="form.impact_scope" :options="impactScopeOptions" placeholder="请选择影响范围" />
               </NFormItem>
               <NFormItem label="问题分类" path="category">
                 <NSelect v-model:value="form.category" :options="categoryOptions" placeholder="请选择分类" />
@@ -659,6 +718,19 @@ function submit() {
   width: fit-content;
   color: #374151;
   background: #f3f4f6;
+}
+
+.field-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.field-note {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 900px) {

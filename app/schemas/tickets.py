@@ -12,6 +12,8 @@ class TicketCreate(BaseModel):
     email: EmailStr = Field(..., description="邮箱")
     phone: str = Field(..., description="手机号")
     project_phase: str = Field(..., description="项目阶段")
+    issue_type: str | None = Field(default=None, description="跟踪")
+    impact_scope: str | None = Field(default=None, description="影响范围")
     category: str = Field(..., description="问题分类")
     title: str = Field(..., description="问题标题")
     description: str = Field(..., description="问题描述")
@@ -55,6 +57,8 @@ class TicketUpdateIn(BaseModel):
     email: EmailStr = Field(..., description="邮箱")
     phone: str = Field(..., description="手机号")
     project_phase: str = Field(..., description="项目阶段")
+    issue_type: str | None = Field(default=None, description="跟踪")
+    impact_scope: str | None = Field(default=None, description="影响范围")
     category: str = Field(..., description="问题分类")
     title: str = Field(..., description="问题标题")
     description: str = Field(..., description="问题描述")
@@ -75,6 +79,8 @@ class TicketListQuery(BaseModel):
     page_size: int = 10
     status: Optional[TicketStatus] = None
     project_phase: Optional[str] = None
+    issue_type: Optional[str] = None
+    impact_scope: Optional[str] = None
     category: Optional[str] = None
     title: Optional[str] = None
     submitter_id: Optional[int] = None

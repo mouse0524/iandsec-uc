@@ -32,6 +32,8 @@ const assignTechId = ref(null)
 const assignComment = ref('')
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
+const issueTypeOptions = ref([])
+const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const selectedRootCause = ref(null)
 const techOptions = ref([])
@@ -65,11 +67,15 @@ async function loadTicketMetaOptions() {
     const res = await api.getPublicConfig()
     const config = res?.data || {}
     projectPhaseOptions.value = (config.ticket_project_phases || []).map((item) => ({ label: item, value: item }))
+    issueTypeOptions.value = (config.ticket_issue_types || []).map((item) => ({ label: item, value: item }))
+    impactScopeOptions.value = (config.ticket_impact_scopes || []).map((item) => ({ label: item, value: item }))
     categoryOptions.value = (config.ticket_categories || []).map((item) => ({ label: item, value: item }))
     rootCauseOptions.value = (config.ticket_root_causes || []).map((item) => ({ label: item, value: item }))
   } catch (error) {
     rootCauseOptions.value = []
     categoryOptions.value = []
+    issueTypeOptions.value = []
+    impactScopeOptions.value = []
     projectPhaseOptions.value = []
   }
 }
@@ -220,6 +226,8 @@ const columns = [
     },
   },
   { title: '项目阶段', key: 'project_phase', align: 'center' },
+  { title: '跟踪', key: 'issue_type', align: 'center' },
+  { title: '影响范围', key: 'impact_scope', align: 'center' },
   { title: '分类', key: 'category', align: 'center' },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
   {
@@ -332,6 +340,24 @@ const columns = [
             </QueryBarItem>
             <QueryBarItem label="分类" :label-width="40">
               <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" />
+            </QueryBarItem>
+            <QueryBarItem label="跟踪" :label-width="40">
+              <NSelect
+                v-model:value="queryItems.issue_type"
+                :options="issueTypeOptions"
+                clearable
+                placeholder="选择跟踪"
+                style="width: 180px"
+              />
+            </QueryBarItem>
+            <QueryBarItem label="影响" :label-width="40">
+              <NSelect
+                v-model:value="queryItems.impact_scope"
+                :options="impactScopeOptions"
+                clearable
+                placeholder="选择影响范围"
+                style="width: 180px"
+              />
             </QueryBarItem>
             <QueryBarItem label="阶段" :label-width="40">
               <NSelect
