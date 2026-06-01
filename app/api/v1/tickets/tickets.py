@@ -247,7 +247,25 @@ async def list_ticket(
     filter_cost_ms = int((perf_counter() - filter_start_at) * 1000)
 
     query_start_at = perf_counter()
-    total, rows = await ticket_controller.list_tickets(page=page, page_size=page_size, search=q)
+    summary_q = _build_ticket_search(
+        user=user,
+        role_names=role_names,
+        status=None,
+        project_phase=project_phase,
+        issue_type=issue_type,
+        impact_scope=impact_scope,
+        category=category,
+        root_cause=root_cause,
+        title=title,
+        created_start=created_start,
+        created_end=created_end,
+        finished_start=finished_start,
+        finished_end=finished_end,
+    )
+    (total, rows), status_summary = await asyncio.gather(
+        ticket_controller.list_tickets(page=page, page_size=page_size, search=q),
+        ticket_controller.status_summary(search=summary_q),
+    )
     query_cost_ms = int((perf_counter() - query_start_at) * 1000)
     total_cost_ms = int((perf_counter() - start_at) * 1000)
     logger.info(
@@ -262,7 +280,7 @@ async def list_ticket(
         query_cost_ms,
         total_cost_ms,
     )
-    return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
+    return SuccessExtra(data=rows, total=total, page=page, page_size=page_size, status_summary=status_summary)
 
 
 @router.get("/export", summary="Export tickets", dependencies=[DependAuth])

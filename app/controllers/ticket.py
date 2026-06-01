@@ -364,6 +364,23 @@ class TicketController:
         )
         return total, rows
 
+    async def status_summary(self, *, search: Q) -> dict[str, int]:
+        query = Ticket.filter(search)
+        total, pending_review, tech_processing, done, rejected = await asyncio.gather(
+            query.count(),
+            query.filter(status=TicketStatus.PENDING_REVIEW).count(),
+            query.filter(status=TicketStatus.TECH_PROCESSING).count(),
+            query.filter(status=TicketStatus.DONE).count(),
+            query.filter(status__in=[TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED]).count(),
+        )
+        return {
+            "total": int(total or 0),
+            "pending_review": int(pending_review or 0),
+            "tech_processing": int(tech_processing or 0),
+            "done": int(done or 0),
+            "rejected": int(rejected or 0),
+        }
+
     async def set_customer_service_review(
         self, *, ticket_id: int, reviewer_id: int, approved: bool, comment: str | None, tech_id: int | None
     ) -> Ticket:

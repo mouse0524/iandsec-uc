@@ -41,6 +41,13 @@ const detailVisible = ref(false)
 const detailLoading = ref(false)
 const currentTicket = ref({})
 const tableData = ref([])
+const summaryStats = ref({
+  total: 0,
+  pending_review: 0,
+  tech_processing: 0,
+  done: 0,
+  rejected: 0,
+})
 const editVisible = ref(false)
 const editingTicketId = ref(null)
 const savingEdit = ref(false)
@@ -74,16 +81,13 @@ const fallbackCategories = ['登录问题', '权限问题', '系统异常', '其
 const fallbackRootCauses = ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖']
 
 const summaryCards = computed(() => {
-  const rows = tableData.value || []
-  const countByStatus = rows.reduce((acc, item) => {
-    acc[item.status] = (acc[item.status] || 0) + 1
-    return acc
-  }, {})
+  const stats = summaryStats.value || {}
   return [
-    { label: '当前总工单', value: rows.length, tone: 'neutral' },
-    { label: '审核中', value: countByStatus.pending_review || 0, tone: 'warning' },
-    { label: '技术处理中', value: countByStatus.tech_processing || 0, tone: 'info' },
-    { label: '已完成', value: countByStatus.done || 0, tone: 'success' },
+    { label: '当前总工单', value: stats.total || 0, tone: 'neutral' },
+    { label: '审核中', value: stats.pending_review || 0, tone: 'warning' },
+    { label: '技术处理中', value: stats.tech_processing || 0, tone: 'info' },
+    { label: '已驳回', value: stats.rejected || 0, tone: 'error' },
+    { label: '已完成', value: stats.done || 0, tone: 'success' },
   ]
 })
 
@@ -141,6 +145,18 @@ async function fetchEditCaptcha() {
 
 function handleTableDataChange(rows) {
   tableData.value = Array.isArray(rows) ? rows : []
+}
+
+async function getMyTicketList(params = {}) {
+  const res = await api.getTicketList(params)
+  summaryStats.value = {
+    total: Number(res?.status_summary?.total || 0),
+    pending_review: Number(res?.status_summary?.pending_review || 0),
+    tech_processing: Number(res?.status_summary?.tech_processing || 0),
+    done: Number(res?.status_summary?.done || 0),
+    rejected: Number(res?.status_summary?.rejected || 0),
+  }
+  return res
 }
 
 function triggerDownload(blob, filename) {
@@ -377,7 +393,7 @@ const columns = [
           ref="$table"
           v-model:query-items="queryItems"
           :columns="columns"
-          :get-data="api.getTicketList"
+          :get-data="getMyTicketList"
           @on-data-change="handleTableDataChange"
         >
           <template #queryBar>
@@ -533,7 +549,7 @@ const columns = [
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -565,6 +581,10 @@ const columns = [
 
 .summary-card[data-tone='info'] {
   background: linear-gradient(180deg, #f3f8ff 0%, #ffffff 100%);
+}
+
+.summary-card[data-tone='error'] {
+  background: linear-gradient(180deg, #fff1f2 0%, #ffffff 100%);
 }
 
 .summary-card[data-tone='success'] {
@@ -660,7 +680,7 @@ const columns = [
 
 @media (max-width: 960px) {
   .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
 }

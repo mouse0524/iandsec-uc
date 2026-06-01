@@ -20,7 +20,16 @@ COPY deploy/entrypoint.sh .
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     --mount=type=cache,target=/var/lib/apt,sharing=locked,id=core-apt \
-    sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/sources.list \
+    set -eux; \
+    for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+        if [ -f "$source_file" ]; then \
+            sed -i \
+                -e "s@http://deb.debian.org/debian-security@http://mirrors.ustc.edu.cn/debian-security@g" \
+                -e "s@http://security.debian.org/debian-security@http://mirrors.ustc.edu.cn/debian-security@g" \
+                -e "s@http://deb.debian.org/debian@http://mirrors.ustc.edu.cn/debian@g" \
+                "$source_file"; \
+        fi; \
+    done \
     && rm -f /etc/apt/apt.conf.d/docker-clean \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \

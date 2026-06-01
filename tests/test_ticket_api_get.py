@@ -66,6 +66,7 @@ class TicketGetApiTestCase(unittest.TestCase):
             patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
             patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=["技术"])),
             patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(1, [{"id": 1}])) ) as mock_list,
+            patch.object(tickets_module.ticket_controller, "status_summary", AsyncMock(return_value={"total": 1, "pending_review": 0, "tech_processing": 1, "done": 0, "rejected": 0})),
         ):
             resp = self.client.get("/api/v1/tickets/list", params={"page": 1, "page_size": 10})
 
@@ -270,6 +271,7 @@ class TicketGetApiTestCase(unittest.TestCase):
             patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
             patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=["管理员"])),
             patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(0, []))) as mock_list,
+            patch.object(tickets_module.ticket_controller, "status_summary", AsyncMock(return_value={"total": 0, "pending_review": 0, "tech_processing": 0, "done": 0, "rejected": 0})),
         ):
             resp = self.client.get("/api/v1/tickets/list", params={"issue_type": "需求"})
 
@@ -287,6 +289,7 @@ class TicketGetApiTestCase(unittest.TestCase):
             patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
             patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=["管理员"])),
             patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(0, []))) as mock_list,
+            patch.object(tickets_module.ticket_controller, "status_summary", AsyncMock(return_value={"total": 0, "pending_review": 0, "tech_processing": 0, "done": 0, "rejected": 0})),
         ):
             resp = self.client.get("/api/v1/tickets/list", params={"impact_scope": "单台必现"})
 
@@ -296,6 +299,28 @@ class TicketGetApiTestCase(unittest.TestCase):
         for child in getattr(search_q, "children", []):
             filters.update(getattr(child, "filters", {}))
         self.assertEqual(filters.get("impact_scope"), "单台必现")
+
+    def test_list_ticket_returns_status_summary_without_status_filter(self):
+        current_user = SimpleNamespace(id=10, is_superuser=False)
+        summary = {"total": 4, "pending_review": 1, "tech_processing": 1, "done": 1, "rejected": 1}
+
+        with (
+            patch.object(tickets_module, "_get_current_user", AsyncMock(return_value=current_user)),
+            patch.object(tickets_module, "_get_user_role_names", AsyncMock(return_value=[])),
+            patch.object(tickets_module.ticket_controller, "list_tickets", AsyncMock(return_value=(1, [{"id": 1}]))),
+            patch.object(tickets_module.ticket_controller, "status_summary", AsyncMock(return_value=summary)) as mock_summary,
+        ):
+            resp = self.client.get("/api/v1/tickets/list", params={"status": "done"})
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body.get("status_summary", {}).get("rejected"), 1)
+
+        summary_q = mock_summary.await_args.kwargs.get("search")
+        filters = {}
+        for child in getattr(summary_q, "children", []):
+            filters.update(getattr(child, "filters", {}))
+        self.assertNotIn("status", filters)
 
     def test_update_ticket_preserves_issue_type_when_omitted(self):
         current_user = SimpleNamespace(id=10, is_superuser=False)
