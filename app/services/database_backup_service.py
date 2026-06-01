@@ -123,7 +123,7 @@ class DatabaseBackupService:
     async def test_directory(self, config: dict | None = None) -> dict:
         normalized = self.normalize_config(config or {})
         self.ensure_remote_directory(normalized["db_backup_directory"])
-        marker = f".write-test-{os.getpid()}-{id(self)}.txt"
+        marker = f"write-test-{os.getpid()}-{id(self)}.txt"
         result = await self.upload_remote(normalized, marker, b"ok")
         remote_path = result.get("remote_path") or self.remote_path(normalized["db_backup_directory"], marker)
         if self.upload_remote == self.upload_to_webdav:
@@ -249,6 +249,8 @@ class DatabaseBackupService:
                 )
         except httpx.RequestError as exc:
             raise HTTPException(status_code=502, detail=f"上传 NAS 远端失败: {exc}") from exc
+        if response.status_code == 405:
+            raise HTTPException(status_code=502, detail="上传 NAS 远端失败：当前备份地址或目录不支持文件上传，请确认备份地址指向 WebDAV 根目录，NAS远端目录填写可写目录")
         if response.status_code not in {200, 201, 204}:
             raise HTTPException(status_code=502, detail=f"上传 NAS 远端失败，状态码 {response.status_code}")
         return {"remote_path": remote_path, "status_code": response.status_code}

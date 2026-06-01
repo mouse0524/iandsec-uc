@@ -140,6 +140,32 @@ def test_test_directory_rejects_relative_path():
         run(service.test_directory({"db_backup_directory": "relative/path"}))
 
 
+def test_test_directory_uses_regular_marker_filename():
+    uploads = []
+
+    async def fake_upload(config, filename, payload):
+        uploads.append((filename, payload))
+        return {"remote_path": f"/db/{filename}", "status_code": 201}
+
+    service = DatabaseBackupService(upload_remote=fake_upload)
+
+    result = run(
+        service.test_directory(
+            {
+                "db_backup_directory": "/db",
+                "db_backup_webdav_base_url": "https://nas.example.com/dav",
+                "db_backup_webdav_username": "backup",
+                "db_backup_webdav_password": "secret",
+            }
+        )
+    )
+
+    assert result["ok"] is True
+    assert uploads
+    assert uploads[0][0].startswith("write-test-")
+    assert not uploads[0][0].startswith(".")
+
+
 def test_scheduler_seconds_until_next_run():
     scheduler = DatabaseBackupScheduler()
     now = datetime(2026, 5, 26, 1, 0, 0)
