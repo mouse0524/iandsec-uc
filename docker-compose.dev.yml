@@ -36,7 +36,7 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "9999:9999"
-      - "127.0.0.1:3100:3100"
+      - "3100:3100"
     volumes:
       - .:/opt/iandsec-uc
       - app_storage:/opt/iandsec-uc/storage

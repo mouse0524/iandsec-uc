@@ -39,6 +39,7 @@ const timeSyncStatus = ref(null)
 const logoUploading = ref(false)
 const previewVisible = ref(false)
 const appStore = useAppStore()
+const MASKED_SECRET = '******'
 const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
@@ -526,7 +527,7 @@ async function testWebdavConnection() {
 }
 
 function dbBackupPayload() {
-  return {
+  const payload = {
     db_backup_enabled: form.value.db_backup_enabled,
     db_backup_directory: form.value.db_backup_directory,
     db_backup_mysql_container: form.value.db_backup_mysql_container,
@@ -536,6 +537,10 @@ function dbBackupPayload() {
     db_backup_run_at: form.value.db_backup_run_at,
     db_backup_retention_days: form.value.db_backup_retention_days,
   }
+  if (payload.db_backup_webdav_password === MASKED_SECRET) {
+    delete payload.db_backup_webdav_password
+  }
+  return payload
 }
 
 async function loadDatabaseBackupStatus() {

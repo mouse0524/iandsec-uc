@@ -7,6 +7,16 @@ from app.schemas.settings import DatabaseBackupConfigIn, SystemSettingUpdateIn, 
 from app.services.database_backup_service import database_backup_scheduler, database_backup_service
 
 router = APIRouter()
+MASKED_SECRET = "******"
+
+
+async def _database_backup_config(payload: DatabaseBackupConfigIn) -> dict:
+    config = await system_setting_controller.get_full_dict()
+    data = payload.model_dump(exclude_none=True)
+    if data.get("db_backup_webdav_password") == MASKED_SECRET:
+        data.pop("db_backup_webdav_password", None)
+    config.update(data)
+    return config
 
 
 @router.get("/get", summary="获取系统设置")
@@ -84,8 +94,7 @@ async def get_database_backup_status():
 @router.post("/database-backup/test", summary="测试数据库备份目录")
 async def test_database_backup_directory(payload: DatabaseBackupConfigIn):
     logger.info("[api.settings.database_backup.test] request")
-    config = await system_setting_controller.get_full_dict()
-    config.update(payload.model_dump(exclude_none=True))
+    config = await _database_backup_config(payload)
     data = await database_backup_service.test_directory(config)
     return Success(msg="NAS远端目录可用", data=data)
 
@@ -93,8 +102,7 @@ async def test_database_backup_directory(payload: DatabaseBackupConfigIn):
 @router.post("/database-backup/run", summary="立即执行数据库备份")
 async def run_database_backup(payload: DatabaseBackupConfigIn):
     logger.info("[api.settings.database_backup.run] request")
-    config = await system_setting_controller.get_full_dict()
-    config.update(payload.model_dump(exclude_none=True))
+    config = await _database_backup_config(payload)
     data = await database_backup_scheduler.run_once(config=config, force=True)
     if data is None:
         return Success(msg="已有数据库备份任务正在执行", data={"ok": True, "skipped": True, "reason": "locked"})

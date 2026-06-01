@@ -278,3 +278,38 @@ def test_database_backup_run_uses_scheduler_lock():
     assert body["data"] == {"ok": True, "skipped": True, "reason": "locked"}
     mock_run_once.assert_awaited_once()
     assert mock_run_once.await_args.kwargs["force"] is True
+
+
+def test_database_backup_test_keeps_saved_password_when_payload_is_masked():
+    with (
+        patch.object(
+            settings_module.system_setting_controller,
+            "get_full_dict",
+            AsyncMock(
+                return_value={
+                    "db_backup_directory": "/db",
+                    "db_backup_webdav_base_url": "https://nas.example.com/dav",
+                    "db_backup_webdav_username": "backup",
+                    "db_backup_webdav_password": "real-secret",
+                }
+            ),
+        ),
+        patch.object(
+            settings_module.database_backup_service,
+            "test_directory",
+            AsyncMock(return_value={"ok": True, "remote_path": "/db/.write-test.txt"}),
+        ) as mock_test,
+    ):
+        response = _settings_client().post(
+            "/api/v1/settings/database-backup/test",
+            json={
+                "db_backup_directory": "/db",
+                "db_backup_webdav_base_url": "https://nas.example.com/dav",
+                "db_backup_webdav_username": "backup",
+                "db_backup_webdav_password": "******",
+            },
+        )
+
+    assert response.status_code == 200
+    config = mock_test.await_args.args[0]
+    assert config["db_backup_webdav_password"] == "real-secret"
