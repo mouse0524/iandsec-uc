@@ -6,6 +6,7 @@ import json
 
 import httpx
 from fastapi import HTTPException, UploadFile
+from tortoise.exceptions import IntegrityError
 
 from app.log import logger
 from app.core.redis_client import execute_redis
@@ -36,7 +37,9 @@ def normalize_webdav_base_url(url: str | None) -> str:
 
 class SystemSettingController:
     PUBLIC_CONFIG_CACHE_KEY = "config:public:v1"
+    REDMINE_METADATA_CACHE_KEY = "config:redmine:metadata:v1"
     PUBLIC_CONFIG_CACHE_TTL_SECONDS = 300
+    REDMINE_METADATA_CACHE_TTL_SECONDS = 86400
     _SECTIONS = {
         "site",
         "ticket",
@@ -47,6 +50,7 @@ class SystemSettingController:
         "mail_template",
         "webdav",
         "database_backup",
+        "redmine",
     }
 
     _DEFAULTS = {
@@ -154,6 +158,19 @@ class SystemSettingController:
             "db_backup_run_at": os.getenv("DB_BACKUP_RUN_AT", "02:30"),
             "db_backup_retention_days": _int_env("DB_BACKUP_RETENTION_DAYS", 7),
         },
+        "redmine": {
+            "redmine_enabled": False,
+            "redmine_base_url": os.getenv("REDMINE_BASE_URL") or None,
+            "redmine_api_key": os.getenv("REDMINE_API_KEY") or None,
+            "redmine_project_id": os.getenv("REDMINE_PROJECT_ID") or None,
+            "redmine_tracker_id": _int_env("REDMINE_TRACKER_ID", 0) or None,
+            "redmine_priority_id": _int_env("REDMINE_PRIORITY_ID", 0) or None,
+            "redmine_assigned_to_id": _int_env("REDMINE_ASSIGNED_TO_ID", 0) or None,
+            "redmine_project_phase_field_id": _int_env("REDMINE_PROJECT_PHASE_FIELD_ID", 0) or None,
+            "redmine_os_field_id": _int_env("REDMINE_OS_FIELD_ID", 0) or None,
+            "redmine_sync_visible_fields": ["project_id", "tracker_id", "priority_id"],
+            "redmine_sync_options": {},
+        },
     }
 
     @staticmethod
@@ -164,13 +181,22 @@ class SystemSettingController:
 
     async def _get_or_create_section(self, section: str) -> SystemSettingItem:
         if section not in self._SECTIONS:
-            raise HTTPException(status_code=400, detail="未知的配置分组")
-        item = await SystemSettingItem.filter(section=section).first()
-        if item:
+            raise HTTPException(status_code=400, detail="???????")
+        try:
+            item, created = await SystemSettingItem.get_or_create(
+                section=section,
+                defaults={"data": self._DEFAULTS[section]},
+            )
+            if created:
+                logger.info("[settings] create section={}", section)
             return item
-        item = await SystemSettingItem.create(section=section, data=self._DEFAULTS[section])
-        logger.info("[settings] create section={}", section)
-        return item
+        except IntegrityError:
+            # Concurrent startup can race on the unique section key; the winner
+            # already inserted the row, so the loser should simply reuse it.
+            item = await SystemSettingItem.filter(section=section).first()
+            if item:
+                return item
+            raise
 
     async def _ensure_all_sections(self) -> dict[str, dict]:
         merged: dict[str, dict] = {}
@@ -191,6 +217,7 @@ class SystemSettingController:
         data["smtp_password"] = self._mask_secret(data.get("smtp_password"))
         data["webdav_password"] = self._mask_secret(data.get("webdav_password"))
         data["db_backup_webdav_password"] = self._mask_secret(data.get("db_backup_webdav_password"))
+        data["redmine_api_key"] = self._mask_secret(data.get("redmine_api_key"))
         return data
 
     async def get_public_config(self) -> dict:
@@ -319,6 +346,8 @@ class SystemSettingController:
             payload["webdav_password"] = sections["webdav"].get("webdav_password")
         if payload.get("db_backup_webdav_password") == "******":
             payload["db_backup_webdav_password"] = sections["database_backup"].get("db_backup_webdav_password")
+        if payload.get("redmine_api_key") == "******":
+            payload["redmine_api_key"] = sections["redmine"].get("redmine_api_key")
         if payload.get("webdav_base_url"):
             payload["webdav_base_url"] = normalize_webdav_base_url(payload.get("webdav_base_url"))
         if payload.get("db_backup_webdav_base_url"):
@@ -437,6 +466,19 @@ class SystemSettingController:
             "db_backup_run_at",
             "db_backup_retention_days",
         }
+        redmine_keys = {
+            "redmine_enabled",
+            "redmine_base_url",
+            "redmine_api_key",
+            "redmine_project_id",
+            "redmine_tracker_id",
+            "redmine_priority_id",
+            "redmine_assigned_to_id",
+            "redmine_project_phase_field_id",
+            "redmine_os_field_id",
+            "redmine_sync_visible_fields",
+            "redmine_sync_options",
+        }
         mapping = {
             "site": site_keys,
             "ticket": ticket_keys,
@@ -447,6 +489,7 @@ class SystemSettingController:
             "mail_template": mail_template_keys,
             "webdav": webdav_keys,
             "database_backup": database_backup_keys,
+            "redmine": redmine_keys,
         }
 
         for section, keys in mapping.items():
@@ -469,6 +512,25 @@ class SystemSettingController:
             await execute_redis("delete", self.PUBLIC_CONFIG_CACHE_KEY)
         except Exception as exc:
             logger.warning("[settings.update] cache_delete_failed key={} error={}", self.PUBLIC_CONFIG_CACHE_KEY, str(exc))
+        await self._sync_redmine_metadata_cache()
+
+    async def _sync_redmine_metadata_cache(self) -> None:
+        try:
+            raw = await execute_redis("get", self.REDMINE_METADATA_CACHE_KEY)
+            if not raw:
+                return
+            metadata = json.loads(raw)
+            redmine = (await self._ensure_all_sections())["redmine"]
+            metadata["redmine_os_field_id"] = redmine.get("redmine_os_field_id")
+            metadata["redmine_sync_options"] = redmine.get("redmine_sync_options") or {}
+            await execute_redis(
+                "setex",
+                self.REDMINE_METADATA_CACHE_KEY,
+                self.REDMINE_METADATA_CACHE_TTL_SECONDS,
+                json.dumps(metadata, ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.warning("[settings.redmine.metadata] cache_sync_failed key={} error={}", self.REDMINE_METADATA_CACHE_KEY, str(exc))
 
     async def get_logo_abs_path(self) -> str:
         site = (await self._ensure_all_sections())["site"]

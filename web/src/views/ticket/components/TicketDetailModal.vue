@@ -33,6 +33,15 @@ const descriptionImagePreviewSrc = ref('')
 const descriptionImagePreviewAlt = ref('')
 const safeDescription = computed(() => sanitizeHtml(props.ticket?.description || '-'))
 const hasActions = computed(() => Array.isArray(props.ticket?.actions) && props.ticket.actions.length > 0)
+const redmineStatusTextMap = {
+  never: '未同步',
+  success: '同步成功',
+  failed: '同步失败',
+  syncing: '同步中',
+}
+const redmineDisplayStatus = computed(() => {
+  return props.ticket?.redmine_status_name || redmineStatusTextMap[props.ticket?.redmine_sync_status] || '-'
+})
 
 function revokeImagePreviewUrls() {
   Object.values(imagePreviewMap.value || {}).forEach((url) => {
@@ -218,6 +227,24 @@ function getActionIconClass(action) {
         <span>完成时间</span>
         <strong>{{ ticket.finished_at || '-' }}</strong>
       </div>
+      <div class="detail-card">
+        <span>Redmine工单</span>
+        <strong>
+          <a v-if="ticket.redmine_issue_url" :href="ticket.redmine_issue_url" target="_blank" rel="noopener">
+            #{{ ticket.redmine_issue_id }}
+          </a>
+          <template v-else>{{ ticket.redmine_issue_id ? `#${ticket.redmine_issue_id}` : '-' }}</template>
+        </strong>
+      </div>
+      <div class="detail-card">
+        <span>Redmine状态</span>
+        <strong>{{ redmineDisplayStatus }}</strong>
+      </div>
+      <div class="detail-card">
+        <span>Redmine同步时间</span>
+        <strong>{{ ticket.redmine_synced_at || '-' }}</strong>
+      </div>
+
     </div>
 
     <div class="description-card">

@@ -24,12 +24,23 @@ const detailLoading = ref(false)
 const currentTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
+const redmineVisible = ref(false)
 const pendingActionRow = ref(null)
 const pendingAssignRow = ref(null)
+const pendingRedmineRow = ref(null)
 const pendingActionType = ref('finish')
 const actionComment = ref('')
 const assignTechId = ref(null)
 const assignComment = ref('')
+const redmineLoadingMap = ref({})
+const redmineForm = ref({
+  project_id: null,
+  tracker_id: null,
+  priority_id: null,
+  assigned_to_id: null,
+  project_phase: '',
+  os_value: '',
+})
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
 const issueTypeOptions = ref([])
@@ -37,6 +48,39 @@ const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const selectedRootCause = ref(null)
 const techOptions = ref([])
+const redmineDefaultTrackerId = ref(null)
+const redmineDefaultProjectId = ref(null)
+const redmineDefaultPriorityId = ref(null)
+const redmineDefaultAssignedToId = ref(null)
+const redmineSyncVisibleFields = ref(['project_id', 'tracker_id', 'priority_id'])
+const redmineSyncOptions = ref({})
+const redmineProjectOptions = ref([])
+const redmineTrackerOptionsFromApi = ref([])
+const redminePriorityOptionsFromApi = ref([])
+const redmineUserOptions = ref([])
+const redmineOsOptions = ref([])
+const redmineStatusTextMap = {
+  never: '未同步',
+  success: '同步成功',
+  failed: '同步失败',
+  syncing: '同步中',
+}
+const redmineTrackerOptions = computed(() => {
+  if (redmineTrackerOptionsFromApi.value.length) return redmineTrackerOptionsFromApi.value
+  return [
+  { label: '现网问题', value: 8 },
+  { label: '现网需求', value: 9 },
+  ]
+})
+const redminePriorityOptions = computed(() => {
+  if (redminePriorityOptionsFromApi.value.length) return redminePriorityOptionsFromApi.value
+  return [
+  { label: '建议', value: 1 },
+  { label: '一般', value: 2 },
+  { label: '严重', value: 3 },
+  { label: '致命', value: 4 },
+  ]
+})
 const quickFilters = [
   { label: '处理中', value: 'tech_processing' },
   { label: '已完成', value: 'done' },
@@ -204,6 +248,202 @@ async function submitAssignAction() {
   refreshSummaryStats()
 }
 
+function setRedmineLoading(ticketId, loading) {
+  redmineLoadingMap.value = {
+    ...redmineLoadingMap.value,
+    [ticketId]: loading,
+  }
+}
+
+function redmineLoading(row) {
+  return !!redmineLoadingMap.value[row.id]
+}
+
+function filterRedmineOptions(field, options) {
+  const allowed = Array.isArray(redmineSyncOptions.value?.[field])
+    ? redmineSyncOptions.value[field].map((item) => String(item))
+    : []
+  if (!allowed.length) return options
+  return options.filter((item) => allowed.includes(String(item.value)))
+}
+
+async function loadRedmineOptions() {
+  if (redmineProjectOptions.value.length && redmineUserOptions.value.length && redmineTrackerOptionsFromApi.value.length && redminePriorityOptionsFromApi.value.length) return
+  try {
+    const res = await api.getRedmineMetadata()
+    const projects = Array.isArray(res?.data?.projects) ? res.data.projects : []
+    const trackers = Array.isArray(res?.data?.trackers) ? res.data.trackers : []
+    const priorities = Array.isArray(res?.data?.priorities) ? res.data.priorities : []
+    const users = Array.isArray(res?.data?.users) ? res.data.users : []
+    const customFields = Array.isArray(res?.data?.custom_fields) ? res.data.custom_fields : []
+    redmineDefaultProjectId.value = res?.data?.redmine_project_id || null
+    redmineDefaultTrackerId.value = Number(res?.data?.redmine_tracker_id) || null
+    redmineDefaultPriorityId.value = Number(res?.data?.redmine_priority_id) || null
+    redmineDefaultAssignedToId.value = Number(res?.data?.redmine_assigned_to_id) || null
+    redmineSyncVisibleFields.value = Array.isArray(res?.data?.redmine_sync_visible_fields) && res.data.redmine_sync_visible_fields.length
+      ? res.data.redmine_sync_visible_fields
+      : ['project_id', 'tracker_id', 'priority_id']
+    redmineSyncOptions.value = res?.data?.redmine_sync_options || {}
+    redmineProjectOptions.value = filterRedmineOptions('project_id', projects
+      .map((item) => ({ label: item.label || item.name || String(item.value || item.id), value: String(item.value || item.id) }))
+      .filter((item) => item.value))
+    if (redmineDefaultProjectId.value && !redmineProjectOptions.value.some((item) => item.value === redmineDefaultProjectId.value)) {
+      redmineProjectOptions.value.unshift({ label: redmineDefaultProjectId.value, value: redmineDefaultProjectId.value })
+    }
+    redmineTrackerOptionsFromApi.value = filterRedmineOptions('tracker_id', trackers
+      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
+      .filter((item) => item.value))
+    redminePriorityOptionsFromApi.value = filterRedmineOptions('priority_id', priorities
+      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
+      .filter((item) => item.value))
+    redmineUserOptions.value = filterRedmineOptions('assigned_to_id', users
+      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
+      .filter((item) => item.value))
+    const osField = customFields.find((item) => Number(item.id) === Number(res?.data?.redmine_os_field_id))
+      || customFields.find((item) => String(item.label || item.name || '').includes('操作系统'))
+    redmineOsOptions.value = filterRedmineOptions('os', Array.isArray(osField?.possible_values) ? osField.possible_values : [])
+  } catch (error) {
+    redmineProjectOptions.value = []
+    redmineTrackerOptionsFromApi.value = []
+    redminePriorityOptionsFromApi.value = []
+    redmineUserOptions.value = []
+    redmineOsOptions.value = []
+  }
+}
+function defaultRedmineTrackerId(row) {
+  if (redmineDefaultTrackerId.value && redmineTrackerOptions.value.some((item) => item.value === redmineDefaultTrackerId.value)) {
+    return redmineDefaultTrackerId.value
+  }
+  const issueType = String(row?.issue_type || '')
+  const preferred = issueType.includes('需求') ? 9 : 8
+  if (redmineTrackerOptions.value.some((item) => item.value === preferred)) return preferred
+  return redmineTrackerOptions.value[0]?.value || preferred
+}
+
+function defaultRedmineProjectId() {
+  if (redmineDefaultProjectId.value && redmineProjectOptions.value.some((item) => item.value === redmineDefaultProjectId.value)) {
+    return redmineDefaultProjectId.value
+  }
+  return redmineProjectOptions.value[0]?.value || redmineDefaultProjectId.value
+}
+
+function defaultRedminePriorityId() {
+  if (redmineDefaultPriorityId.value && redminePriorityOptions.value.some((item) => item.value === redmineDefaultPriorityId.value)) {
+    return redmineDefaultPriorityId.value
+  }
+  return redminePriorityOptions.value[0]?.value || redmineDefaultPriorityId.value || 2
+}
+
+function defaultRedmineAssignedToId() {
+  if (redmineDefaultAssignedToId.value && redmineUserOptions.value.some((item) => item.value === redmineDefaultAssignedToId.value)) {
+    return redmineDefaultAssignedToId.value
+  }
+  return redmineUserOptions.value[0]?.value || null
+}
+
+async function openRedmineSync(row) {
+  await loadRedmineOptions()
+  pendingRedmineRow.value = row
+  redmineForm.value = {
+    project_id: defaultRedmineProjectId(),
+    tracker_id: defaultRedmineTrackerId(row),
+    priority_id: defaultRedminePriorityId(),
+    assigned_to_id: defaultRedmineAssignedToId(),
+    project_phase: redmineProjectPhaseOptions.value.some((item) => item.value === row.project_phase) ? row.project_phase : redmineProjectPhaseOptions.value[0]?.value || '',
+    os_value: '',
+  }
+  redmineVisible.value = true
+}
+
+async function pushRedmine(row, payload = {}) {
+  setRedmineLoading(row.id, true)
+  try {
+    const res = await api.pushTicketRedmine({ ticket_id: row.id, ...payload })
+    $message.success(res?.msg || 'Redmine????')
+    $table.value?.handleSearch()
+    if (currentTicket.value?.id === row.id) {
+      currentTicket.value = res?.data || currentTicket.value
+    }
+  } finally {
+    setRedmineLoading(row.id, false)
+  }
+}
+
+
+function redmineFieldVisible(field) {
+  return redmineSyncVisibleFields.value.includes(field)
+}
+
+const redmineProjectPhaseOptions = computed(() => filterRedmineOptions('project_phase', projectPhaseOptions.value))
+
+async function submitRedmineSync() {
+  if (!pendingRedmineRow.value) return
+  const payload = {}
+  if (redmineFieldVisible('project_id')) {
+    if (!redmineForm.value.project_id) {
+      $message.warning('请选择Redmine项目标识')
+      return
+    }
+    payload.project_id = redmineForm.value.project_id
+  }
+  if (redmineFieldVisible('tracker_id')) {
+    if (!redmineForm.value.tracker_id) {
+      $message.warning('请选择Redmine跟踪')
+      return
+    }
+    payload.tracker_id = redmineForm.value.tracker_id
+  }
+  if (redmineFieldVisible('priority_id')) {
+    if (!redmineForm.value.priority_id) {
+      $message.warning('请选择Redmine优先级')
+      return
+    }
+    payload.priority_id = redmineForm.value.priority_id
+  }
+  if (redmineFieldVisible('assigned_to_id') && redmineForm.value.assigned_to_id) {
+    payload.assigned_to_id = redmineForm.value.assigned_to_id
+  }
+  if (redmineFieldVisible('project_phase') && redmineForm.value.project_phase) {
+    payload.project_phase = redmineForm.value.project_phase
+  }
+  if (redmineFieldVisible('os') && redmineForm.value.os_value) {
+    payload.os_value = redmineForm.value.os_value
+  }
+  await pushRedmine(pendingRedmineRow.value, payload)
+  redmineVisible.value = false
+  pendingRedmineRow.value = null
+}
+
+async function pullRedmine(row) {
+  setRedmineLoading(row.id, true)
+  try {
+    const res = await api.pullTicketRedmine({ ticket_id: row.id })
+    $message.success(res?.msg || 'Redmine状态已更新')
+    $table.value?.handleSearch()
+    if (currentTicket.value?.id === row.id) {
+      currentTicket.value = res?.data || currentTicket.value
+    }
+  } finally {
+    setRedmineLoading(row.id, false)
+  }
+}
+
+function openRedmine(row) {
+  if (!row.redmine_issue_url) return
+  window.open(row.redmine_issue_url, '_blank', 'noopener,noreferrer')
+}
+
+function redmineDisplayStatus(row) {
+  return row.redmine_status_name || redmineStatusTextMap[row.redmine_sync_status] || '-'
+}
+
+function redmineSyncTagType(row) {
+  if (row.redmine_sync_status === 'failed') return 'error'
+  if (row.redmine_sync_status === 'success') return 'success'
+  if (row.redmine_sync_status === 'syncing') return 'info'
+  return 'warning'
+}
+
 const columns = [
   { title: '工单编号', key: 'ticket_no', align: 'center' },
   { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
@@ -230,6 +470,21 @@ const columns = [
   { title: '影响范围', key: 'impact_scope', align: 'center' },
   { title: '分类', key: 'category', align: 'center' },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
+  {
+    title: 'Redmine',
+    key: 'redmine_issue_id',
+    align: 'center',
+    width: 160,
+    render(row) {
+      if (!row.redmine_issue_id) {
+        return h(NTag, { type: redmineSyncTagType(row), bordered: false }, { default: () => redmineDisplayStatus(row) })
+      }
+      return h('div', { class: 'redmine-cell' }, [
+        h(NTag, { type: redmineSyncTagType(row), bordered: false }, { default: () => `#${row.redmine_issue_id}` }),
+        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small' }, { default: () => redmineDisplayStatus(row) }),
+      ])
+    },
+  },
   {
     title: '状态',
     key: 'status',
@@ -259,6 +514,49 @@ const columns = [
           { default: () => '详情' }
         ),
       ]
+      buttons.push(
+        h(
+          NButton,
+          {
+            size: 'small',
+            color: '#7c3aed',
+            textColor: '#fff',
+            loading: redmineLoading(row),
+            onClick: () => openRedmineSync(row),
+          },
+          { default: () => (row.redmine_issue_id ? '更新Redmine' : '同步Redmine') }
+        )
+      )
+      if (row.redmine_issue_id) {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              color: '#0f766e',
+              textColor: '#fff',
+              loading: redmineLoading(row),
+              onClick: () => pullRedmine(row),
+            },
+            { default: () => '拉取Redmine' }
+          )
+        )
+        if (row.redmine_issue_url) {
+          buttons.push(
+            h(
+              NButton,
+              {
+                size: 'small',
+                color: '#475569',
+                textColor: '#fff',
+                onClick: () => openRedmine(row),
+              },
+              { default: () => '打开' }
+            )
+          )
+        }
+      }
+
       if (row.status === 'tech_processing') {
         buttons.push(
           h(
@@ -386,6 +684,64 @@ const columns = [
 
       <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
+      <NModal v-model:show="redmineVisible" preset="card" style="width: 520px" title="同步Redmine">
+        <NSelect
+          v-if="redmineFieldVisible('project_id')"
+          v-model:value="redmineForm.project_id"
+          class="mb-12"
+          :options="redmineProjectOptions"
+          :clearable="false"
+          filterable
+          placeholder="请选择Redmine项目标识"
+        />
+        <NSelect
+          v-if="redmineFieldVisible('tracker_id')"
+          v-model:value="redmineForm.tracker_id"
+          class="mb-12"
+          :options="redmineTrackerOptions"
+          :clearable="false"
+          placeholder="请选择Redmine跟踪"
+        />
+        <NSelect
+          v-if="redmineFieldVisible('priority_id')"
+          v-model:value="redmineForm.priority_id"
+          class="mb-12"
+          :options="redminePriorityOptions"
+          :clearable="false"
+          placeholder="请选择Redmine优先级"
+        />
+        <NSelect
+          v-if="redmineFieldVisible('assigned_to_id')"
+          v-model:value="redmineForm.assigned_to_id"
+          class="mb-12"
+          :options="redmineUserOptions"
+          clearable
+          placeholder="请选择Redmine指派人"
+        />
+        <NSelect
+          v-if="redmineFieldVisible('project_phase')"
+          v-model:value="redmineForm.project_phase"
+          class="mb-12"
+          :options="redmineProjectPhaseOptions"
+          clearable
+          placeholder="请选择项目阶段"
+        />
+        <NSelect
+          v-if="redmineFieldVisible('os')"
+          v-model:value="redmineForm.os_value"
+          class="mb-12"
+          :options="redmineOsOptions"
+          clearable
+          filterable
+          placeholder="请选择操作系统"
+        />
+        <div class="modal-actions">
+          <NButton @click="redmineVisible = false">取消</NButton>
+          <NButton color="#7c3aed" text-color="#fff" :loading="pendingRedmineRow && redmineLoading(pendingRedmineRow)" @click="submitRedmineSync">
+            确认同步
+          </NButton>
+        </div>
+      </NModal>
       <NModal
         v-model:show="commentVisible"
         preset="card"
@@ -502,7 +858,14 @@ const columns = [
   display: flex;
   justify-content: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+}
+
+.redmine-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 .modal-actions {

@@ -73,6 +73,8 @@ export default {
   reviewTicket: (data = {}) => request.post('/ticket/review', data),
   techActionTicket: (data = {}) => request.post('/ticket/tech/action', data),
   assignTicketTech: (data = {}) => request.post('/ticket/assign-tech', data),
+  pushTicketRedmine: (data = {}) => request.post('/ticket/redmine/push', data),
+  pullTicketRedmine: (data = {}) => request.post('/ticket/redmine/pull', data),
   downloadTicketAttachment: (params = {}) =>
     request.get('/ticket/attachment/download', {
       params,
@@ -138,6 +140,7 @@ export default {
   getDatabaseBackupStatus: () => request.get('/settings/database-backup/status'),
   testDatabaseBackupDirectory: (data = {}) => request.post('/settings/database-backup/test', data),
   runDatabaseBackup: (data = {}) => request.post('/settings/database-backup/run', data, { timeout: 300000 }),
+  getRedmineMetadata: (data = {}) => request.post('/settings/redmine/metadata', data),
   uploadSiteLogo: (file) => {
     const formData = new FormData()
     formData.append('file', file)

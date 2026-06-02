@@ -98,6 +98,47 @@ def test_ticket_impact_scopes_rejects_empty_values():
         SystemSettingUpdateIn(**payload)
 
 
+def test_redmine_project_id_accepts_identifier_text():
+    payload = minimal_settings_payload(redmine_project_id=" customer-portal ")
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_project_id == "customer-portal"
+
+
+def test_redmine_visible_fields_accepts_project_id():
+    payload = minimal_settings_payload(redmine_sync_visible_fields=["project_id", "tracker_id", "project_id"])
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_sync_visible_fields == ["project_id", "tracker_id"]
+
+
+def test_redmine_sync_options_normalizes_selected_values():
+    payload = minimal_settings_payload(
+        redmine_sync_options={
+            "project_id": [" demo ", "demo", ""],
+            "tracker_id": [8, "9", None],
+            "priority_id": ["2"],
+            "assigned_to_id": ["7"],
+            "project_phase": ["实施"],
+            "os": [" Windows ", "Linux"],
+            "unknown": ["x"],
+        }
+    )
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_sync_options == {
+        "project_id": ["demo"],
+        "tracker_id": ["8", "9"],
+        "priority_id": ["2"],
+        "assigned_to_id": ["7"],
+        "project_phase": ["实施"],
+        "os": ["Windows", "Linux"],
+    }
+
+
 def minimal_settings_payload(**overrides):
     payload = {
         "site_title": "Test",

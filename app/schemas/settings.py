@@ -86,6 +86,17 @@ class SystemSettingUpdateIn(BaseModel):
     db_backup_webdav_password: str | None = None
     db_backup_run_at: str = "02:30"
     db_backup_retention_days: int = 7
+    redmine_enabled: bool = False
+    redmine_base_url: str | None = None
+    redmine_api_key: str | None = None
+    redmine_project_id: str | None = None
+    redmine_tracker_id: int | None = None
+    redmine_priority_id: int | None = None
+    redmine_assigned_to_id: int | None = None
+    redmine_project_phase_field_id: int | None = None
+    redmine_os_field_id: int | None = None
+    redmine_sync_visible_fields: list[str] = Field(default_factory=list)
+    redmine_sync_options: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("ticket_attachment_extensions")
     @classmethod
@@ -283,6 +294,63 @@ class SystemSettingUpdateIn(BaseModel):
         return value
 
 
+    @field_validator("redmine_base_url", "redmine_api_key", "redmine_project_id")
+    @classmethod
+    def validate_redmine_text(cls, value: str | None, info):
+        if value is None:
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > 500:
+            raise ValueError(f"{info.field_name} 不能超过500个字符")
+        return text
+
+    @field_validator(
+        "redmine_tracker_id",
+        "redmine_priority_id",
+        "redmine_assigned_to_id",
+        "redmine_project_phase_field_id",
+        "redmine_os_field_id",
+    )
+    @classmethod
+    def validate_redmine_ids(cls, value: int | None, info):
+        if value is None:
+            return value
+        if value < 1:
+            raise ValueError(f"{info.field_name} 必须大于等于1")
+        return value
+
+    @field_validator("redmine_sync_visible_fields")
+    @classmethod
+    def validate_redmine_sync_visible_fields(cls, value: list[str]):
+        allowed = {"project_id", "tracker_id", "priority_id", "assigned_to_id", "project_phase", "os"}
+        result = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if text in allowed and text not in result:
+                result.append(text)
+        return result
+
+    @field_validator("redmine_sync_options", mode="before")
+    @classmethod
+    def validate_redmine_sync_options(cls, value):
+        allowed = {"project_id", "tracker_id", "priority_id", "assigned_to_id", "project_phase", "os"}
+        result = {}
+        for key, values in (value or {}).items():
+            field = str(key or "").strip()
+            if field not in allowed:
+                continue
+            items = []
+            for item in values or []:
+                text = str(item or "").strip()
+                if text and text not in items:
+                    items.append(text)
+            if items:
+                result[field] = items
+        return result
+
+
 class PublicSiteConfigOut(BaseModel):
     site_title: str
     site_logo: str | None = None
@@ -318,6 +386,23 @@ class WebDavTestIn(BaseModel):
     webdav_base_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
+
+
+class RedmineMetadataIn(BaseModel):
+    redmine_base_url: str | None = None
+    redmine_api_key: str | None = None
+
+    @field_validator("redmine_base_url", "redmine_api_key")
+    @classmethod
+    def validate_redmine_metadata_text(cls, value: str | None, info):
+        if value is None:
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) > 500:
+            raise ValueError(f"{info.field_name} 不能超过500个字符")
+        return text
 
 
 class DatabaseBackupConfigIn(BaseModel):

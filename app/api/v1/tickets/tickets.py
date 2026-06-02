@@ -23,7 +23,8 @@ from app.core.dependency import DependAuth
 from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.tickets import TicketAssignTechIn, TicketCreate, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.schemas.tickets import TicketAssignTechIn, TicketCreate, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
 from app.utils.http_headers import build_download_content_disposition
 
@@ -674,3 +675,39 @@ async def ticket_actions(ticket_id: int = Query(..., description="工单ID")):
     logs = await TicketActionLog.filter(ticket_id=ticket_id).order_by("id")
     data = [await item.to_dict() for item in logs]
     return Success(data=data)
+
+
+@router.post("/redmine/push", summary="同步工单到 Redmine", dependencies=[DependAuth])
+async def push_ticket_to_redmine(payload: TicketRedmineSyncIn):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
+        return Fail(code=403, msg="仅技术或管理员可同步 Redmine")
+    ticket = await ticket_controller.get_ticket(payload.ticket_id)
+    if not _can_access_ticket(ticket, user, role_names):
+        return Fail(code=403, msg="暂无权限操作该工单")
+    data = await redmine_sync_service.push_ticket(
+        ticket,
+        operator_id=user.id,
+        note=payload.note,
+        project_id=payload.project_id,
+        tracker_id=payload.tracker_id,
+        priority_id=payload.priority_id,
+        assigned_to_id=payload.assigned_to_id,
+        project_phase=payload.project_phase,
+        os_value=payload.os_value,
+    )
+    return Success(msg="Redmine 同步完成", data=data)
+
+
+@router.post("/redmine/pull", summary="从 Redmine 拉取工单状态", dependencies=[DependAuth])
+async def pull_ticket_from_redmine(payload: TicketRedmineSyncIn):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
+        return Fail(code=403, msg="仅技术或管理员可拉取 Redmine 状态")
+    ticket = await ticket_controller.get_ticket(payload.ticket_id)
+    if not _can_access_ticket(ticket, user, role_names):
+        return Fail(code=403, msg="暂无权限操作该工单")
+    data = await redmine_sync_service.pull_ticket(ticket, operator_id=user.id)
+    return Success(msg="Redmine 状态已更新", data=data)

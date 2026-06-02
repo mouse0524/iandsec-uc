@@ -1,3 +1,5 @@
+import json
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -313,3 +315,124 @@ def test_database_backup_test_keeps_saved_password_when_payload_is_masked():
     assert response.status_code == 200
     config = mock_test.await_args.args[0]
     assert config["db_backup_webdav_password"] == "real-secret"
+
+
+def test_redmine_metadata_uses_saved_api_key_when_payload_is_masked():
+    class FakeRedmineClient:
+        def __init__(self, config):
+            self.config = config
+
+        async def list_projects(self):
+            assert self.config["redmine_api_key"] == "real-key"
+            return [SimpleNamespace(id=1, identifier="demo", name="<Demo>")]
+
+        async def list_trackers(self):
+            return [SimpleNamespace(id=8, name="现网问题")]
+
+        async def list_issue_priorities(self):
+            return [SimpleNamespace(id=2, name="一般")]
+
+        async def list_users(self):
+            return [SimpleNamespace(id=7, login="tech", firstname="Tech", lastname="User")]
+
+        async def list_custom_fields(self):
+            return [SimpleNamespace(id=11, name="项目阶段")]
+
+    with (
+        patch.object(
+            settings_module.system_setting_controller,
+            "get_full_dict",
+            AsyncMock(
+                return_value={
+                    "redmine_base_url": "https://redmine.example.com",
+                    "redmine_api_key": "real-key",
+                    "redmine_project_id": "demo",
+                    "redmine_tracker_id": 8,
+                    "redmine_priority_id": 2,
+                    "redmine_assigned_to_id": 7,
+                    "redmine_project_phase_field_id": 11,
+                    "redmine_os_field_id": 12,
+                    "redmine_sync_visible_fields": ["project_id", "tracker_id"],
+                    "redmine_sync_options": {"project_id": ["demo"]},
+                }
+            ),
+        ),
+        patch.object(settings_module, "RedmineClient", FakeRedmineClient),
+    ):
+        response = _settings_client().post(
+            "/api/v1/settings/redmine/metadata",
+            json={
+                "redmine_base_url": "https://redmine.example.com",
+                "redmine_api_key": "******",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["projects"][0]["value"] == "demo"
+    assert data["projects"][0]["label"] == "&lt;Demo&gt;"
+    assert data["trackers"][0]["id"] == 8
+    assert data["priorities"][0]["label"] == "一般"
+    assert data["users"][0]["id"] == 7
+    assert [item["id"] for item in data["custom_fields"]] == [11]
+    assert data["redmine_project_id"] == "demo"
+    assert data["redmine_tracker_id"] == 8
+    assert data["redmine_priority_id"] == 2
+    assert data["redmine_assigned_to_id"] == 7
+    assert data["redmine_project_phase_field_id"] == 11
+    assert data["redmine_os_field_id"] == 12
+    assert data["redmine_sync_visible_fields"] == ["project_id", "tracker_id"]
+    assert data["redmine_sync_options"] == {"project_id": ["demo"]}
+
+
+def test_public_config_does_not_expose_redmine_internal_settings():
+    sections = {
+        "site": {"site_title": "Test", "allow_partner_register": True},
+        "ticket": {},
+        "login_security": {},
+        "redmine": {
+            "redmine_project_id": "demo",
+            "redmine_tracker_id": 8,
+            "redmine_sync_options": {"project_id": ["demo"]},
+        },
+    }
+
+    async def fake_redis(*args, **kwargs):
+        return None
+
+    with (
+        patch.object(settings_module.system_setting_controller, "_ensure_all_sections", AsyncMock(return_value=sections)),
+        patch("app.controllers.system_setting.execute_redis", fake_redis),
+    ):
+        data = asyncio.run(settings_module.system_setting_controller.get_public_config())
+
+    assert "site_title" in data
+    assert not any(key.startswith("redmine_") for key in data)
+
+
+def test_redmine_metadata_uses_redis_cache_for_empty_payload():
+    async def fail_get_full_dict():
+        raise AssertionError("empty metadata request should use redis cache")
+
+    cache_data = {
+        "projects": [{"label": "Demo", "value": "demo"}],
+        "trackers": [{"label": "现网问题", "value": "8", "id": 8}],
+        "priorities": [],
+        "users": [],
+        "custom_fields": [],
+        "redmine_sync_options": {"project_id": ["demo"]},
+    }
+
+    async def fake_redis(command, *args, **kwargs):
+        assert command == "get"
+        assert args[0] == settings_module.REDMINE_METADATA_CACHE_KEY
+        return json.dumps(cache_data, ensure_ascii=False)
+
+    with (
+        patch.object(settings_module.system_setting_controller, "get_full_dict", fail_get_full_dict),
+        patch.object(settings_module, "execute_redis", fake_redis),
+    ):
+        response = _settings_client().post("/api/v1/settings/redmine/metadata", json={})
+
+    assert response.status_code == 200
+    assert response.json()["data"] == cache_data

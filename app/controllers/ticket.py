@@ -324,6 +324,14 @@ class TicketController:
             "title",
             "root_cause",
             "status",
+            "redmine_issue_id",
+            "redmine_issue_url",
+            "redmine_sync_status",
+            "redmine_sync_error",
+            "redmine_synced_at",
+            "redmine_last_updated_on",
+            "redmine_status_id",
+            "redmine_status_name",
             "submitter_id",
             "reviewer_id",
             "tech_id",
@@ -347,7 +355,7 @@ class TicketController:
                     user_map[int(uid)] = ""
 
         for row in rows:
-            for field in ("created_at", "updated_at", "finished_at"):
+            for field in ("created_at", "updated_at", "finished_at", "redmine_synced_at", "redmine_last_updated_on"):
                 value = row.get(field)
                 if isinstance(value, datetime):
                     row[field] = value.strftime(settings.DATETIME_FORMAT)

@@ -3,12 +3,13 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from app.controllers.captcha import captcha_controller
-from app.controllers.system_setting import normalize_webdav_base_url, system_setting_controller
+from app.controllers.system_setting import SystemSettingController, normalize_webdav_base_url, system_setting_controller
 from app.core.init_app import _default_basic_api_filter, _default_basic_api_paths
 from app.controllers.ticket import TicketController
 from app.services.security import validate_external_service_url
 from app.services.skill_know.document_service import skill_know_document_service
 from app.services.skill_know.openai_client import SkillKnowOpenAIClient
+from tortoise.exceptions import IntegrityError
 
 
 class SecurityRegressionTestCase(unittest.TestCase):
@@ -50,6 +51,34 @@ class SecurityRegressionTestCase(unittest.TestCase):
         ):
             with self.assertRaises(Exception):
                 normalize_webdav_base_url(base_url)
+
+    def test_settings_section_create_race_reuses_existing_row(self):
+        async def run():
+            class FakeSystemSettingItem:
+                get_or_create_calls = 0
+                filter_calls = []
+
+                @classmethod
+                async def get_or_create(cls, **kwargs):
+                    cls.get_or_create_calls += 1
+                    raise IntegrityError("duplicate")
+
+                @classmethod
+                def filter(cls, **kwargs):
+                    cls.filter_calls.append(kwargs)
+                    return cls()
+
+                async def first(self):
+                    return "existing-redmine-row"
+
+            with patch("app.controllers.system_setting.SystemSettingItem", FakeSystemSettingItem):
+                item = await SystemSettingController()._get_or_create_section("redmine")
+
+            self.assertEqual(item, "existing-redmine-row")
+            self.assertEqual(FakeSystemSettingItem.get_or_create_calls, 1)
+            self.assertEqual(FakeSystemSettingItem.filter_calls, [{"section": "redmine"}])
+
+        asyncio.run(run())
 
     def test_webdav_connection_test_rejects_invalid_base_url_before_request(self):
         async def run():

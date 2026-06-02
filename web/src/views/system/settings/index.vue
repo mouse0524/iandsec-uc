@@ -13,6 +13,7 @@ import {
   NInput,
   NInputNumber,
   NModal,
+  NSelect,
   NSpace,
   NSwitch,
   NTabPane,
@@ -30,6 +31,7 @@ const formRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const webdavTesting = ref(false)
+const redmineMetadataLoading = ref(false)
 const dbBackupTesting = ref(false)
 const dbBackupRunning = ref(false)
 const dbBackupStatus = ref(null)
@@ -40,6 +42,12 @@ const logoUploading = ref(false)
 const previewVisible = ref(false)
 const appStore = useAppStore()
 const MASKED_SECRET = '******'
+const redmineProjectOptions = ref([])
+const redmineTrackerOptions = ref([])
+const redminePriorityOptions = ref([])
+const redmineUserOptions = ref([])
+const redmineCustomFieldOptions = ref([])
+const redmineOsValueOptions = ref([])
 const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
@@ -126,6 +134,17 @@ const form = ref({
   db_backup_webdav_password: '',
   db_backup_run_at: '02:30',
   db_backup_retention_days: 7,
+  redmine_enabled: false,
+  redmine_base_url: '',
+  redmine_api_key: '',
+  redmine_project_id: '',
+  redmine_tracker_id: null,
+  redmine_priority_id: null,
+  redmine_assigned_to_id: null,
+  redmine_project_phase_field_id: null,
+  redmine_os_field_id: null,
+  redmine_sync_visible_fields: ['tracker_id', 'priority_id'],
+  redmine_sync_options: {},
 })
 
 const previewParams = ref({
@@ -436,6 +455,30 @@ const rules = {
     message: '请输入 1-365 天',
     trigger: ['blur', 'change'],
   },
+  redmine_base_url: {
+    validator: () => {
+      if (!form.value.redmine_enabled) return true
+      if (!String(form.value.redmine_base_url || '').trim()) return new Error('请输入 Redmine 地址')
+      return true
+    },
+    trigger: ['input', 'blur'],
+  },
+  redmine_api_key: {
+    validator: () => {
+      if (!form.value.redmine_enabled) return true
+      if (!String(form.value.redmine_api_key || '').trim()) return new Error('请输入 Redmine API Key')
+      return true
+    },
+    trigger: ['input', 'blur'],
+  },
+  redmine_project_id: {
+    validator: () => {
+      if (!form.value.redmine_enabled) return true
+      if (!String(form.value.redmine_project_id || '').trim()) return new Error('请输入 Redmine 项目标识')
+      return true
+    },
+    trigger: ['blur', 'change'],
+  },
 }
 
 onMounted(() => {
@@ -482,6 +525,7 @@ async function loadData() {
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
     }
+    ensureRedmineSelectedOptions()
     await loadDatabaseBackupStatus()
     const publicRes = await api.getPublicConfig()
     appStore.setSiteConfig(publicRes.data || {})
@@ -500,6 +544,9 @@ function save() {
         allow_partner_register: form.value.allow_channel_register || form.value.allow_user_register,
         ticket_notify_by_role: normalizeTicketNotifyByRole(form.value.ticket_notify_by_role),
       }
+      if (payload.redmine_api_key === MASKED_SECRET) {
+        delete payload.redmine_api_key
+      }
       await api.updateSystemSettings(payload)
       $message.success('设置已保存并生效')
       const publicRes = await api.getPublicConfig()
@@ -509,6 +556,14 @@ function save() {
       saving.value = false
     }
   })
+}
+
+function redmineSyncOptionValue(field) {
+  return selectedRedmineSyncOptions(field)
+}
+
+function updateRedmineSyncOptionValue(field, values) {
+  setSelectedRedmineSyncOptions(field, values)
 }
 
 async function testWebdavConnection() {
@@ -523,6 +578,155 @@ async function testWebdavConnection() {
     $message.success(res?.msg || 'WebDAV连接成功')
   } finally {
     webdavTesting.value = false
+  }
+}
+
+function redmineMetadataPayload() {
+  const payload = {
+    redmine_base_url: form.value.redmine_base_url,
+    redmine_api_key: form.value.redmine_api_key,
+  }
+  if (payload.redmine_api_key === MASKED_SECRET) {
+    delete payload.redmine_api_key
+  }
+  return payload
+}
+
+function normalizeRedmineOptions(items = [], numeric = false) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const rawValue = numeric ? item.id : item.value
+      const value = numeric ? Number(rawValue) : String(rawValue || '')
+      if (numeric && (!value || Number.isNaN(value))) return null
+      if (!numeric && !value) return null
+      return {
+        label: item.label || item.name || String(value),
+        value,
+      }
+    })
+    .filter(Boolean)
+}
+
+function mergeRedmineOption(options, value, labelPrefix) {
+  if (value === null || value === undefined || value === '') return options
+  const normalizedValue = typeof value === 'number' ? value : String(value)
+  if (options.some((item) => item.value === normalizedValue)) return options
+  return [{ label: String(normalizedValue), value: normalizedValue }, ...options]
+}
+
+function ensureRedmineSelectedOptions() {
+  redmineProjectOptions.value = mergeRedmineOption(
+    redmineProjectOptions.value,
+    form.value.redmine_project_id,
+    '已保存项目',
+  )
+  redmineTrackerOptions.value = mergeRedmineOption(
+    redmineTrackerOptions.value,
+    form.value.redmine_tracker_id,
+    '已保存跟踪',
+  )
+  redminePriorityOptions.value = mergeRedmineOption(
+    redminePriorityOptions.value,
+    form.value.redmine_priority_id,
+    '已保存优先级',
+  )
+  redmineUserOptions.value = mergeRedmineOption(
+    redmineUserOptions.value,
+    form.value.redmine_assigned_to_id,
+    '已保存指派人',
+  )
+  redmineCustomFieldOptions.value = mergeRedmineOption(
+    redmineCustomFieldOptions.value,
+    form.value.redmine_project_phase_field_id,
+    '已保存自定义字段',
+  )
+  redmineCustomFieldOptions.value = mergeRedmineOption(
+    redmineCustomFieldOptions.value,
+    form.value.redmine_os_field_id,
+    '已保存自定义字段',
+  )
+}
+
+function selectedRedmineSyncOptions(field) {
+  return Array.isArray(form.value.redmine_sync_options?.[field])
+    ? form.value.redmine_sync_options[field]
+    : []
+}
+
+function setSelectedRedmineSyncOptions(field, values) {
+  form.value.redmine_sync_options = {
+    ...(form.value.redmine_sync_options || {}),
+    [field]: Array.isArray(values) ? values.map((item) => String(item)) : [],
+  }
+}
+
+function syncRedmineOptionSelection(field, options) {
+  const selected = selectedRedmineSyncOptions(field)
+  if (selected.length || !Array.isArray(options) || !options.length) return
+  setSelectedRedmineSyncOptions(field, options.map((item) => item.value))
+}
+
+function redmineOsValueOptionsFromCustomFields(fields = []) {
+  const fieldId = Number(form.value.redmine_os_field_id)
+  const osField = (fields || []).find((item) => Number(item.id) === fieldId)
+    || (fields || []).find((item) => String(item.label || item.name || '').includes('操作系统'))
+  return Array.isArray(osField?.possible_values) ? osField.possible_values : []
+}
+
+async function loadRedmineMetadata() {
+  if (!form.value.redmine_base_url) {
+    $message.warning('请先填写Redmine地址')
+    return
+  }
+  if (!form.value.redmine_api_key) {
+    $message.warning('请先填写Redmine API Key')
+    return
+  }
+  try {
+    redmineMetadataLoading.value = true
+    const res = await api.getRedmineMetadata(redmineMetadataPayload())
+    const data = res?.data || {}
+    redmineProjectOptions.value = normalizeRedmineOptions(data.projects)
+    redmineTrackerOptions.value = normalizeRedmineOptions(data.trackers, true)
+    redminePriorityOptions.value = normalizeRedmineOptions(data.priorities, true)
+    redmineUserOptions.value = normalizeRedmineOptions(data.users, true)
+    redmineCustomFieldOptions.value = normalizeRedmineOptions(data.custom_fields, true)
+    redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
+    ensureRedmineSelectedOptions()
+    if (!form.value.redmine_project_id && redmineProjectOptions.value.length) {
+      form.value.redmine_project_id = redmineProjectOptions.value[0].value
+    }
+    if (!form.value.redmine_tracker_id && redmineTrackerOptions.value.length) {
+      form.value.redmine_tracker_id = redmineTrackerOptions.value[0].value
+    }
+    if (!form.value.redmine_priority_id && redminePriorityOptions.value.length) {
+      form.value.redmine_priority_id = redminePriorityOptions.value[0].value
+    }
+    if (!form.value.redmine_assigned_to_id && redmineUserOptions.value.length) {
+      form.value.redmine_assigned_to_id = redmineUserOptions.value[0].value
+    }
+    if (!form.value.redmine_project_phase_field_id && redmineCustomFieldOptions.value.length) {
+      const item = redmineCustomFieldOptions.value.find((option) =>
+        String(option.label || '').includes('项目阶段'),
+      )
+      form.value.redmine_project_phase_field_id = item?.value || null
+    }
+    if (!form.value.redmine_os_field_id && redmineCustomFieldOptions.value.length) {
+      const item = redmineCustomFieldOptions.value.find((option) =>
+        String(option.label || '').includes('操作系统'),
+      )
+      form.value.redmine_os_field_id = item?.value || null
+    }
+    redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
+    syncRedmineOptionSelection('project_id', redmineProjectOptions.value)
+    syncRedmineOptionSelection('tracker_id', redmineTrackerOptions.value)
+    syncRedmineOptionSelection('priority_id', redminePriorityOptions.value)
+    syncRedmineOptionSelection('assigned_to_id', redmineUserOptions.value)
+    syncRedmineOptionSelection('project_phase', projectPhaseOptions.value)
+    syncRedmineOptionSelection('os', redmineOsValueOptions.value)
+    $message.success('Redmine配置选项已更新')
+  } finally {
+    redmineMetadataLoading.value = false
   }
 }
 
@@ -1031,6 +1235,170 @@ function applyPresetHtmlTemplates() {
                   </NButton>
                 </NSpace>
               </NFormItem>
+            </NCard>
+          </NTabPane>
+
+          <NTabPane name="redmine" tab="Redmine同步">
+            <NCard size="small" title="Redmine同步配置">
+              <NAlert type="info" class="mb-12">
+                技术处理页手动同步工单到 Redmine；从 Redmine 拉取时只刷新外部状态，不自动改本地工单状态。
+              </NAlert>
+              <NFormItem label="启用Redmine">
+                <NSwitch v-model:value="form.redmine_enabled" />
+              </NFormItem>
+              <NFormItem label="Redmine地址" path="redmine_base_url">
+                <NInput
+                  v-model:value="form.redmine_base_url"
+                  placeholder="例如 https://redmine.example.com"
+                />
+              </NFormItem>
+              <NFormItem label="API Key" path="redmine_api_key">
+                <NInput
+                  v-model:value="form.redmine_api_key"
+                  type="password"
+                  show-password-on="click"
+                  placeholder="保存后会以 ****** 显示"
+                />
+              </NFormItem>
+              <NFormItem>
+                <NButton type="primary" ghost :loading="redmineMetadataLoading" @click="loadRedmineMetadata">
+                  获取配置选项
+                </NButton>
+              </NFormItem>
+              <NFormItem label="项目标识" path="redmine_project_id">
+                <NSelect
+                  v-model:value="form.redmine_project_id"
+                  :options="redmineProjectOptions"
+                  filterable
+                  tag
+                  clearable
+                  placeholder="请先获取项目列表，或输入项目标识"
+                />
+              </NFormItem>
+              <NFormItem label="跟踪ID">
+                <NSelect
+                  v-model:value="form.redmine_tracker_id"
+                  :options="redmineTrackerOptions"
+                  filterable
+                  clearable
+                  placeholder="请先获取跟踪列表"
+                />
+              </NFormItem>
+              <NFormItem label="优先级ID">
+                <NSelect
+                  v-model:value="form.redmine_priority_id"
+                  :options="redminePriorityOptions"
+                  filterable
+                  clearable
+                  placeholder="请先获取优先级列表"
+                />
+              </NFormItem>
+              <NFormItem label="指派给">
+                <NSelect
+                  v-model:value="form.redmine_assigned_to_id"
+                  :options="redmineUserOptions"
+                  filterable
+                  clearable
+                  placeholder="请先获取用户列表"
+                />
+              </NFormItem>
+              <NFormItem label="项目阶段字段">
+                <NSelect
+                  v-model:value="form.redmine_project_phase_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="请选择 Redmine 的项目阶段自定义字段"
+                />
+              </NFormItem>
+              <NFormItem label="操作系统字段">
+                <NSelect
+                  v-model:value="form.redmine_os_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="请选择 Redmine 的操作系统自定义字段"
+                />
+              </NFormItem>
+              <NFormItem label="技术同步显示字段">
+                <NCheckboxGroup v-model:value="form.redmine_sync_visible_fields">
+                  <NSpace>
+                    <NCheckbox value="tracker_id">跟踪</NCheckbox>
+                    <NCheckbox value="project_id">项目标识</NCheckbox>
+                    <NCheckbox value="priority_id">优先级</NCheckbox>
+                    <NCheckbox value="assigned_to_id">指派给</NCheckbox>
+                    <NCheckbox value="project_phase">项目阶段</NCheckbox>
+                    <NCheckbox value="os">操作系统</NCheckbox>
+                  </NSpace>
+                </NCheckboxGroup>
+              </NFormItem>
+              <NFormItem label="技术可选项目标识">
+                <NSelect
+                  :value="redmineSyncOptionValue('project_id')"
+                  :options="redmineProjectOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的项目"
+                  @update:value="(value) => updateRedmineSyncOptionValue('project_id', value)"
+                />
+              </NFormItem>
+              <NFormItem label="技术可选跟踪">
+                <NSelect
+                  :value="redmineSyncOptionValue('tracker_id')"
+                  :options="redmineTrackerOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的跟踪"
+                  @update:value="(value) => updateRedmineSyncOptionValue('tracker_id', value)"
+                />
+              </NFormItem>
+              <NFormItem label="技术可选优先级">
+                <NSelect
+                  :value="redmineSyncOptionValue('priority_id')"
+                  :options="redminePriorityOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的优先级"
+                  @update:value="(value) => updateRedmineSyncOptionValue('priority_id', value)"
+                />
+              </NFormItem>
+              <NFormItem label="技术可选指派人">
+                <NSelect
+                  :value="redmineSyncOptionValue('assigned_to_id')"
+                  :options="redmineUserOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的 Redmine 用户"
+                  @update:value="(value) => updateRedmineSyncOptionValue('assigned_to_id', value)"
+                />
+              </NFormItem>
+              <NFormItem label="技术可选项目阶段">
+                <NSelect
+                  :value="redmineSyncOptionValue('project_phase')"
+                  :options="projectPhaseOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的项目阶段"
+                  @update:value="(value) => updateRedmineSyncOptionValue('project_phase', value)"
+                />
+              </NFormItem>
+              <NFormItem label="技术可选操作系统">
+                <NSelect
+                  :value="redmineSyncOptionValue('os')"
+                  :options="redmineOsValueOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择技术同步时可见的操作系统"
+                  @update:value="(value) => updateRedmineSyncOptionValue('os', value)"
+                />
+              </NFormItem>
+
             </NCard>
           </NTabPane>
 

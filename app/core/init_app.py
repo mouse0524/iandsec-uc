@@ -64,6 +64,14 @@ def _webdav_password_api_paths() -> list[str]:
     ]
 
 
+def _ticket_redmine_api_paths() -> list[str]:
+    return [
+        "/api/v1/ticket/redmine/push",
+        "/api/v1/ticket/redmine/pull",
+        "/api/v1/settings/redmine/metadata",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -672,6 +680,43 @@ async def init_apis():
     await api_controller.refresh_api()
 
 
+async def _backfill_existing_role_permissions(
+    *,
+    role_name: str,
+    api_paths: list[str],
+    component_paths: list[str] | None = None,
+) -> bool:
+    role = await Role.filter(name=role_name).first()
+    if not role:
+        return False
+
+    changed = False
+    apis = await Api.filter(path__in=api_paths)
+    if apis:
+        existing_api_ids = {api.id for api in await role.apis.filter(id__in=[api.id for api in apis])}
+        missing_apis = [api for api in apis if api.id not in existing_api_ids]
+        if missing_apis:
+            await role.apis.add(*missing_apis)
+            changed = True
+
+    if component_paths:
+        menus = await Menu.filter(Q(component__in=component_paths))
+        if menus:
+            existing_menu_ids = {menu.id for menu in await role.menus.filter(id__in=[menu.id for menu in menus])}
+            missing_menus = [menu for menu in menus if menu.id not in existing_menu_ids]
+            if missing_menus:
+                await role.menus.add(*missing_menus)
+                changed = True
+
+    if changed:
+        from app.controllers.role import role_controller
+
+        await role_controller.clear_permission_cache_by_role(role.id)
+        await role_controller.clear_role_dict_cache()
+        logger.info("[init_roles] backfilled permissions role={} api_count={}", role_name, len(apis))
+    return changed
+
+
 async def init_db():
     await Tortoise.init(config=settings.TORTOISE_ORM)
     try:
@@ -691,6 +736,14 @@ async def ensure_security_columns():
             ("ALTER TABLE `auditlog` ADD COLUMN `is_archived` BOOL NOT NULL DEFAULT 0", "auditlog.is_archived"),
             ("ALTER TABLE `ticket` ADD COLUMN `issue_type` VARCHAR(30) NOT NULL DEFAULT '现网问题'", "ticket.issue_type"),
             ("ALTER TABLE `ticket` ADD COLUMN `impact_scope` VARCHAR(30) NOT NULL DEFAULT '全部'", "ticket.impact_scope"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_issue_id` BIGINT NULL", "ticket.redmine_issue_id"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_issue_url` VARCHAR(500) NULL", "ticket.redmine_issue_url"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_sync_status` VARCHAR(20) NOT NULL DEFAULT 'never'", "ticket.redmine_sync_status"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_sync_error` TEXT NULL", "ticket.redmine_sync_error"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_synced_at` DATETIME(6) NULL", "ticket.redmine_synced_at"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_last_updated_on` DATETIME(6) NULL", "ticket.redmine_last_updated_on"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_id` BIGINT NULL", "ticket.redmine_status_id"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_name` VARCHAR(120) NULL", "ticket.redmine_status_name"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
         ]:
@@ -755,6 +808,10 @@ async def init_roles():
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/webdav-password")))
                 await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
+            await _backfill_existing_role_permissions(
+                role_name="技术",
+                api_paths=_ticket_redmine_api_paths(),
+            )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -781,7 +838,13 @@ async def init_roles():
             "/api/v1/ticket/actions",
         ]
     )
-    ticket_tech_apis = await Api.filter(path__in=["/api/v1/ticket/tech/action", "/api/v1/ticket/assign-tech"])
+    ticket_tech_apis = await Api.filter(
+        path__in=[
+            "/api/v1/ticket/tech/action",
+            "/api/v1/ticket/assign-tech",
+            *_ticket_redmine_api_paths(),
+        ]
+    )
     ticket_review_apis = await Api.filter(path__in=["/api/v1/ticket/review", "/api/v1/ticket/assign-tech"])
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
@@ -792,6 +855,7 @@ async def init_roles():
             "/api/v1/settings/update",
             "/api/v1/settings/time-sync/status",
             "/api/v1/settings/time-sync/sync",
+            "/api/v1/settings/redmine/metadata",
             "/api/v1/settings/database-backup/status",
             "/api/v1/settings/database-backup/test",
             "/api/v1/settings/database-backup/run",

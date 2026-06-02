@@ -121,6 +121,15 @@ class Ticket(BaseModel, TimestampMixin):
     root_cause = fields.CharField(max_length=120, null=True, description="问题根因", index=True)
     finished_at = fields.DatetimeField(null=True, description="完成时间", index=True)
 
+    redmine_issue_id = fields.BigIntField(null=True, description="Redmine Issue ID", index=True)
+    redmine_issue_url = fields.CharField(max_length=500, null=True, description="Redmine Issue URL")
+    redmine_sync_status = fields.CharField(max_length=20, default="never", description="Redmine sync status", index=True)
+    redmine_sync_error = fields.TextField(null=True, description="Redmine sync error")
+    redmine_synced_at = fields.DatetimeField(null=True, description="Redmine synced at")
+    redmine_last_updated_on = fields.DatetimeField(null=True, description="Redmine last updated on")
+    redmine_status_id = fields.BigIntField(null=True, description="Redmine status ID", index=True)
+    redmine_status_name = fields.CharField(max_length=120, null=True, description="Redmine status name")
+
     class Meta:
         table = "ticket"
 
