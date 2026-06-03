@@ -143,7 +143,7 @@ const form = ref({
   redmine_assigned_to_id: null,
   redmine_project_phase_field_id: null,
   redmine_os_field_id: null,
-  redmine_sync_visible_fields: ['tracker_id', 'priority_id'],
+  redmine_sync_visible_fields: [],
   redmine_sync_options: {},
 })
 
@@ -525,6 +525,7 @@ async function loadData() {
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
     }
+    await loadCachedRedmineMetadata()
     ensureRedmineSelectedOptions()
     await loadDatabaseBackupStatus()
     const publicRes = await api.getPublicConfig()
@@ -566,6 +567,13 @@ function updateRedmineSyncOptionValue(field, values) {
   setSelectedRedmineSyncOptions(field, values)
 }
 
+function redmineSyncSelectOptions(options) {
+  return (Array.isArray(options) ? options : []).map((item) => ({
+    ...item,
+    value: String(item.value),
+  }))
+}
+
 async function testWebdavConnection() {
   try {
     webdavTesting.value = true
@@ -595,12 +603,13 @@ function redmineMetadataPayload() {
 function normalizeRedmineOptions(items = [], numeric = false) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
-      const rawValue = numeric ? item.id : item.value
+      const rawValue = numeric ? (item.id ?? item.value) : (item.value ?? item.id)
       const value = numeric ? Number(rawValue) : String(rawValue || '')
       if (numeric && (!value || Number.isNaN(value))) return null
       if (!numeric && !value) return null
+      const label = item.label || item.name || item.login || String(value)
       return {
-        label: item.label || item.name || String(value),
+        label,
         value,
       }
     })
@@ -611,7 +620,7 @@ function mergeRedmineOption(options, value, labelPrefix) {
   if (value === null || value === undefined || value === '') return options
   const normalizedValue = typeof value === 'number' ? value : String(value)
   if (options.some((item) => item.value === normalizedValue)) return options
-  return [{ label: String(normalizedValue), value: normalizedValue }, ...options]
+  return [{ label: `${labelPrefix || '已保存'}：${normalizedValue}`, value: normalizedValue }, ...options]
 }
 
 function ensureRedmineSelectedOptions() {
@@ -660,17 +669,30 @@ function setSelectedRedmineSyncOptions(field, values) {
   }
 }
 
-function syncRedmineOptionSelection(field, options) {
-  const selected = selectedRedmineSyncOptions(field)
-  if (selected.length || !Array.isArray(options) || !options.length) return
-  setSelectedRedmineSyncOptions(field, options.map((item) => item.value))
-}
-
 function redmineOsValueOptionsFromCustomFields(fields = []) {
   const fieldId = Number(form.value.redmine_os_field_id)
   const osField = (fields || []).find((item) => Number(item.id) === fieldId)
     || (fields || []).find((item) => String(item.label || item.name || '').includes('操作系统'))
   return Array.isArray(osField?.possible_values) ? osField.possible_values : []
+}
+
+function applyRedmineMetadata(data = {}) {
+  redmineProjectOptions.value = normalizeRedmineOptions(data.projects)
+  redmineTrackerOptions.value = normalizeRedmineOptions(data.trackers, true)
+  redminePriorityOptions.value = normalizeRedmineOptions(data.priorities, true)
+  redmineUserOptions.value = normalizeRedmineOptions(data.users, true)
+  redmineCustomFieldOptions.value = normalizeRedmineOptions(data.custom_fields, true)
+  redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
+  ensureRedmineSelectedOptions()
+}
+
+async function loadCachedRedmineMetadata() {
+  try {
+    const res = await api.getRedmineMetadata({})
+    applyRedmineMetadata(res?.data || {})
+  } catch (error) {
+    ensureRedmineSelectedOptions()
+  }
 }
 
 async function loadRedmineMetadata() {
@@ -686,13 +708,7 @@ async function loadRedmineMetadata() {
     redmineMetadataLoading.value = true
     const res = await api.getRedmineMetadata(redmineMetadataPayload())
     const data = res?.data || {}
-    redmineProjectOptions.value = normalizeRedmineOptions(data.projects)
-    redmineTrackerOptions.value = normalizeRedmineOptions(data.trackers, true)
-    redminePriorityOptions.value = normalizeRedmineOptions(data.priorities, true)
-    redmineUserOptions.value = normalizeRedmineOptions(data.users, true)
-    redmineCustomFieldOptions.value = normalizeRedmineOptions(data.custom_fields, true)
-    redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
-    ensureRedmineSelectedOptions()
+    applyRedmineMetadata(data)
     if (!form.value.redmine_project_id && redmineProjectOptions.value.length) {
       form.value.redmine_project_id = redmineProjectOptions.value[0].value
     }
@@ -718,12 +734,6 @@ async function loadRedmineMetadata() {
       form.value.redmine_os_field_id = item?.value || null
     }
     redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
-    syncRedmineOptionSelection('project_id', redmineProjectOptions.value)
-    syncRedmineOptionSelection('tracker_id', redmineTrackerOptions.value)
-    syncRedmineOptionSelection('priority_id', redminePriorityOptions.value)
-    syncRedmineOptionSelection('assigned_to_id', redmineUserOptions.value)
-    syncRedmineOptionSelection('project_phase', projectPhaseOptions.value)
-    syncRedmineOptionSelection('os', redmineOsValueOptions.value)
     $message.success('Redmine配置选项已更新')
   } finally {
     redmineMetadataLoading.value = false
@@ -916,6 +926,9 @@ function applyPresetHtmlTemplates() {
 
           <NTabPane name="ticket" tab="工单配置">
             <NCard size="small" title="工单分类">
+              <NFormItem label="客服自动审批工单">
+                <NSwitch v-model:value="form.customer_service_auto_approve_ticket" />
+              </NFormItem>
               <NFormItem label="附件类型" path="ticket_attachment_extensions">
                 <NDynamicTags v-model:value="form.ticket_attachment_extensions" />
               </NFormItem>
@@ -923,7 +936,14 @@ function applyPresetHtmlTemplates() {
                 <NDynamicTags v-model:value="form.ticket_project_phases" />
               </NFormItem>
               <NFormItem label="客服审核阶段" path="ticket_cs_review_project_phases">
-                <NDynamicTags v-model:value="form.ticket_cs_review_project_phases" />
+                <NSelect
+                  v-model:value="form.ticket_cs_review_project_phases"
+                  multiple
+                  filterable
+                  clearable
+                  :options="form.ticket_project_phases.map((item) => ({ label: item, value: item }))"
+                  placeholder="从项目阶段中选择需要客服审核的阶段"
+                />
               </NFormItem>
               <NFormItem label="跟踪" path="ticket_issue_types">
                 <NDynamicTags v-model:value="form.ticket_issue_types" />
@@ -933,9 +953,6 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="问题分类" path="ticket_categories">
                 <NDynamicTags v-model:value="form.ticket_categories" />
-              </NFormItem>
-              <NFormItem label="客服自动审批工单">
-                <NSwitch v-model:value="form.customer_service_auto_approve_ticket" />
               </NFormItem>
               <NFormItem label="问题根因" path="ticket_root_causes">
                 <NDynamicTags v-model:value="form.ticket_root_causes" />
@@ -1265,62 +1282,11 @@ function applyPresetHtmlTemplates() {
                   获取配置选项
                 </NButton>
               </NFormItem>
-              <NFormItem label="项目标识" path="redmine_project_id">
-                <NSelect
-                  v-model:value="form.redmine_project_id"
-                  :options="redmineProjectOptions"
-                  filterable
-                  tag
-                  clearable
-                  placeholder="请先获取项目列表，或输入项目标识"
-                />
-              </NFormItem>
-              <NFormItem label="跟踪ID">
-                <NSelect
-                  v-model:value="form.redmine_tracker_id"
-                  :options="redmineTrackerOptions"
-                  filterable
-                  clearable
-                  placeholder="请先获取跟踪列表"
-                />
-              </NFormItem>
-              <NFormItem label="优先级ID">
-                <NSelect
-                  v-model:value="form.redmine_priority_id"
-                  :options="redminePriorityOptions"
-                  filterable
-                  clearable
-                  placeholder="请先获取优先级列表"
-                />
-              </NFormItem>
-              <NFormItem label="指派给">
-                <NSelect
-                  v-model:value="form.redmine_assigned_to_id"
-                  :options="redmineUserOptions"
-                  filterable
-                  clearable
-                  placeholder="请先获取用户列表"
-                />
-              </NFormItem>
-              <NFormItem label="项目阶段字段">
-                <NSelect
-                  v-model:value="form.redmine_project_phase_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="请选择 Redmine 的项目阶段自定义字段"
-                />
-              </NFormItem>
-              <NFormItem label="操作系统字段">
-                <NSelect
-                  v-model:value="form.redmine_os_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="请选择 Redmine 的操作系统自定义字段"
-                />
-              </NFormItem>
-              <NFormItem label="技术同步显示字段">
+              <NDivider title-placement="left">技术可选</NDivider>
+              <NAlert type="info" class="mb-12">
+                这里配置技术同步 Redmine 时可见、可选的字段和值；获取配置选项后默认不勾选，选择后保存生效。
+              </NAlert>
+              <NFormItem label="同步时展示字段">
                 <NCheckboxGroup v-model:value="form.redmine_sync_visible_fields">
                   <NSpace>
                     <NCheckbox value="tracker_id">跟踪</NCheckbox>
@@ -1332,10 +1298,10 @@ function applyPresetHtmlTemplates() {
                   </NSpace>
                 </NCheckboxGroup>
               </NFormItem>
-              <NFormItem label="技术可选项目标识">
+              <NFormItem label="项目标识">
                 <NSelect
                   :value="redmineSyncOptionValue('project_id')"
-                  :options="redmineProjectOptions"
+                  :options="redmineSyncSelectOptions(redmineProjectOptions)"
                   multiple
                   filterable
                   clearable
@@ -1343,10 +1309,10 @@ function applyPresetHtmlTemplates() {
                   @update:value="(value) => updateRedmineSyncOptionValue('project_id', value)"
                 />
               </NFormItem>
-              <NFormItem label="技术可选跟踪">
+              <NFormItem label="跟踪">
                 <NSelect
                   :value="redmineSyncOptionValue('tracker_id')"
-                  :options="redmineTrackerOptions"
+                  :options="redmineSyncSelectOptions(redmineTrackerOptions)"
                   multiple
                   filterable
                   clearable
@@ -1354,10 +1320,10 @@ function applyPresetHtmlTemplates() {
                   @update:value="(value) => updateRedmineSyncOptionValue('tracker_id', value)"
                 />
               </NFormItem>
-              <NFormItem label="技术可选优先级">
+              <NFormItem label="优先级">
                 <NSelect
                   :value="redmineSyncOptionValue('priority_id')"
-                  :options="redminePriorityOptions"
+                  :options="redmineSyncSelectOptions(redminePriorityOptions)"
                   multiple
                   filterable
                   clearable
@@ -1365,10 +1331,10 @@ function applyPresetHtmlTemplates() {
                   @update:value="(value) => updateRedmineSyncOptionValue('priority_id', value)"
                 />
               </NFormItem>
-              <NFormItem label="技术可选指派人">
+              <NFormItem label="指派给">
                 <NSelect
                   :value="redmineSyncOptionValue('assigned_to_id')"
-                  :options="redmineUserOptions"
+                  :options="redmineSyncSelectOptions(redmineUserOptions)"
                   multiple
                   filterable
                   clearable
@@ -1376,10 +1342,10 @@ function applyPresetHtmlTemplates() {
                   @update:value="(value) => updateRedmineSyncOptionValue('assigned_to_id', value)"
                 />
               </NFormItem>
-              <NFormItem label="技术可选项目阶段">
+              <NFormItem label="项目阶段">
                 <NSelect
                   :value="redmineSyncOptionValue('project_phase')"
-                  :options="projectPhaseOptions"
+                  :options="redmineSyncSelectOptions(form.ticket_project_phases.map((item) => ({ label: item, value: item })))"
                   multiple
                   filterable
                   clearable
@@ -1387,10 +1353,10 @@ function applyPresetHtmlTemplates() {
                   @update:value="(value) => updateRedmineSyncOptionValue('project_phase', value)"
                 />
               </NFormItem>
-              <NFormItem label="技术可选操作系统">
+              <NFormItem label="操作系统">
                 <NSelect
                   :value="redmineSyncOptionValue('os')"
-                  :options="redmineOsValueOptions"
+                  :options="redmineSyncSelectOptions(redmineOsValueOptions)"
                   multiple
                   filterable
                   clearable

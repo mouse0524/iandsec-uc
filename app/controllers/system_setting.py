@@ -168,7 +168,7 @@ class SystemSettingController:
             "redmine_assigned_to_id": _int_env("REDMINE_ASSIGNED_TO_ID", 0) or None,
             "redmine_project_phase_field_id": _int_env("REDMINE_PROJECT_PHASE_FIELD_ID", 0) or None,
             "redmine_os_field_id": _int_env("REDMINE_OS_FIELD_ID", 0) or None,
-            "redmine_sync_visible_fields": ["project_id", "tracker_id", "priority_id"],
+            "redmine_sync_visible_fields": [],
             "redmine_sync_options": {},
         },
     }

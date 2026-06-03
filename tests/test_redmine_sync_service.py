@@ -36,6 +36,7 @@ class FakeTicket:
         self.redmine_status_id = None
         self.redmine_status_name = None
         self.save_calls = 0
+        self.to_dict_calls = 0
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -43,6 +44,7 @@ class FakeTicket:
         self.save_calls += 1
 
     async def to_dict(self):
+        self.to_dict_calls += 1
         return dict(self.__dict__)
 
 
@@ -69,17 +71,91 @@ class FakeClient:
             id=issue_id,
             updated_on="2026-06-01T12:00:00+08:00",
             status=SimpleNamespace(id=5, name="Resolved"),
+            journals=[],
         )
 
     async def upload(self, filename, content, *, content_type="application/octet-stream"):
         self.uploads.append((filename, content, content_type))
         return f"token-{len(self.uploads)}"
 
+    async def download_attachment(self, attachment):
+        self.calls.append(("download_attachment", attachment))
+        return b"image-content"
+
+
+class FakeExistsQuery:
+    def __init__(self, exists):
+        self._exists = exists
+
+    async def exists(self):
+        return self._exists
+
+
+class FakeTicketActionLog:
+    rows = []
+
+    @classmethod
+    def filter(cls, **kwargs):
+        marker = kwargs.get("comment__contains")
+        exists = any(
+            row.get("ticket_id") == kwargs.get("ticket_id") and marker and marker in str(row.get("comment") or "")
+            for row in cls.rows
+        )
+        return FakeExistsQuery(exists)
+
+    @classmethod
+    async def create(cls, **kwargs):
+        cls.rows.append(kwargs)
+        return SimpleNamespace(**kwargs)
+
+
+class FakeTicketAttachment:
+    rows = []
+    next_id = 1000
+
+    @classmethod
+    def filter(cls, **kwargs):
+        return FakeAttachmentQuery(kwargs)
+
+    @classmethod
+    async def create(cls, **kwargs):
+        cls.next_id += 1
+        row = SimpleNamespace(id=cls.next_id, **kwargs)
+        cls.rows.append(row)
+        return row
+
+
+class FakeAttachmentQuery:
+    def __init__(self, kwargs):
+        self.kwargs = kwargs
+
+    async def first(self):
+        marker = self.kwargs.get("file_path__contains")
+        ticket_id = self.kwargs.get("ticket_id")
+        for row in FakeTicketAttachment.rows:
+            if ticket_id is not None and getattr(row, "ticket_id", None) != ticket_id:
+                continue
+            if marker and marker not in str(getattr(row, "file_path", "")):
+                continue
+            return row
+        return None
+
+    def order_by(self, *args):
+        return self
+
+    def __iter__(self):
+        return iter(FakeTicketAttachment.rows)
+
 
 @pytest.fixture(autouse=True)
 def reset_fake_client(monkeypatch):
     FakeClient.instances = []
+    FakeTicketActionLog.rows = []
+    FakeTicketAttachment.rows = []
+    FakeTicketAttachment.next_id = 1000
     monkeypatch.setattr("app.services.redmine_sync_service.RedmineClient", FakeClient)
+    monkeypatch.setattr("app.services.redmine_sync_service.TicketActionLog", FakeTicketActionLog)
+    monkeypatch.setattr("app.services.redmine_sync_service.TicketAttachment", FakeTicketAttachment)
 
 
 @pytest.fixture
@@ -270,6 +346,145 @@ async def test_pull_ticket_saves_redmine_status_without_local_status_mutation(co
     assert ticket.redmine_status_id == 5
     assert ticket.redmine_status_name == "Resolved"
     assert isinstance(ticket.redmine_last_updated_on, datetime)
+
+
+@pytest.mark.anyio
+async def test_pull_ticket_imports_redmine_journal_notes(config, monkeypatch):
+    ticket = FakeTicket(redmine_issue_id=88, status="tech_processing")
+    service = RedmineSyncService()
+
+    async def get_issue(self, issue_id, **params):
+        self.calls.append(("get_issue", issue_id, params))
+        return SimpleNamespace(
+            id=issue_id,
+            updated_on="2026-06-01T12:00:00+08:00",
+            status=SimpleNamespace(id=5, name="Resolved"),
+            journals=[
+                SimpleNamespace(
+                    id=101,
+                    notes="需要现场补充日志",
+                    user=SimpleNamespace(name="Redmine User"),
+                    created_on="2026-06-01T11:50:00+08:00",
+                ),
+                SimpleNamespace(id=102, notes="  "),
+            ],
+        )
+
+    monkeypatch.setattr(FakeClient, "get_issue", get_issue)
+
+    await service.pull_ticket(ticket, operator_id=7)
+
+    assert len(FakeTicketActionLog.rows) == 1
+    row = FakeTicketActionLog.rows[0]
+    assert row["ticket_id"] == ticket.id
+    assert row["action"] == "tech_note"
+    assert row["from_status"] == ticket.status
+    assert row["to_status"] == ticket.status
+    assert row["operator_id"] == 7
+    assert "<!-- redmine-journal:101 -->" in row["comment"]
+    assert "Redmine备注人：Redmine User" in row["comment"]
+    assert "Redmine备注时间：2026-06-01 11:50:00" in row["comment"]
+    assert "备注内容：需要现场补充日志" in row["comment"]
+
+
+@pytest.mark.anyio
+async def test_pull_ticket_skips_existing_redmine_journal_notes(config, monkeypatch):
+    ticket = FakeTicket(redmine_issue_id=88, status="tech_processing")
+    service = RedmineSyncService()
+    FakeTicketActionLog.rows.append({"ticket_id": ticket.id, "comment": "<!-- redmine-journal:101 -->\n旧备注"})
+
+    async def get_issue(self, issue_id, **params):
+        self.calls.append(("get_issue", issue_id, params))
+        return SimpleNamespace(
+            id=issue_id,
+            updated_on="2026-06-01T12:00:00+08:00",
+            status=SimpleNamespace(id=5, name="Resolved"),
+            attachments=[
+                SimpleNamespace(
+                    id=77,
+                    filename="image.png",
+                    content_type="image/png",
+                    content_url="https://redmine.example.com/attachments/77/image.png",
+                )
+            ],
+            journals=[SimpleNamespace(id=101, notes="!image.png!")],
+        )
+
+    monkeypatch.setattr(FakeClient, "get_issue", get_issue)
+
+    await service.pull_ticket(ticket, operator_id=7)
+
+    assert len(FakeTicketActionLog.rows) == 1
+    assert FakeTicketAttachment.rows == []
+    assert not any(call[0] == "download_attachment" for call in FakeClient.instances[0].calls)
+
+
+@pytest.mark.anyio
+async def test_pull_ticket_imports_redmine_note_images_as_local_attachments(config, monkeypatch, tmp_path):
+    ticket = FakeTicket(redmine_issue_id=88, status="tech_processing")
+    service = RedmineSyncService()
+    monkeypatch.setattr("app.services.redmine_sync_service.settings.UPLOAD_DIR", str(tmp_path))
+
+    async def get_issue(self, issue_id, **params):
+        self.calls.append(("get_issue", issue_id, params))
+        return SimpleNamespace(
+            id=issue_id,
+            updated_on="2026-06-01T12:00:00+08:00",
+            status=SimpleNamespace(id=5, name="Resolved"),
+            attachments=[
+                SimpleNamespace(
+                    id=77,
+                    filename="image.png",
+                    content_type="image/png",
+                    content_url="https://redmine.example.com/attachments/77/image.png",
+                )
+            ],
+            journals=[SimpleNamespace(id=101, notes="!image.png!")],
+        )
+
+    monkeypatch.setattr(FakeClient, "get_issue", get_issue)
+
+    await service.pull_ticket(ticket, operator_id=7)
+
+    assert len(FakeTicketAttachment.rows) == 1
+    attachment = FakeTicketAttachment.rows[0]
+    assert attachment.ticket_id == ticket.id
+    assert attachment.origin_name == "image.png"
+    assert attachment.mime_type == "image/png"
+    assert attachment.file_size == len(b"image-content")
+    assert "redmine-88-77" in attachment.file_path
+    assert (tmp_path / attachment.file_path).read_bytes() == b"image-content"
+    assert FakeClient.instances[0].calls[-1][0] == "download_attachment"
+    assert f'/api/v1/ticket/attachment/download?attachment_id={attachment.id}' in FakeTicketActionLog.rows[0]["comment"]
+    assert "<img" in FakeTicketActionLog.rows[0]["comment"]
+
+
+@pytest.mark.anyio
+async def test_pull_ticket_only_imports_attachments_referenced_by_new_notes(config, monkeypatch, tmp_path):
+    ticket = FakeTicket(redmine_issue_id=88, status="tech_processing")
+    service = RedmineSyncService()
+    monkeypatch.setattr("app.services.redmine_sync_service.settings.UPLOAD_DIR", str(tmp_path))
+
+    async def get_issue(self, issue_id, **params):
+        self.calls.append(("get_issue", issue_id, params))
+        return SimpleNamespace(
+            id=issue_id,
+            updated_on="2026-06-01T12:00:00+08:00",
+            status=SimpleNamespace(id=5, name="Resolved"),
+            attachments=[
+                SimpleNamespace(id=77, filename="image.png", content_type="image/png", content_url="https://redmine.example.com/attachments/77/image.png"),
+                SimpleNamespace(id=78, filename="unused.png", content_type="image/png", content_url="https://redmine.example.com/attachments/78/unused.png"),
+            ],
+            journals=[SimpleNamespace(id=101, notes="!image.png!")],
+        )
+
+    monkeypatch.setattr(FakeClient, "get_issue", get_issue)
+
+    await service.pull_ticket(ticket, operator_id=7)
+
+    assert len(FakeTicketAttachment.rows) == 1
+    assert FakeTicketAttachment.rows[0].origin_name == "image.png"
+    assert len([call for call in FakeClient.instances[0].calls if call[0] == "download_attachment"]) == 1
 
 
 @pytest.mark.anyio

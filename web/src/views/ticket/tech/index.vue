@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NCard, NInput, NModal, NSelect, NSpace, NTag } from 'naive-ui'
+import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NSpace, NTag, NTooltip } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
@@ -52,7 +52,7 @@ const redmineDefaultTrackerId = ref(null)
 const redmineDefaultProjectId = ref(null)
 const redmineDefaultPriorityId = ref(null)
 const redmineDefaultAssignedToId = ref(null)
-const redmineSyncVisibleFields = ref(['project_id', 'tracker_id', 'priority_id'])
+const redmineSyncVisibleFields = ref([])
 const redmineSyncOptions = ref({})
 const redmineProjectOptions = ref([])
 const redmineTrackerOptionsFromApi = ref([])
@@ -263,8 +263,24 @@ function filterRedmineOptions(field, options) {
   const allowed = Array.isArray(redmineSyncOptions.value?.[field])
     ? redmineSyncOptions.value[field].map((item) => String(item))
     : []
-  if (!allowed.length) return options
+  if (!allowed.length) return []
   return options.filter((item) => allowed.includes(String(item.value)))
+}
+
+function normalizeOptionText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function findOptionByText(options, text) {
+  const target = normalizeOptionText(text)
+  if (!target) return null
+  return options.find((item) => normalizeOptionText(item.value) === target)
+    || options.find((item) => normalizeOptionText(item.label) === target)
+    || options.find((item) => {
+      const label = normalizeOptionText(item.label)
+      return label && (label.includes(target) || target.includes(label))
+    })
+    || null
 }
 
 async function loadRedmineOptions() {
@@ -280,16 +296,13 @@ async function loadRedmineOptions() {
     redmineDefaultTrackerId.value = Number(res?.data?.redmine_tracker_id) || null
     redmineDefaultPriorityId.value = Number(res?.data?.redmine_priority_id) || null
     redmineDefaultAssignedToId.value = Number(res?.data?.redmine_assigned_to_id) || null
-    redmineSyncVisibleFields.value = Array.isArray(res?.data?.redmine_sync_visible_fields) && res.data.redmine_sync_visible_fields.length
+    redmineSyncVisibleFields.value = Array.isArray(res?.data?.redmine_sync_visible_fields)
       ? res.data.redmine_sync_visible_fields
-      : ['project_id', 'tracker_id', 'priority_id']
+      : []
     redmineSyncOptions.value = res?.data?.redmine_sync_options || {}
     redmineProjectOptions.value = filterRedmineOptions('project_id', projects
       .map((item) => ({ label: item.label || item.name || String(item.value || item.id), value: String(item.value || item.id) }))
       .filter((item) => item.value))
-    if (redmineDefaultProjectId.value && !redmineProjectOptions.value.some((item) => item.value === redmineDefaultProjectId.value)) {
-      redmineProjectOptions.value.unshift({ label: redmineDefaultProjectId.value, value: redmineDefaultProjectId.value })
-    }
     redmineTrackerOptionsFromApi.value = filterRedmineOptions('tracker_id', trackers
       .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
       .filter((item) => item.value))
@@ -311,34 +324,31 @@ async function loadRedmineOptions() {
   }
 }
 function defaultRedmineTrackerId(row) {
-  if (redmineDefaultTrackerId.value && redmineTrackerOptions.value.some((item) => item.value === redmineDefaultTrackerId.value)) {
-    return redmineDefaultTrackerId.value
-  }
   const issueType = String(row?.issue_type || '')
-  const preferred = issueType.includes('需求') ? 9 : 8
-  if (redmineTrackerOptions.value.some((item) => item.value === preferred)) return preferred
-  return redmineTrackerOptions.value[0]?.value || preferred
+  const matched = findOptionByText(redmineTrackerOptions.value, issueType)
+  if (matched) return matched.value
+
+  const preferred = issueType.includes('需求') ? 9 : issueType.includes('建议') ? null : 8
+  if (preferred && redmineTrackerOptions.value.some((item) => item.value === preferred)) return preferred
+  return redmineTrackerOptions.value[0]?.value || null
 }
 
 function defaultRedmineProjectId() {
-  if (redmineDefaultProjectId.value && redmineProjectOptions.value.some((item) => item.value === redmineDefaultProjectId.value)) {
-    return redmineDefaultProjectId.value
-  }
-  return redmineProjectOptions.value[0]?.value || redmineDefaultProjectId.value
+  return redmineProjectOptions.value[0]?.value || null
 }
 
 function defaultRedminePriorityId() {
-  if (redmineDefaultPriorityId.value && redminePriorityOptions.value.some((item) => item.value === redmineDefaultPriorityId.value)) {
-    return redmineDefaultPriorityId.value
-  }
-  return redminePriorityOptions.value[0]?.value || redmineDefaultPriorityId.value || 2
+  return redminePriorityOptions.value[0]?.value || null
 }
 
 function defaultRedmineAssignedToId() {
-  if (redmineDefaultAssignedToId.value && redmineUserOptions.value.some((item) => item.value === redmineDefaultAssignedToId.value)) {
-    return redmineDefaultAssignedToId.value
-  }
-  return redmineUserOptions.value[0]?.value || null
+  return null
+}
+
+function defaultRedmineProjectPhase(row) {
+  const matched = findOptionByText(redmineProjectPhaseOptions.value, row?.project_phase)
+  if (matched) return matched.value
+  return redmineProjectPhaseOptions.value[0]?.value || ''
 }
 
 async function openRedmineSync(row) {
@@ -349,7 +359,7 @@ async function openRedmineSync(row) {
     tracker_id: defaultRedmineTrackerId(row),
     priority_id: defaultRedminePriorityId(),
     assigned_to_id: defaultRedmineAssignedToId(),
-    project_phase: redmineProjectPhaseOptions.value.some((item) => item.value === row.project_phase) ? row.project_phase : redmineProjectPhaseOptions.value[0]?.value || '',
+    project_phase: defaultRedmineProjectPhase(row),
     os_value: '',
   }
   redmineVisible.value = true
@@ -375,6 +385,9 @@ function redmineFieldVisible(field) {
 }
 
 const redmineProjectPhaseOptions = computed(() => filterRedmineOptions('project_phase', projectPhaseOptions.value))
+const hasVisibleRedmineFields = computed(() => {
+  return ['project_id', 'tracker_id', 'priority_id', 'assigned_to_id', 'project_phase', 'os'].some((field) => redmineFieldVisible(field))
+})
 
 async function submitRedmineSync() {
   if (!pendingRedmineRow.value) return
@@ -421,7 +434,8 @@ async function pullRedmine(row) {
     $message.success(res?.msg || 'Redmine状态已更新')
     $table.value?.handleSearch()
     if (currentTicket.value?.id === row.id) {
-      currentTicket.value = res?.data || currentTicket.value
+      const detailRes = await api.getTicketById({ ticket_id: row.id })
+      currentTicket.value = detailRes?.data || res?.data || currentTicket.value
     }
   } finally {
     setRedmineLoading(row.id, false)
@@ -442,6 +456,61 @@ function redmineSyncTagType(row) {
   if (row.redmine_sync_status === 'success') return 'success'
   if (row.redmine_sync_status === 'syncing') return 'info'
   return 'warning'
+}
+
+function renderRedmineCell(row) {
+  const statusText = redmineDisplayStatus(row)
+  const issueText = row.redmine_issue_id ? `#${row.redmine_issue_id}` : '未关联'
+  const tooltipText = row.redmine_issue_id
+    ? `Redmine ${issueText}，${statusText}`
+    : `Redmine ${statusText}`
+  const tags = row.redmine_issue_id
+    ? [
+        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => issueText }),
+        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => statusText }),
+      ]
+    : [
+        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => statusText }),
+      ]
+  return h(
+    NTooltip,
+    { trigger: 'hover' },
+    {
+      trigger: () => h('div', { class: 'redmine-cell' }, tags),
+      default: () => tooltipText,
+    }
+  )
+}
+
+function redmineMoreOptions(row) {
+  const options = [
+    { label: row.redmine_issue_id ? '更新Redmine' : '同步Redmine', key: 'push-redmine' },
+  ]
+  if (row.redmine_issue_id) {
+    options.push({ label: '拉取Redmine', key: 'pull-redmine' })
+    if (row.redmine_issue_url) {
+      options.push({ label: '打开Redmine', key: 'open-redmine' })
+    }
+  }
+  if (row.status === 'tech_processing') {
+    options.push(
+      { label: '记录备注', key: 'tech-note' },
+      { label: '处理完成', key: 'finish' },
+      { label: '技术驳回', key: 'tech-reject' },
+      { label: '改派技术', key: 'assign-tech' },
+    )
+  }
+  return options
+}
+
+function handleMoreAction(key, row) {
+  if (key === 'push-redmine') return openRedmineSync(row)
+  if (key === 'pull-redmine') return pullRedmine(row)
+  if (key === 'open-redmine') return openRedmine(row)
+  if (key === 'tech-note') return openTechAction(row, 'tech_note')
+  if (key === 'finish') return openTechAction(row, 'finish')
+  if (key === 'tech-reject') return openTechAction(row, 'tech_reject')
+  if (key === 'assign-tech') return openAssignAction(row)
 }
 
 const columns = [
@@ -476,13 +545,7 @@ const columns = [
     align: 'center',
     width: 160,
     render(row) {
-      if (!row.redmine_issue_id) {
-        return h(NTag, { type: redmineSyncTagType(row), bordered: false }, { default: () => redmineDisplayStatus(row) })
-      }
-      return h('div', { class: 'redmine-cell' }, [
-        h(NTag, { type: redmineSyncTagType(row), bordered: false }, { default: () => `#${row.redmine_issue_id}` }),
-        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small' }, { default: () => redmineDisplayStatus(row) }),
-      ])
+      return renderRedmineCell(row)
     },
   },
   {
@@ -501,8 +564,9 @@ const columns = [
     title: '操作',
     key: 'actions',
     align: 'center',
-    width: 300,
+    width: 220,
     render(row) {
+      const moreOptions = redmineMoreOptions(row)
       const buttons = [
         h(
           NButton,
@@ -514,84 +578,27 @@ const columns = [
           { default: () => '详情' }
         ),
       ]
-      buttons.push(
-        h(
-          NButton,
-          {
-            size: 'small',
-            color: '#7c3aed',
-            textColor: '#fff',
-            loading: redmineLoading(row),
-            onClick: () => openRedmineSync(row),
-          },
-          { default: () => (row.redmine_issue_id ? '更新Redmine' : '同步Redmine') }
-        )
-      )
-      if (row.redmine_issue_id) {
+      if (moreOptions.length) {
         buttons.push(
           h(
-            NButton,
+            NDropdown,
             {
-              size: 'small',
-              color: '#0f766e',
-              textColor: '#fff',
-              loading: redmineLoading(row),
-              onClick: () => pullRedmine(row),
+              trigger: 'click',
+              options: moreOptions,
+              onSelect: (key) => handleMoreAction(key, row),
             },
-            { default: () => '拉取Redmine' }
-          )
-        )
-        if (row.redmine_issue_url) {
-          buttons.push(
-            h(
-              NButton,
-              {
-                size: 'small',
-                color: '#475569',
-                textColor: '#fff',
-                onClick: () => openRedmine(row),
-              },
-              { default: () => '打开' }
-            )
-          )
-        }
-      }
-
-      if (row.status === 'tech_processing') {
-        buttons.push(
-          h(
-            NButton,
             {
-              size: 'small',
-              type: 'primary',
-              onClick: () => openTechAction(row, 'tech_note'),
-            },
-            { default: () => '备注' }
-          )
-        )
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: 'success',
-              onClick: () => openTechAction(row, 'finish'),
-            },
-            { default: () => '完成' }
-          )
-        )
-        buttons.push(
-          h(
-            NButton,
-            { size: 'small', type: 'error', onClick: () => openTechAction(row, 'tech_reject') },
-            { default: () => '驳回' }
-          )
-        )
-        buttons.push(
-          h(
-            NButton,
-            { size: 'small', type: 'warning', onClick: () => openAssignAction(row) },
-            { default: () => '改派技术' }
+              default: () => h(
+                NButton,
+                {
+                  size: 'small',
+                  color: '#7c3aed',
+                  textColor: '#fff',
+                  loading: redmineLoading(row),
+                },
+                { default: () => '更多' }
+              ),
+            }
           )
         )
       }
@@ -685,6 +692,9 @@ const columns = [
       <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
       <NModal v-model:show="redmineVisible" preset="card" style="width: 520px" title="同步Redmine">
+        <NAlert v-if="!hasVisibleRedmineFields" type="info" class="mb-12">
+          当前未配置技术可选字段，本次同步将使用 Redmine 后台默认配置。
+        </NAlert>
         <NSelect
           v-if="redmineFieldVisible('project_id')"
           v-model:value="redmineForm.project_id"
@@ -858,7 +868,8 @@ const columns = [
   display: flex;
   justify-content: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .redmine-cell {
@@ -866,6 +877,14 @@ const columns = [
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  cursor: default;
+}
+
+.redmine-tag {
+  min-width: 68px;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .modal-actions {

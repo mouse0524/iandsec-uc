@@ -28,6 +28,7 @@ const props = defineProps({
 const attachments = computed(() => props.ticket?.attachments || [])
 const imageAttachments = computed(() => attachments.value.filter((item) => isImageName(item.origin_name || item.file_path || '')))
 const imagePreviewMap = ref({})
+const actionImagePreviewMap = ref({})
 const descriptionImagePreviewVisible = ref(false)
 const descriptionImagePreviewSrc = ref('')
 const descriptionImagePreviewAlt = ref('')
@@ -45,6 +46,9 @@ const redmineDisplayStatus = computed(() => {
 
 function revokeImagePreviewUrls() {
   Object.values(imagePreviewMap.value || {}).forEach((url) => {
+    if (url) URL.revokeObjectURL(url)
+  })
+  Object.values(actionImagePreviewMap.value || {}).forEach((url) => {
     if (url) URL.revokeObjectURL(url)
   })
 }
@@ -74,12 +78,47 @@ function openTimelineImagePreview(event) {
   openDescriptionImagePreview(event)
 }
 
+function extractAttachmentIdFromUrl(url) {
+  const text = String(url || '')
+  const match = text.match(/[?&]attachment_id=(\d+)/)
+  return match ? Number(match[1]) : null
+}
+
+function actionImageKey(actionId, attachmentId) {
+  return `${actionId || 'action'}:${attachmentId}`
+}
+
+function collectActionImageRefs(actions) {
+  const refs = []
+  const seen = new Set()
+  for (const action of actions || []) {
+    const html = String(action?.comment || '')
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    for (const img of Array.from(doc.querySelectorAll('img[src]'))) {
+      const attachmentId = extractAttachmentIdFromUrl(img.getAttribute('src'))
+      if (!attachmentId) continue
+      const key = actionImageKey(action.id, attachmentId)
+      if (seen.has(key)) continue
+      seen.add(key)
+      refs.push({ key, attachmentId })
+    }
+  }
+  return refs
+}
+
 watch(
-  () => [props.visible, props.ticket?.id, imageAttachments.value.length],
+  () => [
+    props.visible,
+    props.ticket?.id,
+    imageAttachments.value.map((item) => item.id).join(','),
+    (props.ticket?.actions || []).map((item) => `${item.id}:${item.updated_at || item.created_at || ''}`).join(','),
+  ],
   async ([visible]) => {
     if (!visible) {
       revokeImagePreviewUrls()
       imagePreviewMap.value = {}
+      actionImagePreviewMap.value = {}
       closeDescriptionImagePreview()
       return
     }
@@ -95,6 +134,18 @@ watch(
       }
     }
     imagePreviewMap.value = nextMap
+
+    const nextActionMap = {}
+    for (const ref of collectActionImageRefs(props.ticket?.actions || [])) {
+      try {
+        const res = await api.downloadTicketAttachment({ attachment_id: ref.attachmentId })
+        const blob = res instanceof Blob ? res : new Blob([res])
+        nextActionMap[ref.key] = URL.createObjectURL(blob)
+      } catch {
+        nextActionMap[ref.key] = ''
+      }
+    }
+    actionImagePreviewMap.value = nextActionMap
   },
   { immediate: true }
 )
@@ -102,6 +153,7 @@ watch(
 onBeforeUnmount(() => {
   revokeImagePreviewUrls()
   imagePreviewMap.value = {}
+  actionImagePreviewMap.value = {}
 })
 
 async function openAttachment(item) {
@@ -135,7 +187,16 @@ function renderActionContent(item) {
     const base = item.comment?.trim() || '处理完成'
     return sanitizeHtml(`${base}（根因：${props.ticket.root_cause}）`)
   }
-  return sanitizeHtml(item.comment || '-')
+  const sanitized = sanitizeHtml(item.comment || '-')
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(sanitized, 'text/html')
+  for (const img of Array.from(doc.querySelectorAll('img[src]'))) {
+    const attachmentId = extractAttachmentIdFromUrl(img.getAttribute('src'))
+    if (!attachmentId) continue
+    const previewUrl = actionImagePreviewMap.value[actionImageKey(item.id, attachmentId)]
+    if (previewUrl) img.setAttribute('src', previewUrl)
+  }
+  return doc.body.innerHTML
 }
 
 function isRejectAction(action) {
@@ -326,7 +387,7 @@ function getActionIconClass(action) {
             </span>
           </template>
           <div class="timeline-content">
-            <div class="timeline-comment" @dblclick="openTimelineImagePreview" v-html="renderActionContent(item)"></div>
+            <div class="timeline-comment" @click="openTimelineImagePreview" v-html="renderActionContent(item)"></div>
             <div class="timeline-meta">操作者：{{ item.operator_display || item.operator_name || item.operator_id || '-' }}</div>
             <div v-if="item.created_at" class="timeline-meta">时间：{{ item.created_at }}</div>
           </div>

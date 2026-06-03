@@ -6,6 +6,7 @@ import html
 import mimetypes
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,8 @@ import anyio
 from fastapi import HTTPException
 
 from app.controllers.system_setting import system_setting_controller
-from app.models.admin import Ticket, TicketAttachment
+from app.models.admin import Ticket, TicketActionLog, TicketAttachment
+from app.models.enums import TicketActionType
 from app.services.redmine_client import RedmineClient
 from app.settings import settings
 
@@ -95,6 +97,15 @@ class RedmineSyncService:
             ticket.redmine_sync_error = None
             ticket.redmine_synced_at = now
             await ticket.save()
+            journals = await self._pending_journal_notes(ticket, issue)
+            attachment_map = await self._sync_redmine_attachments(
+                ticket,
+                issue,
+                client=client,
+                operator_id=operator_id,
+                filenames=self._journal_image_filenames(journals),
+            )
+            await self._sync_journal_notes(ticket, journals, operator_id=operator_id, attachment_map=attachment_map)
             return await ticket.to_dict()
         except Exception as exc:
             if isinstance(exc, HTTPException):
@@ -339,6 +350,167 @@ class RedmineSyncService:
         ticket.redmine_synced_at = now
         await ticket.save()
 
+    async def _sync_redmine_attachments(
+        self,
+        ticket: Ticket,
+        issue: Any,
+        *,
+        client: RedmineClient,
+        operator_id: int,
+        filenames: set[str] | None = None,
+    ) -> dict[str, TicketAttachment]:
+        filenames = filenames or set()
+        if not filenames:
+            return {}
+        result = {}
+        for attachment in self._iter_values(self._get_value(issue, "attachments")):
+            filename = self._attachment_name(attachment)
+            if not filename:
+                continue
+            if filename not in filenames:
+                continue
+            attachment_id = self._get_value(attachment, "id")
+            marker = f"redmine-{ticket.redmine_issue_id}-{attachment_id}" if attachment_id is not None else ""
+            existing = None
+            if marker:
+                existing = await TicketAttachment.filter(ticket_id=ticket.id, file_path__contains=marker).first()
+            if existing:
+                result[filename] = existing
+                continue
+            try:
+                content = await client.download_attachment(attachment)
+            except Exception:
+                continue
+            if not content:
+                continue
+            saved = await self._save_redmine_attachment(
+                ticket=ticket,
+                filename=filename,
+                content=content,
+                content_type=self._redmine_attachment_content_type(attachment, filename),
+                operator_id=operator_id,
+                marker=marker,
+            )
+            result[filename] = saved
+        return result
+
+    async def _save_redmine_attachment(
+        self,
+        *,
+        ticket: Ticket,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        operator_id: int,
+        marker: str,
+    ) -> TicketAttachment:
+        safe_filename = os.path.basename(filename) or "redmine-attachment"
+        ext = Path(safe_filename).suffix.lower().lstrip(".") or "bin"
+        now = datetime.now()
+        rel_dir = os.path.join("tickets", now.strftime("%Y"), now.strftime("%m"), now.strftime("%d"))
+        abs_dir = Path(settings.UPLOAD_DIR) / rel_dir
+        await anyio.to_thread.run_sync(abs_dir.mkdir, 0o777, True, True)
+        stored_prefix = marker or f"redmine-{ticket.redmine_issue_id}-{uuid.uuid4().hex}"
+        stored_name = f"{stored_prefix}-{uuid.uuid4().hex}.{ext}"
+        rel_path = os.path.join(rel_dir, stored_name).replace("\\", "/")
+        abs_path = Path(settings.UPLOAD_DIR) / rel_path
+        await anyio.to_thread.run_sync(abs_path.write_bytes, content)
+        return await TicketAttachment.create(
+            ticket_id=ticket.id,
+            origin_name=safe_filename,
+            file_path=rel_path,
+            file_size=len(content),
+            mime_type=content_type,
+            uploader_id=operator_id,
+        )
+
+    def _redmine_attachment_content_type(self, attachment: Any, filename: str) -> str:
+        return str(
+            self._get_value(attachment, "content_type")
+            or self._get_value(attachment, "mime_type")
+            or mimetypes.guess_type(filename)[0]
+            or "application/octet-stream"
+        )
+
+    async def _pending_journal_notes(self, ticket: Ticket, issue: Any) -> list[dict[str, Any]]:
+        result = []
+        for journal in self._iter_values(self._get_value(issue, "journals")):
+            journal_id = self._get_value(journal, "id")
+            marker = f"<!-- redmine-journal:{journal_id} -->" if journal_id is not None else ""
+            notes = str(self._get_value(journal, "notes") or "").strip()
+            if not notes:
+                continue
+            if marker and await TicketActionLog.filter(ticket_id=ticket.id, comment__contains=marker).exists():
+                continue
+            result.append({"journal": journal, "marker": marker, "notes": notes})
+        return result
+
+    def _journal_image_filenames(self, journals: list[dict[str, Any]]) -> set[str]:
+        result = set()
+        for item in journals:
+            for match in re.finditer(r"!([^!\r\n]+)!", str(item.get("notes") or "")):
+                filename = html.unescape(match.group(1)).strip()
+                if filename:
+                    result.add(filename)
+        return result
+
+    async def _sync_journal_notes(
+        self,
+        ticket: Ticket,
+        journals: list[dict[str, Any]],
+        *,
+        operator_id: int,
+        attachment_map: dict[str, TicketAttachment] | None = None,
+    ) -> int:
+        attachment_map = attachment_map or {}
+        created_count = 0
+        for item in journals:
+            journal = item["journal"]
+            marker = item["marker"]
+            notes = item["notes"]
+
+            user = self._get_value(journal, "user")
+            author = self._get_value(user, "name") or self._get_value(user, "login") or self._get_value(user, "id") or "-"
+            created_on = self._parse_datetime(self._get_value(journal, "created_on"))
+            created_text = created_on.strftime("%Y-%m-%d %H:%M:%S") if created_on else "-"
+            notes = self._format_redmine_note_content(notes, attachment_map)
+            comment = "\n".join(
+                part
+                for part in [
+                    marker,
+                    f"Redmine备注人：{author}",
+                    f"Redmine备注时间：{created_text}",
+                    f"备注内容：{notes}",
+                ]
+                if part != ""
+            )
+            await TicketActionLog.create(
+                ticket_id=ticket.id,
+                action=TicketActionType.TECH_NOTE,
+                from_status=ticket.status,
+                to_status=ticket.status,
+                operator_id=operator_id,
+                comment=comment,
+            )
+            created_count += 1
+        return created_count
+
+    def _format_redmine_note_content(self, notes: str, attachment_map: dict[str, TicketAttachment]) -> str:
+        text = html.escape(notes)
+        text = re.sub(r"\r\n|\r|\n", "<br>", text)
+
+        def replace_image(match: re.Match) -> str:
+            filename = html.unescape(match.group(1)).strip()
+            attachment = attachment_map.get(filename)
+            if not attachment:
+                return html.escape(match.group(0))
+            return (
+                f'<br><img src="/api/v1/ticket/attachment/download?attachment_id={attachment.id}" '
+                f'alt="{html.escape(filename, quote=True)}" loading="lazy" decoding="async"><br>'
+            )
+
+        return re.sub(r"!([^!\r\n]+)!", replace_image, text)
+
     @staticmethod
     def _get_value(value: Any, key: str) -> Any:
         if value is None:
@@ -346,6 +518,17 @@ class RedmineSyncService:
         if isinstance(value, dict):
             return value.get(key)
         return getattr(value, key, None)
+
+    @staticmethod
+    def _iter_values(value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        try:
+            return list(value)
+        except TypeError:
+            return []
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime | None:

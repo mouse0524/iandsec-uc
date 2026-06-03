@@ -57,10 +57,15 @@ class FakeRedmine:
         self.user = FakeListResource([SimpleNamespace(id=7, login="tech", firstname="Tech", lastname="User")])
         self.custom_field = FakeListResource([SimpleNamespace(id=11, name="项目阶段")])
         self.upload_calls = []
+        self.download_calls = []
 
     def upload(self, payload, **kwargs):
         self.upload_calls.append((payload.read(), getattr(payload, "name", ""), kwargs))
         return SimpleNamespace(token="token-1")
+
+    def download(self, url, **kwargs):
+        self.download_calls.append((url, kwargs))
+        return SimpleNamespace(content=b"image-bytes")
 
 
 def fake_factory_holder():
@@ -108,6 +113,17 @@ async def test_upload_returns_upload_token():
 
     assert token == "token-1"
     assert instances[0].upload_calls == [(b"hello", "a b.txt", {"filename": "a b.txt"})]
+
+
+@pytest.mark.anyio
+async def test_download_attachment_uses_content_url():
+    instances, factory = fake_factory_holder()
+    client = RedmineClient(RedmineConfig("https://redmine.example.com", "secret-key"), redmine_factory=factory)
+
+    content = await client.download_attachment(SimpleNamespace(content_url="https://redmine.example.com/attachments/1/image.png"))
+
+    assert content == b"image-bytes"
+    assert instances[0].download_calls == [("https://redmine.example.com/attachments/1/image.png", {})]
 
 
 @pytest.mark.anyio

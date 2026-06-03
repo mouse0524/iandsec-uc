@@ -85,6 +85,24 @@ class RedmineClient:
             raise HTTPException(status_code=502, detail="Redmine 上传响应缺少 token")
         return str(token)
 
+    async def download_attachment(self, attachment: Any) -> bytes:
+        url = self._get_value(attachment, "content_url") or self._get_value(attachment, "url")
+        if not url:
+            raise HTTPException(status_code=502, detail="Redmine 附件缺少下载地址")
+
+        def _download(redmine: Any) -> Any:
+            return redmine.download(str(url))
+
+        response = await self._call(_download)
+        content = getattr(response, "content", response)
+        if isinstance(content, bytes):
+            return content
+        if isinstance(content, bytearray):
+            return bytes(content)
+        if hasattr(content, "read"):
+            return content.read()
+        raise HTTPException(status_code=502, detail="Redmine 附件下载响应不支持")
+
     async def _call(self, func: Callable[[Any], Any]) -> Any:
         def _run() -> Any:
             redmine = self._redmine()
