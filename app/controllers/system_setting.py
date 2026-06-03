@@ -170,6 +170,9 @@ class SystemSettingController:
             "redmine_os_field_id": _int_env("REDMINE_OS_FIELD_ID", 0) or None,
             "redmine_sync_visible_fields": [],
             "redmine_sync_options": {},
+            "redmine_auto_pull_enabled": False,
+            "redmine_auto_pull_interval_minutes": _int_env("REDMINE_AUTO_PULL_INTERVAL_MINUTES", 30),
+            "redmine_auto_pull_ticket_statuses": ["tech_processing"],
         },
     }
 
@@ -478,6 +481,9 @@ class SystemSettingController:
             "redmine_os_field_id",
             "redmine_sync_visible_fields",
             "redmine_sync_options",
+            "redmine_auto_pull_enabled",
+            "redmine_auto_pull_interval_minutes",
+            "redmine_auto_pull_ticket_statuses",
         }
         mapping = {
             "site": site_keys,

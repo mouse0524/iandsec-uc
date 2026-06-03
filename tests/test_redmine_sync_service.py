@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.services.redmine_sync_service import RedmineSyncService
+from app.services.redmine_sync_service import RedmineAutoPullScheduler, RedmineSyncService
 
 
 class FakeTicket:
@@ -145,6 +145,51 @@ class FakeAttachmentQuery:
 
     def __iter__(self):
         return iter(FakeTicketAttachment.rows)
+
+
+class FakeTicketQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.limit_value = None
+
+    def filter(self, **kwargs):
+        FakeTicketModel.filter_calls.append(kwargs)
+        return self
+
+    def order_by(self, *args):
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def __await__(self):
+        async def _run():
+            if self.limit_value is None:
+                return self.rows
+            return self.rows[: self.limit_value]
+
+        return _run().__await__()
+
+
+class FakeTicketModel:
+    rows = []
+    exclude_calls = []
+    filter_calls = []
+
+    @classmethod
+    def exclude(cls, **kwargs):
+        cls.exclude_calls.append(kwargs)
+        return FakeTicketQuery(cls.rows)
+
+
+class FakeRedminePullService:
+    def __init__(self):
+        self.calls = []
+
+    async def pull_ticket(self, ticket, *, operator_id):
+        self.calls.append((ticket, operator_id))
+        return await ticket.to_dict()
 
 
 @pytest.fixture(autouse=True)
@@ -485,6 +530,79 @@ async def test_pull_ticket_only_imports_attachments_referenced_by_new_notes(conf
     assert len(FakeTicketAttachment.rows) == 1
     assert FakeTicketAttachment.rows[0].origin_name == "image.png"
     assert len([call for call in FakeClient.instances[0].calls if call[0] == "download_attachment"]) == 1
+
+
+@pytest.mark.anyio
+async def test_redmine_auto_pull_scheduler_skips_when_disabled():
+    service = FakeRedminePullService()
+    scheduler = RedmineAutoPullScheduler(
+        service=service,
+        ticket_model=FakeTicketModel,
+        redis_executor=lambda *args, **kwargs: None,
+    )
+
+    result = await scheduler.run_once(config={"redmine_enabled": True, "redmine_auto_pull_enabled": False})
+
+    assert result == {"checked": 0, "pulled": 0, "failed": 0, "enabled": False}
+    assert service.calls == []
+
+
+@pytest.mark.anyio
+async def test_redmine_auto_pull_scheduler_pulls_linked_tickets():
+    ticket = FakeTicket(redmine_issue_id=88, tech_id=7)
+    FakeTicketModel.rows = [ticket]
+    FakeTicketModel.exclude_calls = []
+    FakeTicketModel.filter_calls = []
+    service = FakeRedminePullService()
+
+    async def redis_executor(*args, **kwargs):
+        if args and args[0] == "set":
+            return True
+        return 1
+
+    scheduler = RedmineAutoPullScheduler(
+        service=service,
+        ticket_model=FakeTicketModel,
+        redis_executor=redis_executor,
+    )
+
+    result = await scheduler.run_once(config={"redmine_enabled": True, "redmine_auto_pull_enabled": True})
+
+    assert result == {"checked": 1, "pulled": 1, "failed": 0, "enabled": True}
+    assert FakeTicketModel.exclude_calls == [{"redmine_issue_id__isnull": True}]
+    assert FakeTicketModel.filter_calls == [{"status__in": ["tech_processing"]}]
+    assert service.calls == [(ticket, 7)]
+
+
+@pytest.mark.anyio
+async def test_redmine_auto_pull_scheduler_uses_configured_ticket_statuses():
+    ticket = FakeTicket(redmine_issue_id=88, tech_id=7)
+    FakeTicketModel.rows = [ticket]
+    FakeTicketModel.exclude_calls = []
+    FakeTicketModel.filter_calls = []
+    service = FakeRedminePullService()
+
+    async def redis_executor(*args, **kwargs):
+        if args and args[0] == "set":
+            return True
+        return 1
+
+    scheduler = RedmineAutoPullScheduler(
+        service=service,
+        ticket_model=FakeTicketModel,
+        redis_executor=redis_executor,
+    )
+
+    result = await scheduler.run_once(
+        config={
+            "redmine_enabled": True,
+            "redmine_auto_pull_enabled": True,
+            "redmine_auto_pull_ticket_statuses": ["tech_processing", "done"],
+        }
+    )
+
+    assert result == {"checked": 1, "pulled": 1, "failed": 0, "enabled": True}
+    assert FakeTicketModel.filter_calls == [{"status__in": ["tech_processing", "done"]}]
 
 
 @pytest.mark.anyio

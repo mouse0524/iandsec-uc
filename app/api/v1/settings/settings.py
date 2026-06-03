@@ -63,6 +63,9 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "redmine_os_field_id",
         "redmine_sync_visible_fields",
         "redmine_sync_options",
+        "redmine_auto_pull_enabled",
+        "redmine_auto_pull_interval_minutes",
+        "redmine_auto_pull_ticket_statuses",
     )
     for key in optional_preserve_keys:
         if key not in payload.model_fields_set:

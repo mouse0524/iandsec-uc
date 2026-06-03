@@ -7,18 +7,23 @@ import mimetypes
 import os
 import re
 import uuid
+import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import anyio
 from fastapi import HTTPException
 
 from app.controllers.system_setting import system_setting_controller
+from app.core.redis_client import execute_redis
+from app.log import logger
 from app.models.admin import Ticket, TicketActionLog, TicketAttachment
-from app.models.enums import TicketActionType
+from app.models.enums import TicketActionType, TicketStatus
 from app.services.redmine_client import RedmineClient
 from app.settings import settings
+
+RedisExecutor = Callable[..., Awaitable[Any]]
 
 
 class RedmineSyncService:
@@ -559,3 +564,176 @@ class RedmineSyncService:
 
 
 redmine_sync_service = RedmineSyncService()
+
+
+class RedmineAutoPullScheduler:
+    LOCK_KEY = "redmine:auto_pull:lock"
+    LOCK_TTL_SECONDS = 30 * 60
+    MAX_BATCH_SIZE = 100
+
+    def __init__(
+        self,
+        *,
+        service: RedmineSyncService | None = None,
+        config_controller: Any | None = None,
+        ticket_model: Any | None = None,
+        redis_executor: RedisExecutor | None = None,
+    ) -> None:
+        self.service = service or redmine_sync_service
+        self.config_controller = config_controller or system_setting_controller
+        self.ticket_model = ticket_model or Ticket
+        self.redis_executor = redis_executor or execute_redis
+        self._task: asyncio.Task | None = None
+        self._stopping = asyncio.Event()
+        self._local_lock = asyncio.Lock()
+
+    def start(self) -> None:
+        if self._task and not self._task.done():
+            return
+        self._stopping = asyncio.Event()
+        self._task = asyncio.create_task(self._run_loop())
+        logger.info("[redmine.auto_pull.scheduler] started")
+
+    async def stop(self) -> None:
+        self._stopping.set()
+        if not self._task:
+            return
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._task = None
+            logger.info("[redmine.auto_pull.scheduler] stopped")
+
+    async def _run_loop(self) -> None:
+        while not self._stopping.is_set():
+            sleep_seconds = 30 * 60
+            try:
+                config = await self.config_controller.get_full_dict()
+                sleep_seconds = self._interval_seconds(config)
+                if not config.get("redmine_enabled") or not config.get("redmine_auto_pull_enabled"):
+                    await self._sleep_or_stop(sleep_seconds)
+                    continue
+                await self.run_once(config=config)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception("[redmine.auto_pull.scheduler] run_failed error={}", str(exc))
+            if await self._sleep_or_stop(sleep_seconds):
+                return
+
+    async def run_once(self, *, config: dict | None = None) -> dict | None:
+        config = config or await self.config_controller.get_full_dict()
+        if not config.get("redmine_enabled") or not config.get("redmine_auto_pull_enabled"):
+            return {"checked": 0, "pulled": 0, "failed": 0, "enabled": False}
+
+        token = self._lock_token()
+        acquired = await self._acquire_distributed_lock(token)
+        if acquired is False:
+            logger.info("[redmine.auto_pull.scheduler] skip_run lock_held")
+            return None
+
+        if acquired is None:
+            if self._local_lock.locked():
+                logger.info("[redmine.auto_pull.scheduler] skip_run local_lock_held")
+                return None
+            async with self._local_lock:
+                return await self._pull_batch(config)
+
+        try:
+            return await self._pull_batch(config)
+        finally:
+            await self._release_distributed_lock(token)
+
+    async def _pull_batch(self, config: dict) -> dict:
+        ticket_statuses = self._ticket_statuses(config)
+        query = (
+            self.ticket_model.exclude(redmine_issue_id__isnull=True)
+            .filter(status__in=ticket_statuses)
+            .order_by("redmine_synced_at", "id")
+            .limit(self.MAX_BATCH_SIZE)
+        )
+        tickets = await query
+        checked = len(tickets)
+        pulled = 0
+        failed = 0
+        for ticket in tickets:
+            try:
+                await self.service.pull_ticket(ticket, operator_id=self._operator_id(ticket))
+                pulled += 1
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "[redmine.auto_pull.scheduler] pull_failed ticket_id={} redmine_issue_id={} error={}",
+                    getattr(ticket, "id", None),
+                    getattr(ticket, "redmine_issue_id", None),
+                    str(exc),
+                )
+        if checked:
+            logger.info("[redmine.auto_pull.scheduler] batch_done checked={} pulled={} failed={}", checked, pulled, failed)
+        return {"checked": checked, "pulled": pulled, "failed": failed, "enabled": True}
+
+    def _ticket_statuses(self, config: dict) -> list[str]:
+        valid_statuses = {item.value for item in TicketStatus}
+        result = []
+        for item in config.get("redmine_auto_pull_ticket_statuses") or []:
+            status = str(item or "").strip()
+            if status in valid_statuses and status not in result:
+                result.append(status)
+        return result or [TicketStatus.TECH_PROCESSING.value]
+
+    def _operator_id(self, ticket: Any) -> int:
+        for attr in ("tech_id", "reviewer_id", "submitter_id"):
+            value = getattr(ticket, attr, None)
+            if value:
+                return int(value)
+        return 0
+
+    def _interval_seconds(self, config: dict) -> int:
+        try:
+            minutes = int(config.get("redmine_auto_pull_interval_minutes") or 30)
+        except Exception:
+            minutes = 30
+        minutes = min(1440, max(1, minutes))
+        return minutes * 60
+
+    async def _acquire_distributed_lock(self, token: str) -> bool | None:
+        try:
+            result = await self.redis_executor(
+                "set",
+                self.LOCK_KEY,
+                token,
+                ex=self.LOCK_TTL_SECONDS,
+                nx=True,
+            )
+            return bool(result)
+        except Exception as exc:
+            logger.warning("[redmine.auto_pull.scheduler] redis_lock_unavailable fallback=local error={}", str(exc))
+            return None
+
+    async def _release_distributed_lock(self, token: str) -> None:
+        script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        end
+        return 0
+        """
+        try:
+            await self.redis_executor("eval", script, 1, self.LOCK_KEY, token)
+        except Exception as exc:
+            logger.warning("[redmine.auto_pull.scheduler] release_lock_failed error={}", str(exc))
+
+    async def _sleep_or_stop(self, seconds: int) -> bool:
+        try:
+            await asyncio.wait_for(self._stopping.wait(), timeout=max(1, seconds))
+            return True
+        except TimeoutError:
+            return False
+
+    def _lock_token(self) -> str:
+        return f"{id(self)}:{datetime.now().isoformat(timespec='microseconds')}"
+
+
+redmine_auto_pull_scheduler = RedmineAutoPullScheduler(service=redmine_sync_service)

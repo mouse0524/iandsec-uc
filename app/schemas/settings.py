@@ -97,6 +97,9 @@ class SystemSettingUpdateIn(BaseModel):
     redmine_os_field_id: int | None = None
     redmine_sync_visible_fields: list[str] = Field(default_factory=list)
     redmine_sync_options: dict[str, list[str]] = Field(default_factory=dict)
+    redmine_auto_pull_enabled: bool = False
+    redmine_auto_pull_interval_minutes: int = 30
+    redmine_auto_pull_ticket_statuses: list[str] = Field(default_factory=lambda: [TicketStatus.TECH_PROCESSING.value])
 
     @field_validator("ticket_attachment_extensions")
     @classmethod
@@ -320,6 +323,30 @@ class SystemSettingUpdateIn(BaseModel):
         if value < 1:
             raise ValueError(f"{info.field_name} 必须大于等于1")
         return value
+
+    @field_validator("redmine_auto_pull_interval_minutes")
+    @classmethod
+    def validate_redmine_auto_pull_interval_minutes(cls, value: int):
+        if value < 1 or value > 1440:
+            raise ValueError("Redmine定时拉取间隔必须在1到1440分钟之间")
+        return value
+
+    @field_validator("redmine_auto_pull_ticket_statuses")
+    @classmethod
+    def validate_redmine_auto_pull_ticket_statuses(cls, value: list[str]):
+        valid_statuses = {item.value for item in TicketStatus}
+        result = []
+        for item in value or []:
+            status = str(item or "").strip()
+            if not status:
+                continue
+            if status not in valid_statuses:
+                raise ValueError("Redmine定时拉取工单状态包含非法值")
+            if status not in result:
+                result.append(status)
+        if not result:
+            raise ValueError("Redmine定时拉取工单状态至少选择一项")
+        return result
 
     @field_validator("redmine_sync_visible_fields")
     @classmethod

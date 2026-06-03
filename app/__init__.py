@@ -12,6 +12,7 @@ from app.core.init_app import (
 )
 from app.services.database_backup_service import database_backup_scheduler
 from app.services.inactive_user_service import inactive_user_auto_disable_scheduler
+from app.services.redmine_sync_service import redmine_auto_pull_scheduler
 from app.services.skill_know.evolution_scheduler import skill_know_evolution_scheduler
 
 try:
@@ -25,12 +26,14 @@ async def lifespan(app: FastAPI):
     await init_data()
     inactive_user_auto_disable_scheduler.start()
     database_backup_scheduler.start()
+    redmine_auto_pull_scheduler.start()
     skill_know_evolution_scheduler.start()
     try:
         yield
     finally:
         await inactive_user_auto_disable_scheduler.stop()
         await database_backup_scheduler.stop()
+        await redmine_auto_pull_scheduler.stop()
         await skill_know_evolution_scheduler.stop()
         await Tortoise.close_connections()
 

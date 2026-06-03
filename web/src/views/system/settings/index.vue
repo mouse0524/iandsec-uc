@@ -145,6 +145,9 @@ const form = ref({
   redmine_os_field_id: null,
   redmine_sync_visible_fields: [],
   redmine_sync_options: {},
+  redmine_auto_pull_enabled: false,
+  redmine_auto_pull_interval_minutes: 30,
+  redmine_auto_pull_ticket_statuses: ['tech_processing'],
 })
 
 const previewParams = ref({
@@ -219,6 +222,14 @@ const passwordCategoryOptions = [
 ]
 
 const ticketNotifyRoles = ['用户', '代理商', '客服', '技术']
+
+const ticketStatusOptions = [
+  { label: '待客服审核', value: 'pending_review' },
+  { label: '客服驳回', value: 'cs_rejected' },
+  { label: '待技术处理', value: 'tech_processing' },
+  { label: '技术驳回', value: 'tech_rejected' },
+  { label: '已完成', value: 'done' },
+]
 
 function normalizeTicketNotifyByRole(raw = {}) {
   const normalized = {}
@@ -478,6 +489,24 @@ const rules = {
       return true
     },
     trigger: ['blur', 'change'],
+  },
+  redmine_auto_pull_interval_minutes: {
+    trigger: ['input', 'blur'],
+    validator() {
+      const value = Number(form.value.redmine_auto_pull_interval_minutes || 0)
+      if (value < 1 || value > 1440) return new Error('定时拉取间隔需在1到1440分钟之间')
+      return true
+    },
+  },
+  redmine_auto_pull_ticket_statuses: {
+    trigger: ['change', 'blur'],
+    validator() {
+      if (!form.value.redmine_auto_pull_enabled) return true
+      if (!form.value.redmine_auto_pull_ticket_statuses?.length) {
+        return new Error('请至少选择一个定时拉取状态')
+      }
+      return true
+    },
   },
 }
 
@@ -1263,6 +1292,32 @@ function applyPresetHtmlTemplates() {
               <NFormItem label="启用Redmine">
                 <NSwitch v-model:value="form.redmine_enabled" />
               </NFormItem>
+              <NFormItem label="定时拉取">
+                <NSpace align="center">
+                  <NSwitch v-model:value="form.redmine_auto_pull_enabled" />
+                  <span class="form-hint">开启后后台定时拉取已关联 Redmine 的工单状态和备注</span>
+                </NSpace>
+              </NFormItem>
+              <NFormItem label="拉取间隔(分钟)" path="redmine_auto_pull_interval_minutes">
+                <NInputNumber
+                  v-model:value="form.redmine_auto_pull_interval_minutes"
+                  :min="1"
+                  :max="1440"
+                  :step="5"
+                  :disabled="!form.redmine_auto_pull_enabled"
+                  style="width: 180px"
+                />
+              </NFormItem>
+              <NFormItem label="拉取工单状态" path="redmine_auto_pull_ticket_statuses">
+                <NSelect
+                  v-model:value="form.redmine_auto_pull_ticket_statuses"
+                  :options="ticketStatusOptions"
+                  multiple
+                  clearable
+                  :disabled="!form.redmine_auto_pull_enabled"
+                  placeholder="默认只拉取待技术处理"
+                />
+              </NFormItem>
               <NFormItem label="Redmine地址" path="redmine_base_url">
                 <NInput
                   v-model:value="form.redmine_base_url"
@@ -1667,6 +1722,11 @@ function applyPresetHtmlTemplates() {
   gap: 6px;
   line-height: 1.6;
   color: #4b5563;
+}
+
+.form-hint {
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .model-grid {

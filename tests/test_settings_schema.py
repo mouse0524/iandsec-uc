@@ -139,6 +139,47 @@ def test_redmine_sync_options_normalizes_selected_values():
     }
 
 
+def test_redmine_auto_pull_interval_accepts_valid_range():
+    payload = minimal_settings_payload(redmine_auto_pull_enabled=True, redmine_auto_pull_interval_minutes=15)
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_auto_pull_enabled is True
+    assert data.redmine_auto_pull_interval_minutes == 15
+
+
+def test_redmine_auto_pull_interval_rejects_out_of_range():
+    payload = minimal_settings_payload(redmine_auto_pull_interval_minutes=1441)
+
+    with pytest.raises(ValidationError):
+        SystemSettingUpdateIn(**payload)
+
+
+def test_redmine_auto_pull_ticket_statuses_default_to_tech_processing():
+    payload = minimal_settings_payload()
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_auto_pull_ticket_statuses == ["tech_processing"]
+
+
+def test_redmine_auto_pull_ticket_statuses_normalizes_values():
+    payload = minimal_settings_payload(
+        redmine_auto_pull_ticket_statuses=[" tech_processing ", "done", "done"]
+    )
+
+    data = SystemSettingUpdateIn(**payload)
+
+    assert data.redmine_auto_pull_ticket_statuses == ["tech_processing", "done"]
+
+
+def test_redmine_auto_pull_ticket_statuses_rejects_invalid_values():
+    payload = minimal_settings_payload(redmine_auto_pull_ticket_statuses=["unknown"])
+
+    with pytest.raises(ValidationError):
+        SystemSettingUpdateIn(**payload)
+
+
 def minimal_settings_payload(**overrides):
     payload = {
         "site_title": "Test",
