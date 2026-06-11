@@ -9,6 +9,7 @@ class NoticeCreateIn(BaseModel):
     target_type: str = Field(..., description="发送范围：all/roles/users")
     target_role_ids: list[int] = Field(default_factory=list, description="角色ID列表")
     target_user_ids: list[int] = Field(default_factory=list, description="用户ID列表")
+    delivery_channels: list[str] = Field(default_factory=lambda: ["site"], description="投递渠道：site/email")
 
     @field_validator("target_type")
     @classmethod
@@ -27,6 +28,18 @@ class NoticeCreateIn(BaseModel):
         if plain_text_len > 2000:
             raise ValueError("通知内容纯文本长度不能超过2000")
         return value
+
+    @field_validator("delivery_channels")
+    @classmethod
+    def validate_delivery_channels(cls, value: list[str]):
+        channels = [str(item or "").strip() for item in (value or [])]
+        channels = [item for item in channels if item]
+        invalid = [item for item in channels if item not in {"site", "email"}]
+        if invalid:
+            raise ValueError("delivery_channels 仅支持 site/email")
+        if not channels:
+            raise ValueError("请至少选择一种通知方式")
+        return list(dict.fromkeys(channels))
 
 
 class NoticeReadIn(BaseModel):

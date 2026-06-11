@@ -12,8 +12,8 @@ router = APIRouter()
 @router.post("/create", summary="创建全局通知", dependencies=[DependAuth])
 async def create_notice(payload: NoticeCreateIn):
     user_id = CTX_USER_ID.get()
-    notice, recipient_count = await notice_controller.create_notice(creator_id=user_id, payload=payload.model_dump())
-    return Success(msg="通知发送成功", data={"notice_id": notice.id, "recipient_count": recipient_count})
+    notice, stats = await notice_controller.create_notice(creator_id=user_id, payload=payload.model_dump())
+    return Success(msg="通知发送成功", data={"notice_id": notice.id, **stats})
 
 
 @router.get("/list", summary="全局通知列表", dependencies=[DependAuth])

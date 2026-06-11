@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, ref } from 'vue'
-import { NButton, NCard, NInput, NSelect, NTag, NSwitch } from 'naive-ui'
+import { NButton, NCard, NCheckbox, NCheckboxGroup, NInput, NSelect, NTag, NSwitch } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
@@ -19,6 +19,7 @@ const form = ref({
   target_type: 'all',
   target_role_ids: [],
   target_user_ids: [],
+  delivery_channels: ['site'],
   is_html: true,
   content_html: '',
 })
@@ -37,6 +38,16 @@ const targetTypeTextMap = {
   all: '全员',
   roles: '指定角色',
   users: '指定用户',
+}
+
+const deliveryChannelTextMap = {
+  site: '站内通知',
+  email: '邮件通知',
+}
+
+const deliveryChannelTypeMap = {
+  site: 'info',
+  email: 'success',
 }
 
 const plainTextLen = computed(() => String(form.value.content_html || '').replace(/<[^>]*>/g, '').trim().length)
@@ -58,6 +69,10 @@ async function sendNotice() {
     $message.warning('通知内容纯文本长度不能超过2000')
     return
   }
+  if (!form.value.delivery_channels.length) {
+    $message.warning('请至少选择一种通知方式')
+    return
+  }
   if (form.value.target_type === 'roles' && !form.value.target_role_ids.length) {
     $message.warning('请选择目标角色')
     return
@@ -72,8 +87,19 @@ async function sendNotice() {
       ...form.value,
       content_html: form.value.content_html,
     })
-    $message.success(`通知发送成功，覆盖 ${res?.data?.recipient_count || 0} 人`)
-    form.value = { title: '', target_type: 'all', target_role_ids: [], target_user_ids: [], is_html: true, content_html: '' }
+    const data = res?.data || {}
+    $message.success(
+      `通知发送成功，覆盖 ${data.recipient_count || 0} 人，站内 ${data.site_recipient_count || 0} 人，邮件 ${data.email_recipient_count || 0} 人`
+    )
+    form.value = {
+      title: '',
+      target_type: 'all',
+      target_role_ids: [],
+      target_user_ids: [],
+      delivery_channels: ['site'],
+      is_html: true,
+      content_html: '',
+    }
     $table.value?.handleSearch()
   } finally {
     sending.value = false
@@ -129,6 +155,26 @@ const columns = [
     },
   },
   {
+    title: '通知方式',
+    key: 'delivery_channels',
+    align: 'center',
+    width: 180,
+    render(row) {
+      const channels = row.delivery_channels?.length ? row.delivery_channels : ['site']
+      return h(
+        'div',
+        { class: 'channel-tags' },
+        channels.map((item) =>
+          h(
+            NTag,
+            { size: 'small', type: deliveryChannelTypeMap[item] || 'default', bordered: false },
+            { default: () => deliveryChannelTextMap[item] || item }
+          )
+        )
+      )
+    },
+  },
+  {
     title: '内容预览',
     key: 'content_html',
     align: 'left',
@@ -155,6 +201,13 @@ const columns = [
         <div class="form-grid">
           <NInput v-model:value="form.title" placeholder="通知标题（可选）" maxlength="100" />
           <NSelect v-model:value="form.target_type" :options="targetTypeOptions" />
+          <div class="channel-checks">
+            <span>通知方式</span>
+            <NCheckboxGroup v-model:value="form.delivery_channels">
+              <NCheckbox value="site">站内通知</NCheckbox>
+              <NCheckbox value="email">邮件通知</NCheckbox>
+            </NCheckboxGroup>
+          </div>
           <div class="html-switch-wrap">
             <span>HTML格式</span>
             <NSwitch v-model:value="form.is_html" />
@@ -253,6 +306,18 @@ const columns = [
 }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.channel-checks {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  min-height: 34px;
+  background: #fff;
+}
+.channel-tags { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .len-tip { margin-top: 6px; color: #6b7280; font-size: 12px; text-align: right; }
 .len-tip.is-warn { color: #d97706; }
 .len-tip.is-danger { color: #dc2626; }

@@ -4,6 +4,7 @@ import json
 
 from fastapi import HTTPException
 
+from app.controllers.mail import mail_controller
 from app.core.redis_client import execute_redis
 from app.models.admin import GlobalNotice, GlobalNoticeUser, Role, User
 from app.settings import settings
@@ -100,12 +101,23 @@ class NoticeController:
             return list(valid_users)
         raise HTTPException(status_code=400, detail="不支持的发送范围")
 
-    async def create_notice(self, *, creator_id: int, payload: dict) -> tuple[GlobalNotice, int]:
+    @staticmethod
+    def _normalize_delivery_channels(value) -> list[str]:
+        source = ["site"] if value is None else value
+        channels = [str(item or "").strip() for item in source]
+        channels = [item for item in channels if item in {"site", "email"}]
+        return list(dict.fromkeys(channels))
+
+    async def create_notice(self, *, creator_id: int, payload: dict) -> tuple[GlobalNotice, dict]:
         content_html = str(payload.get("content_html") or "").strip()
         if not content_html:
             raise HTTPException(status_code=400, detail="通知内容不能为空")
         if self._plain_text_length(content_html) > 2000:
             raise HTTPException(status_code=400, detail="通知内容纯文本长度不能超过2000")
+
+        delivery_channels = self._normalize_delivery_channels(payload.get("delivery_channels"))
+        if not delivery_channels:
+            raise HTTPException(status_code=400, detail="请至少选择一种通知方式")
 
         target_type = payload.get("target_type")
         role_ids = payload.get("target_role_ids") or []
@@ -124,20 +136,39 @@ class NoticeController:
             target_type=target_type,
             target_role_ids=[int(item) for item in role_ids if item],
             target_user_ids=[int(item) for item in user_ids if item],
+            delivery_channels=delivery_channels,
             created_by=creator_id,
             is_active=True,
         )
 
-        rows = [GlobalNoticeUser(notice_id=notice.id, user_id=uid, is_read=False) for uid in set(recipients)]
-        await GlobalNoticeUser.bulk_create(rows)
-        for uid in set(recipients):
-            await self._clear_inbox_cache(uid)
-            cached_unread = await self._get_cached_unread(uid)
-            if cached_unread is None:
-                await self._clear_unread_cache(uid)
-            else:
-                await self._set_cached_unread(uid, cached_unread + 1)
-        return notice, len(rows)
+        unique_recipients = sorted(set(recipients))
+        site_count = 0
+        if "site" in delivery_channels:
+            rows = [GlobalNoticeUser(notice_id=notice.id, user_id=uid, is_read=False) for uid in unique_recipients]
+            await GlobalNoticeUser.bulk_create(rows)
+            site_count = len(rows)
+            for uid in unique_recipients:
+                await self._clear_inbox_cache(uid)
+                cached_unread = await self._get_cached_unread(uid)
+                if cached_unread is None:
+                    await self._clear_unread_cache(uid)
+                else:
+                    await self._set_cached_unread(uid, cached_unread + 1)
+
+        email_count = 0
+        if "email" in delivery_channels:
+            users = await User.filter(is_active=True, id__in=unique_recipients).all()
+            email_count = await mail_controller.send_global_notice(
+                to_users=users,
+                title=notice.title,
+                content_html=content_html,
+            )
+
+        return notice, {
+            "recipient_count": len(unique_recipients),
+            "site_recipient_count": site_count,
+            "email_recipient_count": email_count,
+        }
 
     async def list_notice(self, *, page: int, page_size: int) -> tuple[int, list[dict]]:
         query = GlobalNotice.filter(is_active=True)
@@ -164,6 +195,7 @@ class NoticeController:
         for row in rows:
             row["creator_name"] = creator_map.get(row.get("created_by"), "")
             row["target_role_names"] = [role_map.get(int(rid), str(rid)) for rid in (row.get("target_role_ids") or [])]
+            row["delivery_channels"] = self._normalize_delivery_channels(row.get("delivery_channels"))
             row["created_at"] = self._fmt_dt(row.get("created_at"))
             row["updated_at"] = self._fmt_dt(row.get("updated_at"))
         return total, rows

@@ -214,7 +214,7 @@
       <div class="captcha-modal-panel">
         <div class="captcha-modal-head">
           <h4>安全校验</h4>
-          <p>请输入图形验证码后发送邮箱验证码。</p>
+          <!-- <p>请输入图形验证码后发送邮箱验证码。</p> -->
         </div>
 
         <n-form :model="partnerForm" :rules="captchaRules" label-width="80" label-placement="left">

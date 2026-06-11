@@ -230,6 +230,7 @@ class GlobalNotice(BaseModel, TimestampMixin):
     target_type = fields.CharField(max_length=10, description="发送范围类型", index=True)
     target_role_ids = fields.JSONField(default=list, description="目标角色ID列表")
     target_user_ids = fields.JSONField(default=list, description="目标用户ID列表")
+    delivery_channels = fields.JSONField(default=list, description="投递渠道")
     created_by = fields.BigIntField(description="创建人ID", index=True)
     is_active = fields.BooleanField(default=True, description="是否生效", index=True)
 

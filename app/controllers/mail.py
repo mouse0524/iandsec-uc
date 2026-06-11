@@ -276,6 +276,24 @@ class MailController:
             tag="ticket_notify",
         )
 
+    async def send_global_notice(self, *, to_users: list[User], title: str | None, content_html: str) -> int:
+        subject = (title or "").strip() or "系统通知"
+        count = 0
+        for user in to_users:
+            if not user.email:
+                continue
+            count += 1
+            self._schedule(
+                self._send_email(
+                    to_email=user.email,
+                    subject=subject,
+                    content=content_html,
+                    is_html=True,
+                ),
+                tag="global_notice",
+            )
+        return count
+
     async def send_admin_reset_password_notice(self, *, to_user: User, temp_password: str) -> None:
         setting = await self._get_setting()
         subject = setting.get("admin_reset_password_subject") or "账号密码已重置"
