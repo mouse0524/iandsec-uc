@@ -23,7 +23,7 @@ from app.core.dependency import DependAuth
 from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
 from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
 from app.utils.http_headers import build_download_content_disposition
@@ -690,6 +690,25 @@ async def close_ticket(payload: TicketCloseIn):
     )
     logger.info("[api.ticket.close] success user_id={} ticket_id={} status={}", user.id, ticket.id, ticket.status)
     return Success(msg="关闭成功", data=await ticket.to_dict())
+
+
+@router.post("/field-verification", summary="处理现场验证结果", dependencies=[DependAuth])
+async def field_verification_ticket(payload: TicketFieldVerificationIn):
+    user = await _get_current_user()
+    ticket = await ticket_controller.set_field_verification_result(
+        ticket_id=payload.ticket_id,
+        operator_id=user.id,
+        approved=payload.approved,
+        comment=payload.comment,
+    )
+    logger.info(
+        "[api.ticket.field_verification] success user_id={} ticket_id={} approved={} status={}",
+        user.id,
+        ticket.id,
+        payload.approved,
+        ticket.status,
+    )
+    return Success(msg="现场验证已处理", data=await ticket.to_dict())
 
 
 @router.get("/actions", summary="工单操作日志", dependencies=[DependAuth])

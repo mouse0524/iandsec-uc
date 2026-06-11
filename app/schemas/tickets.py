@@ -58,6 +58,12 @@ class TicketCloseIn(BaseModel):
     comment: Optional[str] = Field(None, description="关闭备注")
 
 
+class TicketFieldVerificationIn(BaseModel):
+    ticket_id: int = Field(..., description="工单ID")
+    approved: bool = Field(..., description="现场验证是否通过")
+    comment: Optional[str] = Field(None, description="现场验证备注")
+
+
 class TicketResubmitIn(BaseModel):
     ticket_id: int = Field(..., description="工单ID")
     description: Optional[str] = Field(None, description="补充描述")

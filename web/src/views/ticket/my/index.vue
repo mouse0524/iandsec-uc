@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NCard, NInput, NModal, NSelect, NTag } from 'naive-ui'
+import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
@@ -52,6 +52,9 @@ const summaryStats = ref({
 })
 const editVisible = ref(false)
 const editingTicket = ref({})
+const fieldRejectVisible = ref(false)
+const fieldRejectTicket = ref(null)
+const fieldRejectComment = ref('')
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
 const issueTypeOptions = ref([])
@@ -187,8 +190,36 @@ function handleEditSaved() {
 
 async function closeTicket(row) {
   await api.closeTicket({ ticket_id: row.id, comment: '关闭工单' })
-  $message.success('工单已关闭')
+  $message.success('提出者已关闭工单')
   $table.value?.handleSearch()
+}
+
+async function handleFieldVerification(row, approved, comment = null) {
+  await api.fieldVerificationTicket({
+    ticket_id: row.id,
+    approved,
+    comment: comment || (approved ? '现场验证通过，关闭工单' : '现场验证不通过，退回技术处理'),
+  })
+  $message.success(approved ? '提出者已关闭工单' : '已退回技术处理')
+  $table.value?.handleSearch()
+}
+
+function openFieldRejectModal(row) {
+  fieldRejectTicket.value = row
+  fieldRejectComment.value = ''
+  fieldRejectVisible.value = true
+}
+
+async function submitFieldReject() {
+  const comment = fieldRejectComment.value?.trim()
+  if (!comment) {
+    $message.warning('请填写退回备注')
+    return
+  }
+  await handleFieldVerification(fieldRejectTicket.value, false, comment)
+  fieldRejectVisible.value = false
+  fieldRejectTicket.value = null
+  fieldRejectComment.value = ''
 }
 
 
@@ -201,6 +232,30 @@ function redmineSyncTagType(row) {
   if (row.redmine_sync_status === 'success') return 'success'
   if (row.redmine_sync_status === 'syncing') return 'info'
   return 'warning'
+}
+
+function moreOptions(row) {
+  const options = []
+  if (row.status !== 'done') {
+    options.push({ label: '编辑工单', key: 'edit-ticket' })
+  }
+  if (row.status === 'pending_close') {
+    options.push({ label: '关闭工单', key: 'close-ticket' })
+  }
+  if (row.status === 'field_verification') {
+    options.push(
+      { label: '关闭工单', key: 'field-approve' },
+      { label: '退回技术', key: 'field-reject' }
+    )
+  }
+  return options
+}
+
+function handleMoreAction(key, row) {
+  if (key === 'edit-ticket') return openEdit(row)
+  if (key === 'close-ticket') return closeTicket(row)
+  if (key === 'field-approve') return handleFieldVerification(row, true)
+  if (key === 'field-reject') return openFieldRejectModal(row)
 }
 
 const columns = [
@@ -237,34 +292,40 @@ const columns = [
     title: '操作',
     key: 'actions',
     align: 'center',
+    width: 180,
     render(row) {
+      const options = moreOptions(row)
       const buttons = [
         h(
           NButton,
-          { size: 'small', type: 'primary', onClick: () => openDetail(row), style: 'margin-right: 8px' },
+          { size: 'small', type: 'info', onClick: () => openDetail(row) },
           { default: () => '详情' }
         ),
-        h(
-          NButton,
-          {
-            size: 'small',
-            type: 'warning',
-            disabled: row.status === 'done',
-            onClick: () => openEdit(row),
-          },
-          { default: () => '编辑' }
-        ),
       ]
-      if (row.status === 'pending_close') {
+      if (options.length) {
         buttons.push(
           h(
-            NButton,
-            { size: 'small', type: 'success', onClick: () => closeTicket(row), style: 'margin-left: 8px' },
-            { default: () => '关闭' }
+            NDropdown,
+            {
+              trigger: 'click',
+              options,
+              onSelect: (key) => handleMoreAction(key, row),
+            },
+            {
+              default: () => h(
+                NButton,
+                {
+                  size: 'small',
+                  color: '#7c3aed',
+                  textColor: '#fff',
+                },
+                { default: () => '更多' }
+              ),
+            }
           )
         )
       }
-      return buttons
+      return h('div', { class: 'action-buttons' }, buttons)
     },
   },
 ]
@@ -358,6 +419,26 @@ const columns = [
         }"
         @saved="handleEditSaved"
       />
+
+      <NModal
+        v-model:show="fieldRejectVisible"
+        preset="card"
+        title="退回技术"
+        style="width: min(520px, 92vw)"
+      >
+        <NInput
+          v-model:value="fieldRejectComment"
+          type="textarea"
+          placeholder="请填写现场验证不通过的原因或补充说明"
+          :autosize="{ minRows: 4, maxRows: 8 }"
+          maxlength="1000"
+          show-count
+        />
+        <div class="modal-actions">
+          <NButton @click="fieldRejectVisible = false">取消</NButton>
+          <NButton type="warning" @click="submitFieldReject">确认退回</NButton>
+        </div>
+      </NModal>
     </div>
   </CommonPage>
 </template>
@@ -416,6 +497,14 @@ const columns = [
 
 .table-shell {
   border-radius: 20px;
+}
+
+.action-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .edit-shell {
@@ -478,6 +567,13 @@ const columns = [
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  margin-top: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
   margin-top: 16px;
 }
 

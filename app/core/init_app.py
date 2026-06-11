@@ -72,6 +72,25 @@ def _ticket_redmine_api_paths() -> list[str]:
     ]
 
 
+def _ticket_submit_api_paths() -> list[str]:
+    return [
+        "/api/v1/ticket/upload",
+        "/api/v1/ticket/create",
+        "/api/v1/ticket/list",
+        "/api/v1/ticket/export",
+        "/api/v1/ticket/get",
+        "/api/v1/ticket/resubmit",
+        "/api/v1/ticket/actions",
+        "/api/v1/ticket/field-verification",
+    ]
+
+
+def _ticket_field_verification_api_paths() -> list[str]:
+    return [
+        "/api/v1/ticket/field-verification",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -816,6 +835,15 @@ async def init_roles():
                 role_name="技术",
                 api_paths=_ticket_redmine_api_paths(),
             )
+            for role_name in ["用户", "渠道商"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_ticket_field_verification_api_paths(),
+                )
+            await _backfill_existing_role_permissions(
+                role_name="技术",
+                api_paths=_ticket_field_verification_api_paths(),
+            )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -832,15 +860,7 @@ async def init_roles():
     await admin_role.menus.add(*all_menus)
 
     ticket_submit_apis = await Api.filter(
-        path__in=[
-            "/api/v1/ticket/upload",
-            "/api/v1/ticket/create",
-            "/api/v1/ticket/list",
-            "/api/v1/ticket/export",
-            "/api/v1/ticket/get",
-            "/api/v1/ticket/resubmit",
-            "/api/v1/ticket/actions",
-        ]
+        path__in=_ticket_submit_api_paths()
     )
     ticket_tech_apis = await Api.filter(
         path__in=[

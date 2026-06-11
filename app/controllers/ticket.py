@@ -535,12 +535,12 @@ class TicketController:
         }:
             raise HTTPException(status_code=400, detail="不支持的技术操作")
 
-        if action == TicketActionType.FINISH:
+        if action in {TicketActionType.FINISH, TicketActionType.FIELD_VERIFY}:
             setting = await system_setting_controller.get_public_config()
             root_causes = setting.get("ticket_root_causes") or []
             normalized_root_cause = (root_cause or "").strip()
             if not normalized_root_cause:
-                raise HTTPException(status_code=400, detail="处理完成时必须选择问题根因")
+                raise HTTPException(status_code=400, detail="处理完成或转现场验证时必须选择问题根因")
             if root_causes and normalized_root_cause not in root_causes:
                 raise HTTPException(status_code=400, detail="问题根因不合法，请刷新页面后重试")
         else:
@@ -562,6 +562,7 @@ class TicketController:
         elif action == TicketActionType.FIELD_VERIFY:
             ticket.status = TicketStatus.FIELD_VERIFICATION
             ticket.reject_reason = None
+            ticket.root_cause = normalized_root_cause
         elif action == TicketActionType.FIELD_REJECT:
             ticket.status = TicketStatus.TECH_PROCESSING
             ticket.reject_reason = None
@@ -686,7 +687,47 @@ class TicketController:
             from_status=old_status,
             to_status=ticket.status,
             operator_id=operator_id,
-            comment=self._sanitize_rich_html(comment) or "关闭工单",
+            comment=self._sanitize_rich_html(comment) or ("技术处理完成，关闭" if is_tech else "关闭工单"),
+        )
+        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
+        return ticket
+
+    async def set_field_verification_result(
+        self,
+        *,
+        ticket_id: int,
+        operator_id: int,
+        approved: bool,
+        comment: str | None,
+    ) -> Ticket:
+        ticket = await self.get_ticket(ticket_id)
+        if ticket.submitter_id != operator_id:
+            raise HTTPException(status_code=403, detail="仅提交者可处理现场验证结果")
+        if ticket.status != TicketStatus.FIELD_VERIFICATION:
+            raise HTTPException(status_code=400, detail="仅现场验证中的工单可处理验证结果")
+
+        old_status = ticket.status
+        sanitized_comment = self._sanitize_rich_html(comment)
+        if approved:
+            ticket.status = TicketStatus.DONE
+            ticket.reject_reason = None
+            ticket.finished_at = datetime.now()
+            action = TicketActionType.CLOSE
+            action_comment = sanitized_comment or "关闭工单"
+        else:
+            ticket.status = TicketStatus.TECH_PROCESSING
+            ticket.reject_reason = sanitized_comment or "现场验证不通过"
+            action = TicketActionType.FIELD_REJECT
+            action_comment = ticket.reject_reason
+
+        await ticket.save()
+        await self._write_action(
+            ticket_id=ticket.id,
+            action=action,
+            from_status=old_status,
+            to_status=ticket.status,
+            operator_id=operator_id,
+            comment=action_comment,
         )
         await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
         return ticket

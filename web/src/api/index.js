@@ -71,6 +71,7 @@ export default {
   getTicketById: (params = {}) => request.get('/ticket/get', { params }),
   updateTicket: (data = {}) => request.post('/ticket/update', data),
   closeTicket: (data = {}) => request.post('/ticket/close', data),
+  fieldVerificationTicket: (data = {}) => request.post('/ticket/field-verification', data),
   reviewTicket: (data = {}) => request.post('/ticket/review', data),
   techActionTicket: (data = {}) => request.post('/ticket/tech/action', data),
   assignTicketTech: (data = {}) => request.post('/ticket/assign-tech', data),

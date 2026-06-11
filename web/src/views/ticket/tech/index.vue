@@ -179,7 +179,7 @@ async function takeAction(row, action) {
     ticket_id: row.id,
     action,
     comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
-    root_cause: action === 'finish' ? selectedRootCause.value : null,
+    root_cause: ['finish', 'field_verify'].includes(action) ? selectedRootCause.value : null,
   })
   $message.success(action === 'tech_note' ? '处理备注已记录' : '处理操作已完成')
   commentVisible.value = false
@@ -233,8 +233,8 @@ function handleEditSaved() {
 }
 
 async function closeTicket(row) {
-  await api.closeTicket({ ticket_id: row.id, comment: '关闭工单' })
-  $message.success('工单已关闭')
+  await api.closeTicket({ ticket_id: row.id, comment: '技术处理完成，关闭' })
+  $message.success('技术已关闭工单')
   $table.value?.handleSearch()
   refreshSummaryStats()
 }
@@ -261,8 +261,8 @@ async function submitTechAction() {
     $message.warning('请填写当前问题处理进度')
     return
   }
-  if (pendingActionType.value === 'finish' && !selectedRootCause.value) {
-    $message.warning('处理完成时必须选择问题根因')
+  if (['finish', 'field_verify'].includes(pendingActionType.value) && !selectedRootCause.value) {
+    $message.warning(pendingActionType.value === 'field_verify' ? '转现场验证时必须选择问题根因' : '处理完成时必须选择问题根因')
     return
   }
   await takeAction(pendingActionRow.value, pendingActionType.value)
@@ -556,7 +556,7 @@ function redmineMoreOptions(row) {
     )
   }
   if (row.status === 'pending_close') {
-    options.push({ label: '关闭工单', key: 'close-ticket' })
+    options.push({ label: '技术关闭', key: 'close-ticket' })
   }
   return options
 }
@@ -835,7 +835,7 @@ const columns = [
         :title="techActionModalTitle()"
       >
         <NSelect
-          v-if="pendingActionType === 'finish'"
+          v-if="['finish', 'field_verify'].includes(pendingActionType)"
           v-model:value="selectedRootCause"
           class="mb-12"
           :options="rootCauseOptions"
@@ -849,6 +849,7 @@ const columns = [
           :max-height="320"
         />
         <div class="upload-tip" v-if="pendingActionType === 'finish'">技术完成时必须选择问题根因，备注框支持直接粘贴图片。</div>
+        <div class="upload-tip" v-else-if="pendingActionType === 'field_verify'">转现场验证时必须选择问题根因，备注框支持直接粘贴图片。</div>
         <div class="upload-tip" v-else-if="pendingActionType === 'tech_note'">备注会记录到流转日志，不改变工单状态，支持直接粘贴图片。</div>
         <div class="upload-tip" v-else>备注框支持直接粘贴图片（与提交工单一致）。</div>
         <div class="modal-actions">
