@@ -113,7 +113,7 @@ class Ticket(BaseModel, TimestampMixin):
     category = fields.CharField(max_length=60, description="问题分类", index=True)
     title = fields.CharField(max_length=200, description="问题标题", index=True)
     description = fields.TextField(description="问题描述")
-    status = fields.CharEnumField(TicketStatus, default=TicketStatus.PENDING_REVIEW, index=True)
+    status = fields.CharEnumField(TicketStatus, max_length=32, default=TicketStatus.PENDING_REVIEW, index=True)
     submitter_id = fields.BigIntField(description="提交人ID", index=True)
     reviewer_id = fields.BigIntField(null=True, description="客服审核人ID", index=True)
     tech_id = fields.BigIntField(null=True, description="技术处理人ID", index=True)

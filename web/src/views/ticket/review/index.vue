@@ -5,6 +5,7 @@ import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
+import TicketEditModal from '@/views/ticket/components/TicketEditModal.vue'
 import api from '@/api'
 import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
@@ -21,6 +22,8 @@ const summaryStats = ref({
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const currentTicket = ref({})
+const editVisible = ref(false)
+const editingTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
 const reviewAction = ref(true)
@@ -144,6 +147,17 @@ async function openDetail(row) {
       detailLoading.value = false
     }
   }
+}
+
+async function openEdit(row) {
+  const res = await api.getTicketById({ ticket_id: row.id })
+  editingTicket.value = res?.data || row
+  editVisible.value = true
+}
+
+function handleEditSaved() {
+  $table.value?.handleSearch()
+  refreshSummaryStats()
 }
 
 function applyQuickFilter(status) {
@@ -321,6 +335,9 @@ const columns = [
           @on-data-change="handleTableDataChange"
         >
           <template #queryBar>
+            <QueryBarItem label="项目名称" :label-width="64">
+              <NInput v-model:value="queryItems.company_name" clearable placeholder="输入项目名称" @keypress.enter="$table?.handleSearch()" />
+            </QueryBarItem>
             <QueryBarItem label="标题" :label-width="40">
               <NInput v-model:value="queryItems.title" clearable placeholder="输入标题" @keypress.enter="$table?.handleSearch()" />
             </QueryBarItem>
@@ -371,6 +388,17 @@ const columns = [
       </NCard>
 
       <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
+      <TicketEditModal
+        v-model:visible="editVisible"
+        :ticket="editingTicket"
+        :options="{
+          projectPhases: projectPhaseOptions,
+          issueTypes: issueTypeOptions,
+          impactScopes: impactScopeOptions,
+          categories: categoryOptions,
+        }"
+        @saved="handleEditSaved"
+      />
 
       <NModal v-model:show="commentVisible" preset="card" style="width: 520px" :title="reviewAction ? '审核通过备注' : '驳回备注'">
         <NSelect

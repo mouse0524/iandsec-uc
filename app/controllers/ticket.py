@@ -58,9 +58,9 @@ class TicketController:
     def _status_notify_recipients(status: TicketStatus, ticket: Ticket) -> list[int]:
         if status == TicketStatus.PENDING_REVIEW:
             return []
-        if status == TicketStatus.TECH_PROCESSING:
+        if status in {TicketStatus.TECH_PROCESSING, TicketStatus.FIELD_VERIFICATION}:
             return [ticket.tech_id] if ticket.tech_id else []
-        if status in {TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED, TicketStatus.DONE}:
+        if status in {TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED, TicketStatus.PENDING_CLOSE, TicketStatus.DONE}:
             return [ticket.submitter_id] if ticket.submitter_id else []
         return []
 
@@ -88,10 +88,19 @@ class TicketController:
             if not should_notify:
                 continue
 
-            if current_status in {TicketStatus.CS_REJECTED.value, TicketStatus.TECH_REJECTED.value, TicketStatus.DONE.value}:
+            if current_status in {
+                TicketStatus.CS_REJECTED.value,
+                TicketStatus.TECH_REJECTED.value,
+                TicketStatus.PENDING_CLOSE.value,
+                TicketStatus.DONE.value,
+            }:
                 if item.id != ticket.submitter_id:
                     continue
-            if current_status == TicketStatus.TECH_PROCESSING.value and ticket.tech_id and item.id != ticket.tech_id:
+            if (
+                current_status in {TicketStatus.TECH_PROCESSING.value, TicketStatus.FIELD_VERIFICATION.value}
+                and ticket.tech_id
+                and item.id != ticket.tech_id
+            ):
                 continue
             recipients.append(item)
 
@@ -315,6 +324,7 @@ class TicketController:
         rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size).values(
             "id",
             "ticket_no",
+            "company_name",
             "project_phase",
             "issue_type",
             "impact_scope",
@@ -374,10 +384,12 @@ class TicketController:
 
     async def status_summary(self, *, search: Q) -> dict[str, int]:
         query = Ticket.filter(search)
-        total, pending_review, tech_processing, done, rejected = await asyncio.gather(
+        total, pending_review, tech_processing, field_verification, pending_close, done, rejected = await asyncio.gather(
             query.count(),
             query.filter(status=TicketStatus.PENDING_REVIEW).count(),
             query.filter(status=TicketStatus.TECH_PROCESSING).count(),
+            query.filter(status=TicketStatus.FIELD_VERIFICATION).count(),
+            query.filter(status=TicketStatus.PENDING_CLOSE).count(),
             query.filter(status=TicketStatus.DONE).count(),
             query.filter(status__in=[TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED]).count(),
         )
@@ -385,6 +397,8 @@ class TicketController:
             "total": int(total or 0),
             "pending_review": int(pending_review or 0),
             "tech_processing": int(tech_processing or 0),
+            "field_verification": int(field_verification or 0),
+            "pending_close": int(pending_close or 0),
             "done": int(done or 0),
             "rejected": int(rejected or 0),
         }
@@ -457,7 +471,7 @@ class TicketController:
             comment,
         )
         ticket = await self.get_ticket(ticket_id)
-        if ticket.status != TicketStatus.TECH_PROCESSING:
+        if ticket.status not in {TicketStatus.TECH_PROCESSING, TicketStatus.FIELD_VERIFICATION}:
             raise HTTPException(status_code=400, detail="仅技术处理中工单支持变更技术处理人")
 
         tech_user = await User.filter(id=tech_id, is_active=True, roles__name="技术").first()
@@ -508,12 +522,14 @@ class TicketController:
         )
         comment = self._sanitize_rich_html(comment)
         ticket = await self.get_ticket(ticket_id)
-        if ticket.status != TicketStatus.TECH_PROCESSING:
+        if ticket.status not in {TicketStatus.TECH_PROCESSING, TicketStatus.FIELD_VERIFICATION}:
             raise HTTPException(status_code=400, detail="当前状态不可进行技术处理")
 
         if action not in {
             TicketActionType.TECH_START,
             TicketActionType.TECH_NOTE,
+            TicketActionType.FIELD_VERIFY,
+            TicketActionType.FIELD_REJECT,
             TicketActionType.TECH_REJECT,
             TicketActionType.FINISH,
         }:
@@ -535,15 +551,20 @@ class TicketController:
             ticket.status = TicketStatus.TECH_REJECTED
             ticket.reject_reason = comment or "技术驳回"
         elif action == TicketActionType.FINISH:
-            ticket.status = TicketStatus.DONE
+            ticket.status = TicketStatus.PENDING_CLOSE
             ticket.reject_reason = None
             ticket.root_cause = normalized_root_cause
-            ticket.finished_at = datetime.now()
         elif action == TicketActionType.TECH_START:
             ticket.status = TicketStatus.TECH_PROCESSING
             ticket.reject_reason = None
         elif action == TicketActionType.TECH_NOTE:
+            ticket.status = old_status
+        elif action == TicketActionType.FIELD_VERIFY:
+            ticket.status = TicketStatus.FIELD_VERIFICATION
+            ticket.reject_reason = None
+        elif action == TicketActionType.FIELD_REJECT:
             ticket.status = TicketStatus.TECH_PROCESSING
+            ticket.reject_reason = None
 
         ticket.tech_id = tech_id
         await ticket.save()
@@ -570,16 +591,22 @@ class TicketController:
         self,
         *,
         ticket_id: int,
-        submitter_id: int,
+        operator_id: int,
+        role_names: list[str],
         payload: dict,
         attachment_ids: list[int],
     ) -> Ticket:
         ticket = await self.get_ticket(ticket_id)
-        if ticket.submitter_id != submitter_id:
-            raise HTTPException(status_code=403, detail="只能由提交人编辑工单")
-
-        if ticket.status in {TicketStatus.DONE, TicketStatus.TECH_PROCESSING}:
-            raise HTTPException(status_code=400, detail="当前状态不可编辑")
+        can_edit = (
+            ticket.submitter_id == operator_id
+            or "客服" in role_names
+            or "管理员" in role_names
+            or (ticket.tech_id == operator_id and "技术" in role_names)
+        )
+        if not can_edit:
+            raise HTTPException(status_code=403, detail="无权编辑该工单")
+        if ticket.status == TicketStatus.DONE:
+            raise HTTPException(status_code=400, detail="已关闭工单不可编辑")
 
         old_status = ticket.status
         old_status_value = str(old_status)
@@ -592,45 +619,76 @@ class TicketController:
         if old_status_value == TicketStatus.TECH_REJECTED.value:
             ticket.status = TicketStatus.TECH_PROCESSING
             action = TicketActionType.TECH_START
-            action_comment = "提交者编辑后重新流转技术处理"
+            action_comment = "编辑后重新流转技术处理"
         elif old_status_value == TicketStatus.CS_REJECTED.value:
             config = await system_setting_controller.get_public_config()
             if self._needs_customer_service_review(ticket.project_phase, config):
                 ticket.status = TicketStatus.PENDING_REVIEW
                 action = TicketActionType.RESUBMIT
-                action_comment = "提交者编辑后重新提交客服审核"
+                action_comment = "编辑后重新提交客服审核"
             else:
                 tech_user = await self._get_first_active_tech_user()
                 if tech_user:
                     ticket.status = TicketStatus.TECH_PROCESSING
                     ticket.tech_id = tech_user.id
                     action = TicketActionType.TECH_START
-                    action_comment = "提交者编辑后无需客服审核，重新流转技术处理"
+                    action_comment = "编辑后无需客服审核，重新流转技术处理"
                 else:
                     logger.warning("[ticket.update] skip_cs_review_failed ticket_id={} reason=no_active_tech_user", ticket.id)
                     ticket.status = TicketStatus.PENDING_REVIEW
                     action = TicketActionType.RESUBMIT
-                    action_comment = "提交者编辑后重新提交客服审核"
+                    action_comment = "编辑后重新提交客服审核"
         else:
             ticket.status = old_status
             action = TicketActionType.RESUBMIT
-            action_comment = "提交者编辑工单"
+            action_comment = "编辑工单"
 
         await ticket.save()
         await ticket.refresh_from_db()
 
         if attachment_ids:
-            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, 0])
+            await self._bind_attachments(
+                ticket_id=ticket.id,
+                attachment_ids=attachment_ids,
+                owner_ids=[operator_id, ticket.submitter_id, 0],
+            )
 
         await self._write_action(
             ticket_id=ticket.id,
             action=action,
             from_status=old_status,
             to_status=ticket.status,
-            operator_id=submitter_id,
+            operator_id=operator_id,
             comment=action_comment,
         )
-        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=submitter_id)
+        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
+        return ticket
+
+    async def close_ticket(self, *, ticket_id: int, operator_id: int, role_names: list[str], comment: str | None) -> Ticket:
+        ticket = await self.get_ticket(ticket_id)
+        is_tech = ticket.tech_id == operator_id and "技术" in role_names
+        is_submitter = ticket.submitter_id == operator_id
+        is_admin = "管理员" in role_names
+        if not (is_tech or is_submitter or is_admin):
+            raise HTTPException(status_code=403, detail="仅提交者、当前技术或管理员可关闭工单")
+        if ticket.status != TicketStatus.PENDING_CLOSE:
+            raise HTTPException(status_code=400, detail="仅待关闭工单可关闭")
+
+        old_status = ticket.status
+        ticket.status = TicketStatus.DONE
+        ticket.reject_reason = None
+        ticket.finished_at = datetime.now()
+        await ticket.save()
+
+        await self._write_action(
+            ticket_id=ticket.id,
+            action=TicketActionType.CLOSE,
+            from_status=old_status,
+            to_status=ticket.status,
+            operator_id=operator_id,
+            comment=self._sanitize_rich_html(comment) or "关闭工单",
+        )
+        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
         return ticket
 
     async def resubmit_ticket(
@@ -675,7 +733,7 @@ class TicketController:
         await ticket.save()
 
         if attachment_ids:
-            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, 0])
+            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, ticket.submitter_id, 0])
 
         await self._write_action(
             ticket_id=ticket.id,

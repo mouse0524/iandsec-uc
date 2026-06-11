@@ -23,6 +23,8 @@ class TicketStatus(StrEnum):
     PENDING_REVIEW = "pending_review"
     CS_REJECTED = "cs_rejected"
     TECH_PROCESSING = "tech_processing"
+    FIELD_VERIFICATION = "field_verification"
+    PENDING_CLOSE = "pending_close"
     TECH_REJECTED = "tech_rejected"
     DONE = "done"
 
@@ -35,8 +37,11 @@ class TicketActionType(StrEnum):
     TECH_START = "tech_start"
     TECH_ASSIGN = "tech_assign"
     TECH_NOTE = "tech_note"
+    FIELD_VERIFY = "field_verify"
+    FIELD_REJECT = "field_reject"
     TECH_REJECT = "tech_reject"
     FINISH = "finish"
+    CLOSE = "close"
 
 
 class PartnerRegisterStatus(StrEnum):

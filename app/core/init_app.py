@@ -746,6 +746,10 @@ async def ensure_security_columns():
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_name` VARCHAR(120) NULL", "ticket.redmine_status_name"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
+            ("ALTER TABLE `ticket` MODIFY COLUMN `status` VARCHAR(32) NOT NULL DEFAULT 'pending_review'", "ticket.status.width"),
+            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `action` VARCHAR(32) NOT NULL", "ticket_action_log.action.width"),
+            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `from_status` VARCHAR(32) NULL", "ticket_action_log.from_status.width"),
+            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `to_status` VARCHAR(32) NOT NULL", "ticket_action_log.to_status.width"),
         ]:
             try:
                 await conn.execute_query(sql)

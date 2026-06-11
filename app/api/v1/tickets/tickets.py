@@ -23,7 +23,7 @@ from app.core.dependency import DependAuth
 from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.tickets import TicketAssignTechIn, TicketCreate, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
 from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
 from app.utils.http_headers import build_download_content_disposition
@@ -63,6 +63,7 @@ def _build_ticket_search(
     impact_scope: str | None = None,
     category: str | None = None,
     root_cause: str | None = None,
+    company_name: str | None = None,
     title: str | None = None,
     created_start: datetime | None = None,
     created_end: datetime | None = None,
@@ -82,6 +83,8 @@ def _build_ticket_search(
         q &= Q(category=category)
     if root_cause:
         q &= Q(root_cause=root_cause)
+    if company_name:
+        q &= Q(company_name__contains=company_name)
     if title:
         q &= Q(title__contains=title)
     if created_start:
@@ -218,6 +221,7 @@ async def list_ticket(
     impact_scope: str | None = Query(None, description="影响范围"),
     category: str | None = Query(None, description="??"),
     root_cause: str | None = Query(None, description="????"),
+    company_name: str | None = Query(None, description="项目名称"),
     title: str | None = Query(None, description="??"),
     created_start: datetime | None = Query(None, description="??????"),
     created_end: datetime | None = Query(None, description="??????"),
@@ -239,6 +243,7 @@ async def list_ticket(
         impact_scope=impact_scope,
         category=category,
         root_cause=root_cause,
+        company_name=company_name,
         title=title,
         created_start=created_start,
         created_end=created_end,
@@ -257,6 +262,7 @@ async def list_ticket(
         impact_scope=impact_scope,
         category=category,
         root_cause=root_cause,
+        company_name=company_name,
         title=title,
         created_start=created_start,
         created_end=created_end,
@@ -292,6 +298,7 @@ async def export_tickets(
     impact_scope: str | None = Query(None, description="Impact scope"),
     category: str | None = Query(None, description="Category"),
     root_cause: str | None = Query(None, description="Root cause"),
+    company_name: str | None = Query(None, description="Project name"),
     title: str | None = Query(None, description="Title"),
     created_start: datetime | None = Query(None, description="Created start time"),
     created_end: datetime | None = Query(None, description="Created end time"),
@@ -309,6 +316,7 @@ async def export_tickets(
         impact_scope=impact_scope,
         category=category,
         root_cause=root_cause,
+        company_name=company_name,
         title=title,
         created_start=created_start,
         created_end=created_end,
@@ -356,8 +364,10 @@ async def export_tickets(
         TicketStatus.PENDING_REVIEW.value: "Pending review",
         TicketStatus.CS_REJECTED.value: "CS rejected",
         TicketStatus.TECH_PROCESSING.value: "Tech processing",
+        TicketStatus.FIELD_VERIFICATION.value: "Field verification",
+        TicketStatus.PENDING_CLOSE.value: "Pending close",
         TicketStatus.TECH_REJECTED.value: "Tech rejected",
-        TicketStatus.DONE.value: "Done",
+        TicketStatus.DONE.value: "Closed",
     }
     action_text = {
         TicketActionType.SUBMIT.value: "Submit",
@@ -367,8 +377,11 @@ async def export_tickets(
         TicketActionType.TECH_START.value: "Tech start",
         TicketActionType.TECH_ASSIGN.value: "Tech assign",
         TicketActionType.TECH_NOTE.value: "Tech note",
+        TicketActionType.FIELD_VERIFY.value: "Field verification",
+        TicketActionType.FIELD_REJECT.value: "Field verification rejected",
         TicketActionType.TECH_REJECT.value: "Tech reject",
         TicketActionType.FINISH.value: "Finish",
+        TicketActionType.CLOSE.value: "Close",
     }
 
     workbook = Workbook()
@@ -657,12 +670,26 @@ async def update_ticket(payload: TicketUpdateIn):
         body.pop("impact_scope", None)
     ticket = await ticket_controller.update_ticket(
         ticket_id=payload.ticket_id,
-        submitter_id=user.id,
+        operator_id=user.id,
+        role_names=await _get_user_role_names(user),
         payload=body,
         attachment_ids=payload.attachment_ids,
     )
     logger.info("[api.ticket.update] success user_id={} ticket_id={} status={}", user.id, ticket.id, ticket.status)
     return Success(msg="编辑成功", data=await ticket.to_dict())
+
+
+@router.post("/close", summary="关闭工单", dependencies=[DependAuth])
+async def close_ticket(payload: TicketCloseIn):
+    user = await _get_current_user()
+    ticket = await ticket_controller.close_ticket(
+        ticket_id=payload.ticket_id,
+        operator_id=user.id,
+        role_names=await _get_user_role_names(user),
+        comment=payload.comment,
+    )
+    logger.info("[api.ticket.close] success user_id={} ticket_id={} status={}", user.id, ticket.id, ticket.status)
+    return Success(msg="关闭成功", data=await ticket.to_dict())
 
 
 @router.get("/actions", summary="工单操作日志", dependencies=[DependAuth])

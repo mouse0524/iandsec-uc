@@ -99,7 +99,13 @@ class SystemSettingUpdateIn(BaseModel):
     redmine_sync_options: dict[str, list[str]] = Field(default_factory=dict)
     redmine_auto_pull_enabled: bool = False
     redmine_auto_pull_interval_minutes: int = 30
-    redmine_auto_pull_ticket_statuses: list[str] = Field(default_factory=lambda: [TicketStatus.TECH_PROCESSING.value])
+    redmine_auto_pull_ticket_statuses: list[str] = Field(
+        default_factory=lambda: [
+            TicketStatus.TECH_PROCESSING.value,
+            TicketStatus.FIELD_VERIFICATION.value,
+            TicketStatus.PENDING_CLOSE.value,
+        ]
+    )
 
     @field_validator("ticket_attachment_extensions")
     @classmethod

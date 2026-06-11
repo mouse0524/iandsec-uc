@@ -260,6 +260,8 @@ async def get_workbench_stats():
     ticket_total = await ticket_query.count()
     ticket_pending_review = await ticket_query.filter(status=TicketStatus.PENDING_REVIEW).count()
     ticket_tech_processing = await ticket_query.filter(status=TicketStatus.TECH_PROCESSING).count()
+    ticket_field_verification = await ticket_query.filter(status=TicketStatus.FIELD_VERIFICATION).count()
+    ticket_pending_close = await ticket_query.filter(status=TicketStatus.PENDING_CLOSE).count()
     ticket_done = await ticket_query.filter(status=TicketStatus.DONE).count()
     ticket_rejected = await ticket_query.filter(status__in=[TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED]).count()
     ticket_today_created = await ticket_query.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
@@ -268,7 +270,7 @@ async def get_workbench_stats():
         finished_at__gte=today_start,
         finished_at__lt=tomorrow_start,
     ).count()
-    ticket_active = ticket_pending_review + ticket_tech_processing
+    ticket_active = ticket_pending_review + ticket_tech_processing + ticket_field_verification + ticket_pending_close
     ticket_today_completion_rate = round(ticket_today_done * 100 / ticket_today_created, 1) if ticket_today_created else 0
     register_pending = await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING).count() if is_global else 0
     register_approved = await PartnerRegistration.filter(status=PartnerRegisterStatus.APPROVED).count() if is_global else 0
@@ -365,6 +367,8 @@ async def get_workbench_stats():
         "ticket_active": ticket_active,
         "ticket_pending_review": ticket_pending_review,
         "ticket_tech_processing": ticket_tech_processing,
+        "ticket_field_verification": ticket_field_verification,
+        "ticket_pending_close": ticket_pending_close,
         "ticket_done": ticket_done,
         "ticket_rejected": ticket_rejected,
         "ticket_today_created": ticket_today_created,

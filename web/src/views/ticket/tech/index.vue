@@ -6,6 +6,7 @@ import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
+import TicketEditModal from '@/views/ticket/components/TicketEditModal.vue'
 import api from '@/api'
 import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
@@ -16,12 +17,16 @@ const queryItems = ref({ status: 'tech_processing' })
 const tableData = ref([])
 const summaryStats = ref({
   tech_processing: 0,
+  field_verification: 0,
+  pending_close: 0,
   done: 0,
   tech_rejected: 0,
 })
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const currentTicket = ref({})
+const editVisible = ref(false)
+const editingTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
 const redmineVisible = ref(false)
@@ -83,14 +88,18 @@ const redminePriorityOptions = computed(() => {
 })
 const quickFilters = [
   { label: '处理中', value: 'tech_processing' },
-  { label: '已完成', value: 'done' },
+  { label: '现场验证', value: 'field_verification' },
+  { label: '待关闭', value: 'pending_close' },
+  { label: '已关闭', value: 'done' },
   { label: '技术驳回', value: 'tech_rejected' },
 ]
 
 const summaryCards = computed(() => {
   return [
     { label: '处理中', value: summaryStats.value.tech_processing || 0, tone: 'info' },
-    { label: '已完成', value: summaryStats.value.done || 0, tone: 'success' },
+    { label: '现场验证', value: summaryStats.value.field_verification || 0, tone: 'warning' },
+    { label: '待关闭', value: summaryStats.value.pending_close || 0, tone: 'success' },
+    { label: '已关闭', value: summaryStats.value.done || 0, tone: 'success' },
     { label: '技术驳回', value: summaryStats.value.tech_rejected || 0, tone: 'error' },
   ]
 })
@@ -146,18 +155,22 @@ async function getTicketList(params) {
 
 async function refreshSummaryStats() {
   try {
-    const [processingRes, doneRes, rejectedRes] = await Promise.all([
+    const [processingRes, verificationRes, pendingCloseRes, doneRes, rejectedRes] = await Promise.all([
       api.getTicketList({ page: 1, page_size: 1, status: 'tech_processing' }),
+      api.getTicketList({ page: 1, page_size: 1, status: 'field_verification' }),
+      api.getTicketList({ page: 1, page_size: 1, status: 'pending_close' }),
       api.getTicketList({ page: 1, page_size: 1, status: 'done' }),
       api.getTicketList({ page: 1, page_size: 1, status: 'tech_rejected' }),
     ])
     summaryStats.value = {
       tech_processing: Number(processingRes?.total || 0),
+      field_verification: Number(verificationRes?.total || 0),
+      pending_close: Number(pendingCloseRes?.total || 0),
       done: Number(doneRes?.total || 0),
       tech_rejected: Number(rejectedRes?.total || 0),
     }
   } catch (error) {
-    summaryStats.value = { tech_processing: 0, done: 0, tech_rejected: 0 }
+    summaryStats.value = { tech_processing: 0, field_verification: 0, pending_close: 0, done: 0, tech_rejected: 0 }
   }
 }
 
@@ -165,7 +178,7 @@ async function takeAction(row, action) {
   await api.techActionTicket({
     ticket_id: row.id,
     action,
-    comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
+    comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
     root_cause: action === 'finish' ? selectedRootCause.value : null,
   })
   $message.success(action === 'tech_note' ? '处理备注已记录' : '处理操作已完成')
@@ -203,9 +216,43 @@ function applyQuickFilter(status) {
 function openTechAction(row, action) {
   pendingActionRow.value = row
   pendingActionType.value = action
-  actionComment.value = action === 'finish' ? '技术处理完成' : action === 'tech_reject' ? '技术驳回' : ''
+  actionComment.value = action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : ''
   selectedRootCause.value = null
   commentVisible.value = true
+}
+
+async function openEdit(row) {
+  const res = await api.getTicketById({ ticket_id: row.id })
+  editingTicket.value = res?.data || row
+  editVisible.value = true
+}
+
+function handleEditSaved() {
+  $table.value?.handleSearch()
+  refreshSummaryStats()
+}
+
+async function closeTicket(row) {
+  await api.closeTicket({ ticket_id: row.id, comment: '关闭工单' })
+  $message.success('工单已关闭')
+  $table.value?.handleSearch()
+  refreshSummaryStats()
+}
+
+function techActionModalTitle() {
+  if (pendingActionType.value === 'finish') return '完成备注'
+  if (pendingActionType.value === 'tech_note') return '处理进度备注'
+  if (pendingActionType.value === 'field_verify') return '现场验证备注'
+  if (pendingActionType.value === 'field_reject') return '验证不通过备注'
+  return '驳回备注'
+}
+
+function techActionPlaceholder() {
+  if (pendingActionType.value === 'finish') return '填写处理结果摘要，可直接粘贴图片'
+  if (pendingActionType.value === 'tech_note') return '填写当前处理进度、排查结论或下一步计划，可直接粘贴图片'
+  if (pendingActionType.value === 'field_verify') return '填写现场验证安排或说明，可直接粘贴图片'
+  if (pendingActionType.value === 'field_reject') return '填写现场验证不通过原因，可直接粘贴图片'
+  return '请填写驳回原因，可直接粘贴图片'
 }
 
 async function submitTechAction() {
@@ -369,7 +416,7 @@ async function pushRedmine(row, payload = {}) {
   setRedmineLoading(row.id, true)
   try {
     const res = await api.pushTicketRedmine({ ticket_id: row.id, ...payload })
-    $message.success(res?.msg || 'Redmine????')
+    $message.success(res?.msg || 'Redmine同步成功')
     $table.value?.handleSearch()
     if (currentTicket.value?.id === row.id) {
       currentTicket.value = res?.data || currentTicket.value
@@ -492,13 +539,24 @@ function redmineMoreOptions(row) {
       options.push({ label: '打开Redmine', key: 'open-redmine' })
     }
   }
-  if (row.status === 'tech_processing') {
+  if (row.status !== 'done') {
+    options.push({ label: '编辑工单', key: 'edit-ticket' })
+  }
+  if (['tech_processing', 'field_verification'].includes(row.status)) {
+    if (row.status === 'tech_processing') {
+      options.push({ label: '指派现场验证', key: 'field-verify' })
+    } else {
+      options.push({ label: '验证不通过', key: 'field-reject' })
+    }
     options.push(
       { label: '记录备注', key: 'tech-note' },
       { label: '处理完成', key: 'finish' },
       { label: '技术驳回', key: 'tech-reject' },
       { label: '改派技术', key: 'assign-tech' },
     )
+  }
+  if (row.status === 'pending_close') {
+    options.push({ label: '关闭工单', key: 'close-ticket' })
   }
   return options
 }
@@ -507,10 +565,14 @@ function handleMoreAction(key, row) {
   if (key === 'push-redmine') return openRedmineSync(row)
   if (key === 'pull-redmine') return pullRedmine(row)
   if (key === 'open-redmine') return openRedmine(row)
+  if (key === 'edit-ticket') return openEdit(row)
   if (key === 'tech-note') return openTechAction(row, 'tech_note')
+  if (key === 'field-verify') return openTechAction(row, 'field_verify')
+  if (key === 'field-reject') return openTechAction(row, 'field_reject')
   if (key === 'finish') return openTechAction(row, 'finish')
   if (key === 'tech-reject') return openTechAction(row, 'tech_reject')
   if (key === 'assign-tech') return openAssignAction(row)
+  if (key === 'close-ticket') return closeTicket(row)
 }
 
 const columns = [
@@ -640,6 +702,9 @@ const columns = [
           @on-data-change="handleTableDataChange"
         >
           <template #queryBar>
+            <QueryBarItem label="项目名称" :label-width="64">
+              <NInput v-model:value="queryItems.company_name" clearable placeholder="输入项目名称" @keypress.enter="$table?.handleSearch()" />
+            </QueryBarItem>
             <QueryBarItem label="标题" :label-width="40">
               <NInput v-model:value="queryItems.title" clearable placeholder="输入标题" @keypress.enter="$table?.handleSearch()" />
             </QueryBarItem>
@@ -690,6 +755,17 @@ const columns = [
       </NCard>
 
       <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
+      <TicketEditModal
+        v-model:visible="editVisible"
+        :ticket="editingTicket"
+        :options="{
+          projectPhases: projectPhaseOptions,
+          issueTypes: issueTypeOptions,
+          impactScopes: impactScopeOptions,
+          categories: categoryOptions,
+        }"
+        @saved="handleEditSaved"
+      />
 
       <NModal v-model:show="redmineVisible" preset="card" style="width: 520px" title="同步Redmine">
         <NAlert v-if="!hasVisibleRedmineFields" type="info" class="mb-12">
@@ -756,7 +832,7 @@ const columns = [
         v-model:show="commentVisible"
         preset="card"
         style="width: 760px; max-width: 92vw"
-        :title="pendingActionType === 'finish' ? '完成备注' : pendingActionType === 'tech_note' ? '处理进度备注' : '驳回备注'"
+        :title="techActionModalTitle()"
       >
         <NSelect
           v-if="pendingActionType === 'finish'"
@@ -768,13 +844,7 @@ const columns = [
         />
         <RichTextEditor
           v-model="actionComment"
-          :placeholder="
-            pendingActionType === 'finish'
-              ? '填写处理结果摘要，可直接粘贴图片'
-              : pendingActionType === 'tech_note'
-                ? '填写当前处理进度、排查结论或下一步计划，可直接粘贴图片'
-                : '请填写驳回原因，可直接粘贴图片'
-          "
+          :placeholder="techActionPlaceholder()"
           :min-height="180"
           :max-height="320"
         />

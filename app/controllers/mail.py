@@ -243,8 +243,10 @@ class MailController:
             TicketStatus.PENDING_REVIEW.value: "待客服审核",
             TicketStatus.CS_REJECTED.value: "客服驳回",
             TicketStatus.TECH_PROCESSING.value: "待技术处理",
+            TicketStatus.FIELD_VERIFICATION.value: "现场验证",
+            TicketStatus.PENDING_CLOSE.value: "待关闭",
             TicketStatus.TECH_REJECTED.value: "技术驳回",
-            TicketStatus.DONE.value: "已完成",
+            TicketStatus.DONE.value: "已关闭",
         }
         setting = await self._get_setting()
         status_label = status_label_map.get(str(status), str(status))

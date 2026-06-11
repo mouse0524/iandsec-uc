@@ -99,10 +99,10 @@ class SystemSettingController:
         },
         "ticket_notify": {
             "ticket_notify_by_role": {
-                "用户": ["cs_rejected", "tech_rejected", "done"],
-                "代理商": ["cs_rejected", "tech_rejected", "done"],
+                "用户": ["cs_rejected", "tech_rejected", "pending_close", "done"],
+                "代理商": ["cs_rejected", "tech_rejected", "pending_close", "done"],
                 "客服": ["pending_review"],
-                "技术": ["tech_processing"],
+                "技术": ["tech_processing", "field_verification"],
             }
         },
         "mail": {
@@ -172,7 +172,7 @@ class SystemSettingController:
             "redmine_sync_options": {},
             "redmine_auto_pull_enabled": False,
             "redmine_auto_pull_interval_minutes": _int_env("REDMINE_AUTO_PULL_INTERVAL_MINUTES", 30),
-            "redmine_auto_pull_ticket_statuses": ["tech_processing"],
+            "redmine_auto_pull_ticket_statuses": ["tech_processing", "field_verification", "pending_close"],
         },
     }
 
@@ -184,7 +184,7 @@ class SystemSettingController:
 
     async def _get_or_create_section(self, section: str) -> SystemSettingItem:
         if section not in self._SECTIONS:
-            raise HTTPException(status_code=400, detail="???????")
+            raise HTTPException(status_code=400, detail="无效的配置分组")
         try:
             item, created = await SystemSettingItem.get_or_create(
                 section=section,

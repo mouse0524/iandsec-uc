@@ -82,10 +82,10 @@ const form = ref({
   time_sync_max_offset_seconds: 5,
   time_sync_timezone: 'Asia/Shanghai',
   ticket_notify_by_role: {
-    用户: ['cs_rejected', 'tech_rejected', 'done'],
-    代理商: ['cs_rejected', 'tech_rejected', 'done'],
+    用户: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
+    代理商: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
     客服: ['pending_review'],
-    技术: ['tech_processing'],
+    技术: ['tech_processing', 'field_verification'],
   },
   smtp_host: '',
   smtp_port: 465,
@@ -147,7 +147,7 @@ const form = ref({
   redmine_sync_options: {},
   redmine_auto_pull_enabled: false,
   redmine_auto_pull_interval_minutes: 30,
-  redmine_auto_pull_ticket_statuses: ['tech_processing'],
+  redmine_auto_pull_ticket_statuses: ['tech_processing', 'field_verification', 'pending_close'],
 })
 
 const previewParams = ref({
@@ -204,15 +204,20 @@ const ticketNotifyRoleOptions = {
   用户: [
     { label: '客服驳回', value: 'cs_rejected' },
     { label: '技术驳回', value: 'tech_rejected' },
+    { label: '待关闭', value: 'pending_close' },
     { label: '处理完成', value: 'done' },
   ],
   代理商: [
     { label: '客服驳回', value: 'cs_rejected' },
     { label: '技术驳回', value: 'tech_rejected' },
+    { label: '待关闭', value: 'pending_close' },
     { label: '处理完成', value: 'done' },
   ],
   客服: [{ label: '提交后待客服审核', value: 'pending_review' }],
-  技术: [{ label: '通过后待技术处理', value: 'tech_processing' }],
+  技术: [
+    { label: '通过后待技术处理', value: 'tech_processing' },
+    { label: '现场验证', value: 'field_verification' },
+  ],
 }
 
 const passwordCategoryOptions = [
@@ -227,8 +232,10 @@ const ticketStatusOptions = [
   { label: '待客服审核', value: 'pending_review' },
   { label: '客服驳回', value: 'cs_rejected' },
   { label: '待技术处理', value: 'tech_processing' },
+  { label: '现场验证', value: 'field_verification' },
+  { label: '待关闭', value: 'pending_close' },
   { label: '技术驳回', value: 'tech_rejected' },
-  { label: '已完成', value: 'done' },
+  { label: '已关闭', value: 'done' },
 ]
 
 function normalizeTicketNotifyByRole(raw = {}) {

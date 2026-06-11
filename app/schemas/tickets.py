@@ -53,6 +53,11 @@ class TicketRedmineSyncIn(BaseModel):
     os_value: Optional[str] = Field(None, description="Redmine OS custom field value")
 
 
+class TicketCloseIn(BaseModel):
+    ticket_id: int = Field(..., description="工单ID")
+    comment: Optional[str] = Field(None, description="关闭备注")
+
+
 class TicketResubmitIn(BaseModel):
     ticket_id: int = Field(..., description="工单ID")
     description: Optional[str] = Field(None, description="补充描述")
