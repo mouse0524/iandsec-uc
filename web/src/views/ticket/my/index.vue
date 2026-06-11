@@ -372,11 +372,12 @@ const columns = [
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .summary-card {
-  padding: 16px 18px;
+  min-width: 0;
+  padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid #ebeef5;
   background: #fff;
@@ -502,9 +503,17 @@ const columns = [
 
 @media (max-width: 960px) {
   .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
   }
 
+  .summary-card {
+    padding: 12px 10px;
+  }
+
+  .summary-card strong {
+    font-size: 24px;
+  }
 }
 
 @media (max-width: 640px) {
