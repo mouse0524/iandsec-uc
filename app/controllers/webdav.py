@@ -22,6 +22,7 @@ from app.settings import settings
 
 class WebDavController:
     LIST_CACHE_TTL_SECONDS = 24 * 60 * 60
+    LIST_CACHE_KEY_PATTERN = "webdav:list:*"
 
     @staticmethod
     def _auth(conf: dict) -> tuple[str, str]:
@@ -267,6 +268,23 @@ class WebDavController:
             await execute_redis("delete", *keys)
         except Exception as exc:
             logger.warning("[webdav.cache.delete] keys={} error={}", ",".join(keys), str(exc))
+
+    async def clear_list_cache(self) -> int:
+        cleared = 0
+        cursor = 0
+        try:
+            while True:
+                cursor, keys = await execute_redis("scan", cursor=cursor, match=self.LIST_CACHE_KEY_PATTERN, count=500)
+                keys = list(keys or [])
+                if keys:
+                    cleared += int(await execute_redis("delete", *keys) or 0)
+                if int(cursor or 0) == 0:
+                    break
+        except Exception as exc:
+            logger.warning("[webdav.cache.clear] pattern={} error={}", self.LIST_CACHE_KEY_PATTERN, str(exc))
+            raise HTTPException(status_code=500, detail="清理网盘缓存失败") from exc
+        logger.info("[webdav.cache.clear] cleared={}", cleared)
+        return cleared
 
     @staticmethod
     def _parse_file_list(xml_text: str, current_path: str, base_prefix: str) -> list[dict[str, Any]]:

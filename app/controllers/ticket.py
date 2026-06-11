@@ -21,30 +21,6 @@ from app.utils.http_headers import build_download_content_disposition
 
 
 class TicketController:
-    GUEST_ATTACHMENT_BIND_TTL_SECONDS = 30 * 60
-
-    @staticmethod
-    def _guest_attachment_key(captcha_id: str) -> str:
-        return f"guest:ticket:attachments:{captcha_id}"
-
-    async def remember_guest_attachment(self, *, captcha_id: str, attachment_id: int) -> None:
-        key = self._guest_attachment_key(captcha_id)
-        await execute_redis("sadd", key, attachment_id)
-        await execute_redis("expire", key, self.GUEST_ATTACHMENT_BIND_TTL_SECONDS)
-
-    async def validate_guest_attachment_ids(self, *, captcha_id: str, attachment_ids: list[int]) -> None:
-        if not attachment_ids:
-            return
-        key = self._guest_attachment_key(captcha_id)
-        allowed = {int(item) for item in (await execute_redis("smembers", key) or []) if str(item).isdigit()}
-        if not set(attachment_ids).issubset(allowed):
-            raise HTTPException(status_code=403, detail="附件不存在、已绑定或不属于当前会话")
-
-    async def consume_guest_attachment_ids(self, *, captcha_id: str, attachment_ids: list[int]) -> None:
-        if not attachment_ids:
-            return
-        key = self._guest_attachment_key(captcha_id)
-        await execute_redis("srem", key, *attachment_ids)
     _ROLE_NOTIFY_MAP = {
         "用户": "用户",
         "渠道商": "代理商",
@@ -227,7 +203,7 @@ class TicketController:
             **payload,
         )
         if attachment_ids:
-            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, 0])
+            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id])
 
         bound_rows = await TicketAttachment.filter(ticket_id=ticket.id).values("id", "uploader_id", "origin_name")
         logger.info("[ticket.create] ticket_id={} bound_attachments={}", ticket.id, bound_rows)
@@ -651,7 +627,7 @@ class TicketController:
             await self._bind_attachments(
                 ticket_id=ticket.id,
                 attachment_ids=attachment_ids,
-                owner_ids=[operator_id, ticket.submitter_id, 0],
+                owner_ids=[operator_id, ticket.submitter_id],
             )
 
         await self._write_action(
@@ -774,7 +750,7 @@ class TicketController:
         await ticket.save()
 
         if attachment_ids:
-            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, ticket.submitter_id, 0])
+            await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id, ticket.submitter_id])
 
         await self._write_action(
             ticket_id=ticket.id,

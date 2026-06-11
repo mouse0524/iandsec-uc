@@ -37,6 +37,7 @@ from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, Se
 from app.schemas.base import Fail, Success
 from app.schemas.login import CredentialsSchema, JWTPayload, JWTOut
 from app.schemas.users import UpdatePassword
+from app.services.human_challenge import human_challenge_service
 from app.settings import settings
 from app.utils.jwt_utils import create_access_token
 from app.utils.password import get_password_hash, verify_password
@@ -77,7 +78,7 @@ def _is_register_type_enabled(config: dict, register_type: RegisterType | None) 
 async def login_access_token(credentials: CredentialsSchema, request: Request):
     logger.info("[api.login] start username={}", credentials.username)
     client_ip = get_client_ip(request)
-    config = await system_setting_controller.get_public_config()
+    config = await system_setting_controller.get_full_dict()
 
     decision = await login_security_controller.check_lock(username=credentials.username, ip=client_ip)
     if decision.locked:
@@ -90,13 +91,19 @@ async def login_access_token(credentials: CredentialsSchema, request: Request):
         )
         return Fail(code=423, msg=_format_lock_message(decision.ttl_seconds))
 
-    valid = await captcha_controller.verify_captcha(credentials.captcha_id, credentials.captcha_code)
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=credentials.captcha_id,
+        captcha_code=credentials.captcha_code,
+        turnstile_token=credentials.turnstile_token,
+        client_ip=client_ip,
+        config=config,
+        log_context="api.login",
+    )
     if not valid:
-        logger.warning("[api.login] captcha_invalid username={} captcha_id={}", credentials.username, credentials.captcha_id)
         fail_result = await login_security_controller.record_failure(username=credentials.username, ip=client_ip)
         if fail_result.locked:
             return Fail(code=423, msg=_format_lock_message(fail_result.ttl_seconds))
-        return Fail(code=400, msg=_login_error_message(config, f"登录验证码错误或已过期（最多{settings.CAPTCHA_MAX_RETRY}次）"))
+        return Fail(code=400, msg=_login_error_message(config, challenge_error))
 
     try:
         user: User = await user_controller.authenticate(credentials)
@@ -167,8 +174,8 @@ async def get_site_logo():
 
 
 @router.post("/send_email_code", summary="发送邮箱验证码")
-async def send_email_code(payload: SendVerifyCodeIn):
-    config = await system_setting_controller.get_public_config()
+async def send_email_code(payload: SendVerifyCodeIn, request: Request):
+    config = await system_setting_controller.get_full_dict()
     if not _is_register_type_enabled(config, payload.register_type):
         return Fail(code=403, msg=_register_closed_message(payload.register_type))
 
@@ -181,10 +188,17 @@ async def send_email_code(payload: SendVerifyCodeIn):
     if await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING, email=email).exists():
         return Fail(code=400, msg="该邮箱已有待审核申请，请耐心等待审核结果")
 
-    valid = await captcha_controller.verify_captcha(payload.captcha_id, payload.captcha_code)
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        turnstile_token=payload.turnstile_token,
+        client_ip=get_client_ip(request),
+        config=config,
+        log_context="api.send_email_code",
+    )
     if not valid:
         logger.warning("[api.send_email_code] captcha_invalid email={} captcha_id={}", email, payload.captcha_id)
-        return Fail(code=400, msg=f"图形验证码错误或已失效，请重试（最多{settings.CAPTCHA_MAX_RETRY}次）")
+        return Fail(code=400, msg=challenge_error)
 
     await mail_controller.send_partner_verify_code(email)
     logger.info("[api.send_email_code] success email={}", email)
@@ -192,11 +206,17 @@ async def send_email_code(payload: SendVerifyCodeIn):
 
 
 @router.post("/send_reset_password_code", summary="发送找回密码验证码")
-async def send_reset_password_code(payload: SendResetPasswordCodeIn):
+async def send_reset_password_code(payload: SendResetPasswordCodeIn, request: Request):
     email = payload.email.strip().lower()
-    valid = await captcha_controller.verify_captcha(payload.captcha_id, payload.captcha_code)
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        turnstile_token=payload.turnstile_token,
+        client_ip=get_client_ip(request),
+        log_context="api.send_reset_password_code",
+    )
     if not valid:
-        return Fail(code=400, msg=f"图形验证码错误或已失效，请重试（最多{settings.CAPTCHA_MAX_RETRY}次）")
+        return Fail(code=400, msg=challenge_error)
 
     user = await User.filter(email=email).first()
     if not user:

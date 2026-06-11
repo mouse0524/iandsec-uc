@@ -65,6 +65,10 @@ const form = ref({
   ticket_root_causes: ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖'],
   ticket_description_templates: ['问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：'],
   login_security_enabled: true,
+  login_challenge_enabled: true,
+  login_challenge_type: 'captcha',
+  turnstile_site_key: '',
+  turnstile_secret_key: '',
   login_account_ip_fail_limit: 5,
   login_account_ip_lock_minutes: 60,
   login_ip_fail_limit: 20,
@@ -224,6 +228,12 @@ const passwordCategoryOptions = [
   { label: '字母', value: 'letter' },
   { label: '数字', value: 'digit' },
   { label: '特殊字符', value: 'special' },
+]
+
+const loginChallengeTypeOptions = [
+  { label: '图形验证码', value: 'captcha' },
+  { label: 'Cloudflare Turnstile', value: 'turnstile' },
+  { label: '图形验证码 + Turnstile', value: 'both' },
 ]
 
 const ticketNotifyRoles = ['用户', '代理商', '客服', '技术']
@@ -560,6 +570,13 @@ async function loadData() {
       ticket_notify_by_role: normalizeTicketNotifyByRole(
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
+      login_challenge_enabled:
+        typeof res.data?.login_challenge_enabled === 'boolean'
+          ? res.data.login_challenge_enabled
+          : form.value.login_challenge_enabled,
+      login_challenge_type: res.data?.login_challenge_type || form.value.login_challenge_type,
+      turnstile_site_key: res.data?.turnstile_site_key || '',
+      turnstile_secret_key: res.data?.turnstile_secret_key || '',
     }
     await loadCachedRedmineMetadata()
     ensureRedmineSelectedOptions()
@@ -583,6 +600,9 @@ function save() {
       }
       if (payload.redmine_api_key === MASKED_SECRET) {
         delete payload.redmine_api_key
+      }
+      if (payload.turnstile_secret_key === MASKED_SECRET) {
+        delete payload.turnstile_secret_key
       }
       await api.updateSystemSettings(payload)
       $message.success('设置已保存并生效')
@@ -1051,6 +1071,34 @@ function applyPresetHtmlTemplates() {
               <NFormItem label="启用登录安全">
                 <NSwitch v-model:value="form.login_security_enabled" />
               </NFormItem>
+              <NDivider title-placement="left">人机校验</NDivider>
+              <NFormItem label="启用人机校验">
+                <NSwitch v-model:value="form.login_challenge_enabled" />
+              </NFormItem>
+              <NFormItem label="校验方式" path="login_challenge_type">
+                <NSelect
+                  v-model:value="form.login_challenge_type"
+                  :options="loginChallengeTypeOptions"
+                  :disabled="!form.login_challenge_enabled"
+                />
+              </NFormItem>
+              <NFormItem label="Turnstile Site Key">
+                <NInput
+                  v-model:value="form.turnstile_site_key"
+                  :disabled="!form.login_challenge_enabled"
+                  placeholder="前端展示使用的 Site Key"
+                />
+              </NFormItem>
+              <NFormItem label="Turnstile Secret Key">
+                <NInput
+                  v-model:value="form.turnstile_secret_key"
+                  type="password"
+                  show-password-on="click"
+                  :disabled="!form.login_challenge_enabled"
+                  placeholder="后端校验使用，保存后会掩码显示"
+                />
+              </NFormItem>
+              <NDivider title-placement="left">登录锁定</NDivider>
               <NFormItem label="账号+IP失败阈值" path="login_account_ip_fail_limit">
                 <NInputNumber v-model:value="form.login_account_ip_fail_limit" :min="1" :max="20" />
               </NFormItem>

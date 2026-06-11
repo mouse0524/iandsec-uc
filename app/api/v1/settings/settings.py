@@ -66,6 +66,10 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "redmine_auto_pull_enabled",
         "redmine_auto_pull_interval_minutes",
         "redmine_auto_pull_ticket_statuses",
+        "login_challenge_enabled",
+        "login_challenge_type",
+        "turnstile_site_key",
+        "turnstile_secret_key",
     )
     for key in optional_preserve_keys:
         if key not in payload.model_fields_set:

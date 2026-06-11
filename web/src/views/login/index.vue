@@ -88,17 +88,15 @@
               @keypress.enter="handleLogin"
             />
           </div>
-          <div class="auth-form-item">
-            <label>安全验证码</label>
-            <div class="captcha-row">
-              <n-input
-                v-model:value="loginInfo.captcha_code"
-                placeholder="请输入登录验证码"
-                :maxlength="6"
-                @keypress.enter="handleLogin"
-              />
-              <img :src="loginCaptchaImage" alt="login-captcha" class="captcha-img" @click="fetchLoginCaptcha" />
-            </div>
+          <div v-if="challengeEnabled" class="auth-form-item">
+            <label>安全校验</label>
+            <HumanChallenge
+              ref="loginChallengeRef"
+              v-model:captcha-id="loginInfo.captcha_id"
+              v-model:captcha-code="loginInfo.captcha_code"
+              v-model:turnstile-token="loginInfo.turnstile_token"
+              captcha-placeholder="请输入登录验证码"
+            />
           </div>
 
           <n-button class="login-btn" type="primary" :loading="loading" @click="handleLogin">
@@ -212,7 +210,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showCaptchaModal" preset="card" title="图形验证码" style="width: 460px">
+    <n-modal v-model:show="showCaptchaModal" preset="card" title="安全校验" style="width: 460px">
       <div class="captcha-modal-panel">
         <div class="captcha-modal-head">
           <h4>安全校验</h4>
@@ -220,11 +218,14 @@
         </div>
 
         <n-form :model="partnerForm" :rules="captchaRules" label-width="80" label-placement="left">
-          <n-form-item label="验证码" path="captcha_code">
-            <div class="captcha-modal-row">
-              <n-input v-model:value="partnerForm.captcha_code" placeholder="请输入图形验证码" />
-              <img :src="partnerCaptchaImage" class="captcha-modal-img" @click="fetchPartnerCaptcha" />
-            </div>
+          <n-form-item label="安全校验" path="captcha_code">
+            <HumanChallenge
+              ref="partnerChallengeRef"
+              v-model:captcha-id="partnerForm.captcha_id"
+              v-model:captcha-code="partnerForm.captcha_code"
+              v-model:turnstile-token="partnerForm.turnstile_token"
+              captcha-placeholder="请输入图形验证码"
+            />
           </n-form-item>
         </n-form>
       </div>
@@ -241,11 +242,14 @@
         <n-form-item label="邮箱" path="email">
           <n-input v-model:value="forgotForm.email" placeholder="请输入注册邮箱" />
         </n-form-item>
-        <n-form-item label="图形验证码" path="captcha_code">
-          <div class="captcha-modal-row">
-            <n-input v-model:value="forgotForm.captcha_code" placeholder="请输入图形验证码" />
-            <img :src="forgotCaptchaImage" class="captcha-modal-img" @click="fetchForgotCaptcha" />
-          </div>
+        <n-form-item v-if="challengeEnabled" label="安全校验" path="captcha_code">
+          <HumanChallenge
+            ref="forgotChallengeRef"
+            v-model:captcha-id="forgotForm.captcha_id"
+            v-model:captcha-code="forgotForm.captcha_code"
+            v-model:turnstile-token="forgotForm.turnstile_token"
+            captcha-placeholder="请输入图形验证码"
+          />
         </n-form-item>
         <n-form-item label="邮箱验证码" path="email_code">
           <div class="email-code-row">
@@ -319,6 +323,7 @@ import api from '@/api'
 import { addDynamicRoutes } from '@/router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, usePermissionStore, useUserStore } from '@/store'
+import HumanChallenge from '@/components/HumanChallenge.vue'
 
 const router = useRouter()
 const { query } = useRoute()
@@ -332,11 +337,14 @@ const loginInfo = ref({
   password: '',
   captcha_id: '',
   captcha_code: '',
+  turnstile_token: '',
 })
 const loginRemember = ref(false)
 const loginAgree = ref(false)
 
-const loginCaptchaImage = ref('')
+const loginChallengeRef = ref(null)
+const partnerChallengeRef = ref(null)
+const forgotChallengeRef = ref(null)
 
 const showPartnerModal = ref(false)
 const showCaptchaModal = ref(false)
@@ -348,8 +356,6 @@ const emailCodeSending = ref(false)
 const emailCodeCooldown = ref(0)
 let emailCodeTimer = null
 const partnerFormRef = ref(null)
-const partnerCaptchaImage = ref('')
-const forgotCaptchaImage = ref('')
 const forgotFormRef = ref(null)
 const forgotCodeSending = ref(false)
 const forgotSubmitting = ref(false)
@@ -359,6 +365,7 @@ const forgotForm = ref({
   email: '',
   captcha_id: '',
   captcha_code: '',
+  turnstile_token: '',
   email_code: '',
   new_password: '',
 })
@@ -373,6 +380,7 @@ const partnerForm = ref({
   email_code: '',
   captcha_id: '',
   captcha_code: '',
+  turnstile_token: '',
   agree_protocol: false,
 })
 
@@ -408,8 +416,15 @@ const partnerRules = {
 }
 
 const captchaRules = {
-  captcha_code: { required: true, message: '请输入图形验证码', trigger: ['blur', 'input'] },
+  captcha_code: {
+    validator: () => validateChallenge(partnerForm.value),
+    trigger: ['blur', 'input', 'change'],
+  },
 }
+
+const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
+const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
+const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
 
 const canSendEmailCode = computed(() => {
   return !!partnerForm.value.email?.trim() && !emailCodeSending.value && emailCodeCooldown.value === 0
@@ -427,7 +442,6 @@ function getDefaultRegisterType() {
 
 initLoginInfo()
 fetchPublicConfig()
-fetchLoginCaptcha()
 
 function initLoginInfo() {
   const localLoginInfo = lStorage.get('loginInfo')
@@ -463,7 +477,10 @@ function getDefaultLoginPath() {
 
 const forgotRules = {
   email: { required: true, message: '请输入邮箱', trigger: ['blur', 'input'] },
-  captcha_code: { required: true, message: '请输入图形验证码', trigger: ['blur', 'input'] },
+  captcha_code: {
+    validator: () => validateChallenge(forgotForm.value),
+    trigger: ['blur', 'input', 'change'],
+  },
   email_code: { required: true, message: '请输入邮箱验证码', trigger: ['blur', 'input'] },
   new_password: {
     validator: (_, value) => validatePasswordPolicy(value),
@@ -482,9 +499,9 @@ function resolveRoleTargetPath(redirectPath) {
 
 async function handleLogin() {
   const { username, password } = loginInfo.value
-  const captchaCode = loginInfo.value.captcha_code?.trim()
-  if (!username || !password || !captchaCode) {
-    $message.warning('请完整填写邮箱、密码和验证码后再登录')
+  const challengeError = validateChallenge(loginInfo.value)
+  if (!username || !password || challengeError !== true) {
+    $message.warning(challengeError === true ? '请完整填写邮箱、密码后再登录' : challengeError.message)
     return
   }
   if (!loginAgree.value) {
@@ -501,11 +518,6 @@ async function handleLogin() {
     })
     return
   }
-  if (!loginInfo.value.captcha_id) {
-    await fetchLoginCaptcha()
-    $message.warning('验证码已更新，请重新输入后继续登录')
-    return
-  }
   try {
     loading.value = true
     $message.loading(t('views.login.message_verifying'))
@@ -513,7 +525,8 @@ async function handleLogin() {
       username,
       password: password.toString(),
       captcha_id: loginInfo.value.captcha_id,
-      captcha_code: captchaCode,
+      captcha_code: loginInfo.value.captcha_code?.trim(),
+      turnstile_token: loginInfo.value.turnstile_token,
       remember_me: loginRemember.value,
     })
     $message.success(t('views.login.message_login_success'))
@@ -529,26 +542,24 @@ async function handleLogin() {
     }
   } catch (e) {
     // ignore login error detail in production logs
-    await refreshLoginCaptcha()
+    await refreshLoginChallenge()
   }
   loading.value = false
 }
 
 async function refreshLoginCaptcha() {
-  loginInfo.value.captcha_code = ''
-  await fetchLoginCaptcha()
+  await refreshLoginChallenge()
 }
 
-async function fetchLoginCaptcha() {
-  const res = await api.getCaptcha()
-  loginInfo.value.captcha_id = res.data.captcha_id
-  loginCaptchaImage.value = `data:image/png;base64,${res.data.image_base64}`
+async function refreshLoginChallenge() {
+  loginInfo.value.captcha_code = ''
+  loginInfo.value.turnstile_token = ''
+  await loginChallengeRef.value?.refreshCaptcha?.()
+  loginChallengeRef.value?.resetTurnstile?.()
 }
 
 async function fetchPartnerCaptcha() {
-  const res = await api.getCaptcha()
-  partnerForm.value.captcha_id = res.data.captcha_id
-  partnerCaptchaImage.value = `data:image/png;base64,${res.data.image_base64}`
+  await partnerChallengeRef.value?.refreshCaptcha?.()
 }
 
 async function fetchPublicConfig() {
@@ -608,7 +619,7 @@ function submitPartnerRegister() {
       $message.success('注册申请已提交，我们会在24小时内完成审核')
       showPartnerModal.value = false
     } catch (error) {
-      await fetchPartnerCaptcha()
+      await refreshPartnerChallenge()
     } finally {
       partnerSubmitting.value = false
     }
@@ -625,42 +636,36 @@ async function openCaptchaModal() {
     return
   }
   partnerForm.value.captcha_code = ''
-  await fetchPartnerCaptcha()
   showCaptchaModal.value = true
 }
 
 async function sendEmailCode() {
   const email = partnerForm.value.email?.trim()
-  const captchaCode = partnerForm.value.captcha_code?.trim()
-  const captchaId = partnerForm.value.captcha_id
+  const challengeError = validateChallenge(partnerForm.value)
 
   if (!email) {
     $message.warning('请先填写邮箱地址')
     return
   }
-  if (!captchaId) {
-    await fetchPartnerCaptcha()
-    $message.warning('图形验证码已更新，请输入后继续')
-    return
-  }
-  if (!captchaCode) {
-    $message.warning('请先填写图形验证码，再发送邮箱验证码')
+  if (challengeError !== true) {
+    $message.warning(challengeError.message)
     return
   }
   try {
     emailCodeSending.value = true
     await api.sendEmailCode({
       email,
-      captcha_id: captchaId,
-      captcha_code: captchaCode,
+      captcha_id: partnerForm.value.captcha_id,
+      captcha_code: partnerForm.value.captcha_code?.trim(),
+      turnstile_token: partnerForm.value.turnstile_token,
       register_type: partnerForm.value.register_type,
     })
     $message.success('验证码已发送，请注意查收邮箱')
     showCaptchaModal.value = false
     startEmailCooldown()
-    await fetchPartnerCaptcha()
+    await refreshPartnerChallenge()
   } catch (error) {
-    await fetchPartnerCaptcha()
+    await refreshPartnerChallenge()
   } finally {
     emailCodeSending.value = false
   }
@@ -698,7 +703,6 @@ function resetPartnerRegisterState() {
   showCaptchaModal.value = false
   partnerSubmitting.value = false
   emailCodeSending.value = false
-  partnerCaptchaImage.value = ''
   partnerForm.value = {
     register_type: getDefaultRegisterType() || 'channel',
     company_name: '',
@@ -710,6 +714,7 @@ function resetPartnerRegisterState() {
     email_code: '',
     captcha_id: '',
     captcha_code: '',
+    turnstile_token: '',
     agree_protocol: false,
   }
   resetEmailCooldown()
@@ -733,16 +738,9 @@ function validatePasswordPolicy(value) {
   return true
 }
 
-async function fetchForgotCaptcha() {
-  const res = await api.getCaptcha()
-  forgotForm.value.captcha_id = res.data.captcha_id
-  forgotCaptchaImage.value = `data:image/png;base64,${res.data.image_base64}`
-}
-
 async function openForgotPasswordModal() {
   showForgotPasswordModal.value = true
   forgotForm.value.captcha_code = ''
-  await fetchForgotCaptcha()
 }
 
 async function sendForgotCode() {
@@ -750,8 +748,9 @@ async function sendForgotCode() {
     $message.warning('请先填写邮箱')
     return
   }
-  if (!forgotForm.value.captcha_id || !forgotForm.value.captcha_code?.trim()) {
-    $message.warning('请先填写图形验证码')
+  const challengeError = validateChallenge(forgotForm.value)
+  if (challengeError !== true) {
+    $message.warning(challengeError.message)
     return
   }
   try {
@@ -760,10 +759,13 @@ async function sendForgotCode() {
       email: forgotForm.value.email.trim(),
       captcha_id: forgotForm.value.captcha_id,
       captcha_code: forgotForm.value.captcha_code.trim(),
+      turnstile_token: forgotForm.value.turnstile_token,
     })
     $message.success('验证码已发送，请查收邮箱')
     startForgotCodeCooldown()
-    await fetchForgotCaptcha()
+    await refreshForgotChallenge()
+  } catch (error) {
+    await refreshForgotChallenge()
   } finally {
     forgotCodeSending.value = false
   }
@@ -807,10 +809,10 @@ watch(showForgotPasswordModal, (v) => {
       email: '',
       captcha_id: '',
       captcha_code: '',
+      turnstile_token: '',
       email_code: '',
       new_password: '',
     }
-    forgotCaptchaImage.value = ''
     if (forgotCodeTimer) {
       clearInterval(forgotCodeTimer)
       forgotCodeTimer = null
@@ -818,6 +820,31 @@ watch(showForgotPasswordModal, (v) => {
     forgotCodeCooldown.value = 0
   }
 })
+
+function validateChallenge(target) {
+  if (!challengeEnabled.value) return true
+  if (requiresCaptcha.value && (!target.captcha_id || !target.captcha_code?.trim())) {
+    return new Error('请先完成图形验证码')
+  }
+  if (requiresTurnstile.value && !target.turnstile_token) {
+    return new Error('请先完成 Cloudflare Turnstile 安全校验')
+  }
+  return true
+}
+
+async function refreshPartnerChallenge() {
+  partnerForm.value.captcha_code = ''
+  partnerForm.value.turnstile_token = ''
+  await partnerChallengeRef.value?.refreshCaptcha?.()
+  partnerChallengeRef.value?.resetTurnstile?.()
+}
+
+async function refreshForgotChallenge() {
+  forgotForm.value.captcha_code = ''
+  forgotForm.value.turnstile_token = ''
+  await forgotChallengeRef.value?.refreshCaptcha?.()
+  forgotChallengeRef.value?.resetTurnstile?.()
+}
 
 </script>
 

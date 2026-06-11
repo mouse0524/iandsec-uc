@@ -20,6 +20,10 @@ class SystemSettingUpdateIn(BaseModel):
     ticket_root_causes: list[str] = Field(default_factory=list, description="工单问题根因")
     ticket_description_templates: list[str] = Field(default_factory=list, description="工单问题描述模板")
     login_security_enabled: bool = Field(default=True, description="是否启用登录安全策略")
+    login_challenge_enabled: bool = Field(default=True, description="是否启用人机校验")
+    login_challenge_type: str = Field(default="captcha", description="人机校验方式")
+    turnstile_site_key: str | None = Field(default=None, description="Cloudflare Turnstile Site Key")
+    turnstile_secret_key: str | None = Field(default=None, description="Cloudflare Turnstile Secret Key")
     login_account_ip_fail_limit: int = Field(default=5, description="账号+IP失败锁定阈值")
     login_account_ip_lock_minutes: int = Field(default=60, description="账号+IP锁定时长(分钟)")
     login_ip_fail_limit: int = Field(default=20, description="IP失败锁定阈值")
@@ -303,7 +307,7 @@ class SystemSettingUpdateIn(BaseModel):
         return value
 
 
-    @field_validator("redmine_base_url", "redmine_api_key", "redmine_project_id")
+    @field_validator("turnstile_site_key", "turnstile_secret_key", "redmine_base_url", "redmine_api_key", "redmine_project_id")
     @classmethod
     def validate_redmine_text(cls, value: str | None, info):
         if value is None:
@@ -313,6 +317,14 @@ class SystemSettingUpdateIn(BaseModel):
             return None
         if len(text) > 500:
             raise ValueError(f"{info.field_name} 不能超过500个字符")
+        return text
+
+    @field_validator("login_challenge_type")
+    @classmethod
+    def validate_login_challenge_type(cls, value: str):
+        text = str(value or "").strip().lower()
+        if text not in {"captcha", "turnstile", "both"}:
+            raise ValueError("人机校验方式仅支持 captcha/turnstile/both")
         return text
 
     @field_validator(
@@ -400,6 +412,9 @@ class PublicSiteConfigOut(BaseModel):
     customer_service_auto_approve_ticket: bool
     ticket_description_templates: list[str]
     login_security_enabled: bool
+    login_challenge_enabled: bool
+    login_challenge_type: str
+    turnstile_site_key: str
     login_account_ip_fail_limit: int
     login_account_ip_lock_minutes: int
     login_ip_fail_limit: int

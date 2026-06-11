@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.core.ctx import CTX_USER_ID
@@ -31,6 +31,17 @@ async def list_webdav(path: str = Query("/", description="目录路径")):
     rows = await webdav_controller.list_dir(path)
     logger.info("[api.webdav.list] response path={} count={}", path, len(rows))
     return Success(data=rows)
+
+
+@router.post("/cache/clear", summary="清理WebDAV缓存")
+async def clear_webdav_cache():
+    user_id = CTX_USER_ID.get()
+    user = await User.filter(id=user_id).prefetch_related("roles").first()
+    role_names = [role.name for role in await user.roles] if user else []
+    if not user or (not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names):
+        raise HTTPException(status_code=403, detail="仅管理员可清理网盘缓存")
+    cleared = await webdav_controller.clear_list_cache()
+    return Success(msg="网盘缓存已刷新", data={"cleared": cleared})
 
 
 @router.get("/download-url", summary="生成WebDAV直接下载链接")

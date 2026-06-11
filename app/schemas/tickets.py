@@ -18,8 +18,9 @@ class TicketCreate(BaseModel):
     title: str = Field(..., description="问题标题")
     description: str = Field(..., description="问题描述")
     attachment_ids: list[int] = Field(default_factory=list, description="附件ID列表")
-    captcha_id: str = Field(..., description="验证码ID")
-    captcha_code: str = Field(..., description="验证码")
+    captcha_id: str | None = Field(default=None, description="验证码ID")
+    captcha_code: str | None = Field(default=None, description="验证码")
+    turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
 
 
 class TicketReviewIn(BaseModel):
@@ -68,8 +69,9 @@ class TicketResubmitIn(BaseModel):
     ticket_id: int = Field(..., description="工单ID")
     description: Optional[str] = Field(None, description="补充描述")
     attachment_ids: list[int] = Field(default_factory=list, description="新增附件ID")
-    captcha_id: str = Field(..., description="验证码ID")
-    captcha_code: str = Field(..., description="验证码")
+    captcha_id: str | None = Field(default=None, description="验证码ID")
+    captcha_code: str | None = Field(default=None, description="验证码")
+    turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
 
 
 class TicketUpdateIn(BaseModel):
@@ -85,8 +87,9 @@ class TicketUpdateIn(BaseModel):
     title: str = Field(..., description="问题标题")
     description: str = Field(..., description="问题描述")
     attachment_ids: list[int] = Field(default_factory=list, description="附件ID列表")
-    captcha_id: str = Field(..., description="验证码ID")
-    captcha_code: str = Field(..., description="验证码")
+    captcha_id: str | None = Field(default=None, description="验证码ID")
+    captcha_code: str | None = Field(default=None, description="验证码")
+    turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
 
 
 class TicketUploadOut(BaseModel):

@@ -2,21 +2,21 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NForm, NFormItem, NInput, NSelect, NUpload, NAlert, NSpace, NTag } from 'naive-ui'
-import { getToken, isImageName, isNullOrWhitespace } from '@/utils'
+import { isImageName } from '@/utils'
 import api from '@/api'
 import { useAppStore } from '@/store'
 import RichTextEditor from '@/components/editor/RichTextEditor.vue'
+import HumanChallenge from '@/components/HumanChallenge.vue'
 
 defineOptions({ name: '提交工单' })
 
-const isAuthed = computed(() => !isNullOrWhitespace(getToken()))
 const router = useRouter()
 const appStore = useAppStore()
 
 const formRef = ref(null)
 const uploadLoading = ref(false)
 const submitting = ref(false)
-const captchaImage = ref('')
+const challengeRef = ref(null)
 const uploadedAttachmentIds = ref([])
 const uploadFileList = ref([])
 const attachmentAccept = ref('.zip,.rar,.png,.jpg,.gif')
@@ -59,6 +59,7 @@ const form = ref({
   description: '',
   captcha_id: '',
   captcha_code: '',
+  turnstile_token: '',
 })
 
 const categoryOptions = ref([
@@ -79,8 +80,15 @@ const rules = {
   category: { required: true, message: '请选择分类', trigger: ['change'] },
   title: { required: true, message: '请输入标题', trigger: ['blur', 'input'] },
   description: { required: true, message: '请输入问题描述', trigger: ['blur', 'input'] },
-  captcha_code: { required: true, message: '请输入验证码', trigger: ['blur', 'input'] },
+  captcha_code: {
+    validator: () => validateChallenge(),
+    trigger: ['blur', 'input', 'change'],
+  },
 }
+
+const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
+const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
+const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
 
 watch(descriptionTemplateOptions, (options) => {
   if (!options.length) return
@@ -90,10 +98,8 @@ watch(descriptionTemplateOptions, (options) => {
 })
 
 onMounted(async () => {
-  await Promise.all([fetchPublicConfig(), fetchCaptcha()])
-  if (isAuthed.value) {
-    await fetchPrefill()
-  }
+  await fetchPublicConfig()
+  await fetchPrefill()
 })
 
 async function fetchPublicConfig() {
@@ -145,12 +151,6 @@ async function fetchPublicConfig() {
   }
 }
 
-async function fetchCaptcha() {
-  const res = await api.getCaptcha()
-  form.value.captcha_id = res.data.captcha_id
-  captchaImage.value = `data:image/png;base64,${res.data.image_base64}`
-}
-
 async function fetchPrefill(includeCompanyName = false) {
   try {
     const res = await api.getTicketPrefill()
@@ -192,11 +192,7 @@ function buildObjectUrl(rawFile) {
 }
 
 async function uploadSingleFile(rawFile, targetFile = null) {
-  if (!isAuthed.value && (!form.value.captcha_id || !form.value.captcha_code?.trim())) {
-    throw new Error('请先输入验证码再上传附件')
-  }
-  const captcha = { captcha_id: form.value.captcha_id, captcha_code: form.value.captcha_code?.trim() }
-  const res = isAuthed.value ? await api.uploadTicketAttachment(rawFile) : await api.uploadPublicTicketAttachment(rawFile, captcha)
+  const res = await api.uploadTicketAttachment(rawFile)
   const attachmentId = Number(res?.data?.id || 0)
   if (!attachmentId) throw new Error('上传成功但未返回附件ID')
   if (targetFile) {
@@ -255,26 +251,6 @@ function handleRemove({ file }) {
   }
 }
 
-function resetForm() {
-  const keepCaptchaId = form.value.captcha_id
-  form.value = {
-    company_name: '',
-    contact_name: '',
-    email: '',
-    phone: '',
-    project_phase: projectPhaseOptions.value[0]?.value || '',
-    issue_type: issueTypeOptions.value[0]?.value || '',
-    impact_scope: impactScopeOptions.value[0]?.value || '',
-    category: categoryOptions.value[0]?.value || '',
-    title: '',
-    description: descriptionTemplateOptions.value[0]?.value || '',
-    captcha_id: keepCaptchaId,
-    captcha_code: '',
-  }
-  uploadedAttachmentIds.value = []
-  uploadFileList.value = []
-}
-
 function submit() {
   formRef.value?.validate(async (err) => {
     if (err) return
@@ -284,27 +260,33 @@ function submit() {
         ...form.value,
         attachment_ids: [...uploadedAttachmentIds.value],
       }
-      if (isAuthed.value) {
-        await api.createTicket(payload)
-      } else {
-        await api.createPublicTicket(payload)
-      }
+      await api.createTicket(payload)
       $message.success('工单已提交，我们会尽快处理并反馈进度')
-      if (isAuthed.value) {
-        await router.push({ path: '/ticket/my' })
-        return
-      }
-      resetForm()
-      await fetchCaptcha()
-      if (isAuthed.value) {
-        await fetchPrefill()
-      }
+      await router.push({ path: '/ticket/my' })
     } catch (error) {
-      await fetchCaptcha()
+      await refreshChallenge()
     } finally {
       submitting.value = false
     }
   })
+}
+
+function validateChallenge() {
+  if (!challengeEnabled.value) return true
+  if (requiresCaptcha.value && (!form.value.captcha_id || !form.value.captcha_code?.trim())) {
+    return new Error('请先完成图形验证码')
+  }
+  if (requiresTurnstile.value && !form.value.turnstile_token) {
+    return new Error('请先完成 Cloudflare Turnstile 安全校验')
+  }
+  return true
+}
+
+async function refreshChallenge() {
+  form.value.captcha_code = ''
+  form.value.turnstile_token = ''
+  await challengeRef.value?.refreshCaptcha?.()
+  challengeRef.value?.resetTurnstile?.()
 }
 </script>
 
@@ -323,7 +305,7 @@ function submit() {
                 <h3>联系信息</h3>
                 <p>用于客服回访、结果通知与工单状态同步。</p>
               </div>
-              <NButton v-if="isAuthed" quaternary type="primary" @click="quickFill">一键填充</NButton>
+              <NButton quaternary type="primary" @click="quickFill">一键填充</NButton>
             </div>
             <div class="form-grid two-col">
               <NFormItem label="项目名称" path="company_name">
@@ -420,12 +402,13 @@ function submit() {
                   <span class="upload-tip">支持最多 5 个附件，支持粘贴图片上传，当前允许类型：{{ attachmentAccept }}。</span>
                 </div>
               </NFormItem>
-              <NFormItem label="验证码" path="captcha_code">
-                <div class="captcha-row">
-                  <NInput v-model:value="form.captcha_code" placeholder="请输入验证码" style="width: 180px" />
-                  <img :src="captchaImage" alt="captcha" class="captcha-img" @click="fetchCaptcha" />
-                  <NButton text type="primary" @click="fetchCaptcha">换一张</NButton>
-                </div>
+              <NFormItem v-if="challengeEnabled" label="安全校验" path="captcha_code">
+                <HumanChallenge
+                  ref="challengeRef"
+                  v-model:captcha-id="form.captcha_id"
+                  v-model:captcha-code="form.captcha_code"
+                  v-model:turnstile-token="form.turnstile_token"
+                />
               </NFormItem>
             </div>
           </div>

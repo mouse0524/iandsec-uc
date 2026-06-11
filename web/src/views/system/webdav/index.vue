@@ -4,6 +4,7 @@ import { NButton, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api'
+import { useUserStore } from '@/store'
 
 defineOptions({ name: '外发网盘' })
 
@@ -13,7 +14,13 @@ const loading = ref(false)
 const fileTable = ref(null)
 const creatingSharePath = ref('')
 const downloadingPath = ref('')
+const clearingCache = ref(false)
+const userStore = useUserStore()
 const isCreatingShare = computed(() => !!creatingSharePath.value)
+const canClearCache = computed(() => {
+  if (userStore.isSuperUser) return true
+  return (userStore.role || []).some((role) => role?.name === '管理员')
+})
 
 const breadcrumbItems = computed(() => {
   const clean = (currentPath.value || '/').replace(/^\/+|\/+$/g, '')
@@ -206,6 +213,18 @@ async function downloadFile(row) {
     downloadingPath.value = ''
   }
 }
+
+async function clearWebdavCache() {
+  if (!canClearCache.value || clearingCache.value) return
+  try {
+    clearingCache.value = true
+    const res = await api.webdavClearCache()
+    $message.success(`网盘缓存已刷新，清理 ${res?.data?.cleared || 0} 个缓存键`)
+    await loadFiles()
+  } finally {
+    clearingCache.value = false
+  }
+}
 </script>
 
 <template>
@@ -233,6 +252,7 @@ async function downloadFile(row) {
           <div class="toolbar-actions">
             <NButton tertiary round type="primary" :disabled="currentPath === '/'" @click="goParent">返回上级</NButton>
             <NButton secondary round :loading="loading" @click="loadFiles">刷新目录</NButton>
+            <NButton v-if="canClearCache" secondary round type="warning" :loading="clearingCache" @click="clearWebdavCache">刷新缓存</NButton>
           </div>
         </div>
 

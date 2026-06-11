@@ -84,17 +84,6 @@ export default {
     }),
   resubmitTicket: (data = {}) => request.post('/ticket/resubmit', data),
   getTicketActions: (params = {}) => request.get('/ticket/actions', { params }),
-  uploadPublicTicketAttachment: (file, captcha = {}) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('captcha_id', captcha.captcha_id || '')
-    formData.append('captcha_code', captcha.captcha_code || '')
-    return request.post('/public/ticket/upload', formData, {
-      noNeedToken: true,
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-  },
-  createPublicTicket: (data = {}) => request.post('/public/ticket/create', data, { noNeedToken: true }),
   // partner
   channelRegister: (data = {}) =>
     request.post('/partner/register', { ...data, register_type: 'channel' }, { noNeedToken: true }),
@@ -152,6 +141,7 @@ export default {
   },
   // webdav
   webdavList: (params = {}) => request.get('/webdav/list', { params }),
+  webdavClearCache: () => request.post('/webdav/cache/clear'),
   webdavDownload: (params = {}) => request.get('/webdav/download-url', { params }),
   webdavOpsPassword: () => request.get('/webdav/ops-password'),
   webdavReplaceDecryptPassword: () => request.get('/webdav/replace-decrypt-password'),

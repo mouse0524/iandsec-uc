@@ -1,9 +1,11 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NModal, NSelect, NUpload } from 'naive-ui'
 import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import api from '@/api'
 import { isImageName } from '@/utils'
+import { useAppStore } from '@/store'
+import HumanChallenge from '@/components/HumanChallenge.vue'
 
 const props = defineProps({
   visible: Boolean,
@@ -13,11 +15,15 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'saved'])
 
+const appStore = useAppStore()
 const saving = ref(false)
 const uploadLoading = ref(false)
-const captchaImage = ref('')
+const challengeRef = ref(null)
 const fileList = ref([])
 const form = ref(defaultForm())
+const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
+const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
+const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
 
 watch(
   () => props.visible,
@@ -41,6 +47,7 @@ function defaultForm() {
     attachment_ids: [],
     captcha_id: '',
     captcha_code: '',
+    turnstile_token: '',
   }
 }
 
@@ -87,12 +94,6 @@ async function buildPreviewItem(item) {
   }
 }
 
-async function fetchCaptcha() {
-  const res = await api.getCaptcha()
-  form.value.captcha_id = res.data.captcha_id
-  captchaImage.value = `data:image/png;base64,${res.data.image_base64}`
-}
-
 async function resetForm() {
   const source = props.ticket || {}
   const attachments = Array.isArray(source.attachments) ? source.attachments : []
@@ -112,7 +113,6 @@ async function resetForm() {
     attachment_ids: ids,
   }
   fileList.value = await Promise.all(attachments.map((item) => buildPreviewItem(item)))
-  await fetchCaptcha()
 }
 
 async function customUpload({ file, onFinish, onError }) {
@@ -167,8 +167,9 @@ function close() {
 
 async function submit() {
   if (!props.ticket?.id) return
-  if (!form.value.captcha_code?.trim()) {
-    window.$message?.warning('请输入验证码')
+  const challengeError = validateChallenge()
+  if (challengeError !== true) {
+    window.$message?.warning(challengeError.message)
     return
   }
   try {
@@ -180,6 +181,17 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+function validateChallenge() {
+  if (!challengeEnabled.value) return true
+  if (requiresCaptcha.value && (!form.value.captcha_id || !form.value.captcha_code?.trim())) {
+    return new Error('请先完成图形验证码')
+  }
+  if (requiresTurnstile.value && !form.value.turnstile_token) {
+    return new Error('请先完成 Cloudflare Turnstile 安全校验')
+  }
+  return true
 }
 </script>
 
@@ -248,12 +260,13 @@ async function submit() {
               </div>
               <div class="upload-tip">支持最多 5 个附件，支持粘贴图片上传。</div>
             </NFormItem>
-            <NFormItem label="验证码">
-              <div class="captcha-row">
-                <NInput v-model:value="form.captcha_code" placeholder="请输入验证码" style="width: 180px" />
-                <img :src="captchaImage" alt="captcha" class="captcha-img" @click="fetchCaptcha" />
-                <NButton text type="primary" @click="fetchCaptcha">换一张</NButton>
-              </div>
+            <NFormItem v-if="challengeEnabled" label="安全校验">
+              <HumanChallenge
+                ref="challengeRef"
+                v-model:captcha-id="form.captcha_id"
+                v-model:captcha-code="form.captcha_code"
+                v-model:turnstile-token="form.turnstile_token"
+              />
             </NFormItem>
           </div>
         </div>

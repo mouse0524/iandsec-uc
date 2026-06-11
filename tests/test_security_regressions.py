@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 from app.controllers.captcha import captcha_controller
 from app.controllers.system_setting import SystemSettingController, normalize_webdav_base_url, system_setting_controller
+from app.controllers.webdav import WebDavController
 from app.core.init_app import _default_basic_api_filter, _default_basic_api_paths
-from app.controllers.ticket import TicketController
 from app.services.security import validate_external_service_url
 from app.services.skill_know.document_service import skill_know_document_service
 from app.services.skill_know.openai_client import SkillKnowOpenAIClient
@@ -132,6 +132,27 @@ class SecurityRegressionTestCase(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_webdav_clear_list_cache_deletes_only_webdav_list_keys(self):
+        calls = []
+
+        async def fake_redis(command, *args, **kwargs):
+            calls.append((command, args, kwargs))
+            if command == "scan":
+                self.assertEqual(kwargs["match"], "webdav:list:*")
+                return 0, ["webdav:list:%2F", "webdav:list:%2Fdemo"]
+            if command == "delete":
+                return len(args)
+            raise AssertionError(command)
+
+        async def run():
+            with patch("app.controllers.webdav.execute_redis", fake_redis):
+                return await WebDavController().clear_list_cache()
+
+        cleared = asyncio.run(run())
+        self.assertEqual(cleared, 2)
+        self.assertEqual(calls[0][0], "scan")
+        self.assertEqual(calls[1], ("delete", ("webdav:list:%2F", "webdav:list:%2Fdemo"), {}))
+
     def test_openai_compatible_model_url_rejects_private_hosts(self):
         with self.assertRaises(RuntimeError):
             SkillKnowOpenAIClient._validate_openai_compatible_url("http://127.0.0.1:11434/v1", label="LLM对话地址")
@@ -173,17 +194,6 @@ class SecurityRegressionTestCase(unittest.TestCase):
 
         with self.assertRaises(Exception):
             asyncio.run(run())
-
-    def test_guest_attachment_binding_rejects_other_session(self):
-        controller = TicketController()
-
-        async def run():
-            with patch("app.controllers.ticket.execute_redis", AsyncMock(return_value={"1", "2"})):
-                await controller.validate_guest_attachment_ids(captcha_id="cap-a", attachment_ids=[1, 3])
-
-        with self.assertRaises(Exception):
-            asyncio.run(run())
-
 
 if __name__ == "__main__":
     unittest.main()

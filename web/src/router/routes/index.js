@@ -118,15 +118,6 @@ export const basicRoutes = [
     },
   },
   {
-    name: 'PublicTicketSubmit',
-    path: '/ticket/public-submit',
-    component: () => import('@/views/ticket/submit/index.vue'),
-    isHidden: true,
-    meta: {
-      title: '游客工单提交',
-    },
-  },
-  {
     name: 'PublicWebdavShareDownload',
     path: '/public/webdav/share/download',
     component: () => import('@/views/public/webdav-share-download/index.vue'),

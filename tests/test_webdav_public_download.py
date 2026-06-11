@@ -45,7 +45,7 @@ def test_public_direct_download_rejects_unsigned_request(monkeypatch):
         follow_redirects=False,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert response.json()["code"] == 400
     controller.verify_direct_download_signature.assert_not_called()
     controller.get_direct_download_url.assert_not_called()
@@ -88,7 +88,7 @@ def test_public_share_download_rejects_unsigned_request(monkeypatch):
         follow_redirects=False,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert response.json()["code"] == 400
     controller.verify_share_signature.assert_not_called()
     controller.get_share.assert_not_called()

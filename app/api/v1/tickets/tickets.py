@@ -5,14 +5,13 @@ import json
 import re
 from time import perf_counter
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from tortoise.expressions import Q
 
 from app.log import logger
-from app.controllers.captcha import captcha_controller
 from app.controllers.partner import partner_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.ticket import ticket_controller
@@ -24,9 +23,11 @@ from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.services.human_challenge import human_challenge_service
 from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
 from app.utils.http_headers import build_download_content_disposition
+from app.utils.request import get_client_ip
 
 router = APIRouter()
 TICKET_EXPORT_MAX_ROWS = 5000
@@ -142,7 +143,7 @@ async def upload_ticket_attachment(file: UploadFile = File(...)):
 
 
 @router.post("/create", summary="提交工单", dependencies=[DependAuth])
-async def create_ticket(payload: TicketCreate):
+async def create_ticket(payload: TicketCreate, request: Request):
     user = await _get_current_user()
     logger.info("[api.ticket.create] request user_id={}", user.id)
     role_names = await _get_user_role_names(user)
@@ -158,12 +159,19 @@ async def create_ticket(payload: TicketCreate):
     if pending:
         return Fail(code=403, msg="您的注册申请仍在审核中，暂不可提交工单")
 
-    valid = await captcha_controller.verify_captcha(payload.captcha_id, payload.captcha_code)
+    config = await system_setting_controller.get_full_dict()
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        turnstile_token=payload.turnstile_token,
+        client_ip=get_client_ip(request),
+        config=config,
+        log_context="api.ticket.create",
+    )
     if not valid:
         logger.warning("[api.ticket.create] captcha_invalid user_id={}", user.id)
-        return Fail(code=400, msg="验证码错误或已失效，请重试")
+        return Fail(code=400, msg=challenge_error)
 
-    config = await system_setting_controller.get_public_config()
     project_phases = config.get("ticket_project_phases") or []
     issue_types = config.get("ticket_issue_types") or []
     impact_scopes = config.get("ticket_impact_scopes") or []
@@ -179,7 +187,7 @@ async def create_ticket(payload: TicketCreate):
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
 
-    body = payload.model_dump(exclude={"captcha_id", "captcha_code"})
+    body = payload.model_dump(exclude={"captcha_id", "captcha_code", "turnstile_token"})
     body["issue_type"] = issue_type
     body["impact_scope"] = impact_scope
     ticket = await ticket_controller.create_ticket_with_optional_auto_review(submitter_id=user.id, payload=body)
@@ -602,7 +610,7 @@ async def download_ticket_attachment(attachment_id: int = Query(..., description
 
 
 @router.post("/resubmit", summary="重提工单", dependencies=[DependAuth])
-async def resubmit_ticket(payload: TicketResubmitIn):
+async def resubmit_ticket(payload: TicketResubmitIn, request: Request):
     user = await _get_current_user()
     logger.info("[api.ticket.resubmit] request user_id={} ticket_id={}", user.id, payload.ticket_id)
     pending = await partner_controller.has_pending_registration(
@@ -614,10 +622,16 @@ async def resubmit_ticket(payload: TicketResubmitIn):
     if pending:
         return Fail(code=403, msg="您的注册申请仍在审核中，暂不可提交工单")
 
-    valid = await captcha_controller.verify_captcha(payload.captcha_id, payload.captcha_code)
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        turnstile_token=payload.turnstile_token,
+        client_ip=get_client_ip(request),
+        log_context="api.ticket.resubmit",
+    )
     if not valid:
         logger.warning("[api.ticket.resubmit] captcha_invalid user_id={} ticket_id={}", user.id, payload.ticket_id)
-        return Fail(code=400, msg="验证码错误或已失效，请重试")
+        return Fail(code=400, msg=challenge_error)
 
     ticket = await ticket_controller.resubmit_ticket(
         ticket_id=payload.ticket_id,
@@ -630,7 +644,7 @@ async def resubmit_ticket(payload: TicketResubmitIn):
 
 
 @router.post("/update", summary="编辑工单", dependencies=[DependAuth])
-async def update_ticket(payload: TicketUpdateIn):
+async def update_ticket(payload: TicketUpdateIn, request: Request):
     user = await _get_current_user()
     logger.info(
         "[api.ticket.update] request user_id={} ticket_id={}",
@@ -638,12 +652,19 @@ async def update_ticket(payload: TicketUpdateIn):
         payload.ticket_id,
     )
 
-    valid = await captcha_controller.verify_captcha(payload.captcha_id, payload.captcha_code)
+    config = await system_setting_controller.get_full_dict()
+    valid, challenge_error = await human_challenge_service.verify(
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        turnstile_token=payload.turnstile_token,
+        client_ip=get_client_ip(request),
+        config=config,
+        log_context="api.ticket.update",
+    )
     if not valid:
         logger.warning("[api.ticket.update] captcha_invalid user_id={} ticket_id={}", user.id, payload.ticket_id)
-        return Fail(code=400, msg="验证码错误或已失效，请重试")
+        return Fail(code=400, msg=challenge_error)
 
-    config = await system_setting_controller.get_public_config()
     project_phases = config.get("ticket_project_phases") or []
     issue_types = config.get("ticket_issue_types") or []
     impact_scopes = config.get("ticket_impact_scopes") or []
@@ -659,7 +680,7 @@ async def update_ticket(payload: TicketUpdateIn):
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
 
-    body = payload.model_dump(exclude={"ticket_id", "attachment_ids", "captcha_id", "captcha_code"})
+    body = payload.model_dump(exclude={"ticket_id", "attachment_ids", "captcha_id", "captcha_code", "turnstile_token"})
     if "issue_type" in payload.model_fields_set:
         body["issue_type"] = issue_type
     else:

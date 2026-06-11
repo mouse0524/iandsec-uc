@@ -29,6 +29,9 @@ export const useAppStore = defineStore('app', {
       ticketCategories: ['登录问题', '权限问题', '系统异常', '其他'],
       ticketDescriptionTemplates: ['问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：'],
       loginSecurityEnabled: true,
+      loginChallengeEnabled: true,
+      loginChallengeType: 'captcha',
+      turnstileSiteKey: '',
       loginAccountIpFailLimit: 5,
       loginAccountIpLockMinutes: 60,
       loginIpFailLimit: 20,
@@ -102,6 +105,12 @@ export const useAppStore = defineStore('app', {
         this.ticketDescriptionTemplates = config.ticket_description_templates
       }
       this.loginSecurityEnabled = typeof config.login_security_enabled === 'boolean' ? config.login_security_enabled : this.loginSecurityEnabled
+      this.loginChallengeEnabled =
+        typeof config.login_challenge_enabled === 'boolean'
+          ? config.login_challenge_enabled
+          : this.loginChallengeEnabled
+      this.loginChallengeType = config.login_challenge_type || this.loginChallengeType
+      this.turnstileSiteKey = config.turnstile_site_key || ''
       this.loginAccountIpFailLimit = config.login_account_ip_fail_limit || this.loginAccountIpFailLimit
       this.loginAccountIpLockMinutes = config.login_account_ip_lock_minutes || this.loginAccountIpLockMinutes
       this.loginIpFailLimit = config.login_ip_fail_limit || this.loginIpFailLimit

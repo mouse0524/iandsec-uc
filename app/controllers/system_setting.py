@@ -78,6 +78,10 @@ class SystemSettingController:
         },
         "login_security": {
             "login_security_enabled": True,
+            "login_challenge_enabled": True,
+            "login_challenge_type": "captcha",
+            "turnstile_site_key": os.getenv("TURNSTILE_SITE_KEY") or None,
+            "turnstile_secret_key": os.getenv("TURNSTILE_SECRET_KEY") or None,
             "login_account_ip_fail_limit": 5,
             "login_account_ip_lock_minutes": 60,
             "login_ip_fail_limit": 20,
@@ -221,6 +225,7 @@ class SystemSettingController:
         data["webdav_password"] = self._mask_secret(data.get("webdav_password"))
         data["db_backup_webdav_password"] = self._mask_secret(data.get("db_backup_webdav_password"))
         data["redmine_api_key"] = self._mask_secret(data.get("redmine_api_key"))
+        data["turnstile_secret_key"] = self._mask_secret(data.get("turnstile_secret_key"))
         return data
 
     async def get_public_config(self) -> dict:
@@ -257,6 +262,9 @@ class SystemSettingController:
             "ticket_root_causes": ticket.get("ticket_root_causes") or [],
             "ticket_description_templates": ticket.get("ticket_description_templates") or [],
             "login_security_enabled": login_security.get("login_security_enabled", True),
+            "login_challenge_enabled": login_security.get("login_challenge_enabled", True),
+            "login_challenge_type": login_security.get("login_challenge_type") or "captcha",
+            "turnstile_site_key": login_security.get("turnstile_site_key") or "",
             "login_account_ip_fail_limit": login_security.get("login_account_ip_fail_limit", 5),
             "login_account_ip_lock_minutes": login_security.get("login_account_ip_lock_minutes", 60),
             "login_ip_fail_limit": login_security.get("login_ip_fail_limit", 20),
@@ -351,6 +359,8 @@ class SystemSettingController:
             payload["db_backup_webdav_password"] = sections["database_backup"].get("db_backup_webdav_password")
         if payload.get("redmine_api_key") == "******":
             payload["redmine_api_key"] = sections["redmine"].get("redmine_api_key")
+        if payload.get("turnstile_secret_key") == "******":
+            payload["turnstile_secret_key"] = sections["login_security"].get("turnstile_secret_key")
         if payload.get("webdav_base_url"):
             payload["webdav_base_url"] = normalize_webdav_base_url(payload.get("webdav_base_url"))
         if payload.get("db_backup_webdav_base_url"):
@@ -399,6 +409,10 @@ class SystemSettingController:
         }
         login_keys = {
             "login_security_enabled",
+            "login_challenge_enabled",
+            "login_challenge_type",
+            "turnstile_site_key",
+            "turnstile_secret_key",
             "login_account_ip_fail_limit",
             "login_account_ip_lock_minutes",
             "login_ip_fail_limit",
