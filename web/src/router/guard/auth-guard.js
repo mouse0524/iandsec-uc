@@ -2,7 +2,7 @@ import { getToken, isNullOrWhitespace } from '@/utils'
 import { usePermissionStore, useUserStore } from '@/store'
 
 export const WHITE_LIST = ['/login', '/404', '/403', '/public/webdav/share/download']
-const BASIC_AUTH_PATHS = ['/profile']
+const BASIC_AUTH_PATHS = ['/profile', '/webdav/preview']
 export function createAuthGuard(router) {
   router.beforeEach(async (to) => {
     const token = getToken()
