@@ -12,7 +12,7 @@ Skill-Know-main
 .trae/
 .uploads/
 logs/
-
+tests/
 
 db.sqlite3
 db.sqlite3-journal

@@ -1,12 +1,13 @@
 import secrets
 import hmac
 import hashlib
+import os
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote, quote_from_bytes, unquote, urlparse, urlunparse
+from urllib.parse import quote, quote_from_bytes, urlencode, unquote, urlparse, urlunparse
 from xml.etree import ElementTree as ET
 import json
 
@@ -23,6 +24,7 @@ from app.settings import settings
 class WebDavController:
     LIST_CACHE_TTL_SECONDS = 24 * 60 * 60
     LIST_CACHE_KEY_PATTERN = "webdav:list:*"
+    PREVIEW_CACHE_DIR = os.path.join(settings.BASE_DIR, "storage", "webdav_preview_cache")
 
     @staticmethod
     def _auth(conf: dict) -> tuple[str, str]:
@@ -173,6 +175,24 @@ class WebDavController:
         expected = self._sign(secret, f"direct-download:{norm_path}", int(ts))
         if not hmac.compare_digest(expected, str(sig)):
             raise HTTPException(status_code=401, detail="签名校验失败")
+
+    async def build_preview_cache_signature(self, *, cache_key: str, filename: str) -> dict[str, int | str]:
+        conf = await self._get_config()
+        secret = self._get_signature_secret(conf)
+        ts = int(datetime.now(timezone.utc).timestamp())
+        sig = self._sign(secret, f"preview-cache:{cache_key}:{filename}", ts)
+        return {"ts": ts, "sig": sig}
+
+    async def verify_preview_cache_signature(self, *, cache_key: str, filename: str, ts: int, sig: str) -> None:
+        conf = await self._get_config()
+        secret = self._get_signature_secret(conf)
+        signature_ttl = self._signature_ttl_seconds(conf)
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if abs(now_ts - int(ts)) > signature_ttl:
+            raise HTTPException(status_code=401, detail="signature expired")
+        expected = self._sign(secret, f"preview-cache:{cache_key}:{filename}", int(ts))
+        if not hmac.compare_digest(expected, str(sig)):
+            raise HTTPException(status_code=401, detail="signature invalid")
 
     @staticmethod
     def _build_url(base_url: str, path: str) -> str:
@@ -588,6 +608,49 @@ class WebDavController:
                 await client.aclose()
 
         return iterator, resp.headers
+
+    @staticmethod
+    def _safe_preview_filename(file_path: str) -> str:
+        name = PurePosixPath(file_path).name or "preview"
+        return name.replace("\\", "_").replace("/", "_")
+
+    async def _build_preview_cache_url(self, cache_key: str, filename: str) -> str:
+        sign_data = await self.build_preview_cache_signature(cache_key=cache_key, filename=filename)
+        query = urlencode({"ts": sign_data["ts"], "sig": sign_data["sig"]})
+        return f"/api/v1/public/webdav/preview-cache/{cache_key}/{quote(filename)}?{query}"
+
+    async def cache_preview_file(self, file_path: str) -> dict[str, str]:
+        norm_path = self._normalize_path(file_path)
+        cache_key = hashlib.sha256(norm_path.encode("utf-8")).hexdigest()[:24]
+        filename = self._safe_preview_filename(norm_path)
+        target_dir = os.path.join(self.PREVIEW_CACHE_DIR, cache_key)
+        target_path = os.path.join(target_dir, filename)
+
+        if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+            return {
+                "url_path": await self._build_preview_cache_url(cache_key, filename),
+                "abs_path": target_path,
+                "content_type": "application/octet-stream",
+            }
+
+        os.makedirs(target_dir, exist_ok=True)
+        iterator, headers = await self.download_stream(norm_path)
+        temp_path = f"{target_path}.tmp"
+        try:
+            with open(temp_path, "wb") as file:
+                async for chunk in iterator():
+                    file.write(chunk)
+            os.replace(temp_path, target_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        content_type = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"
+        return {
+            "url_path": await self._build_preview_cache_url(cache_key, filename),
+            "abs_path": target_path,
+            "content_type": content_type,
+        }
 
 
 webdav_controller = WebDavController()

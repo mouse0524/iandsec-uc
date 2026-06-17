@@ -126,6 +126,15 @@ export const basicRoutes = [
       title: '公开下载',
     },
   },
+  {
+    name: 'WebdavFilePreview',
+    path: '/webdav/preview',
+    component: () => import('@/views/system/webdav-preview/index.vue'),
+    isHidden: true,
+    meta: {
+      title: '文件预览',
+    },
+  },
 ]
 
 export const NOT_FOUND_ROUTE = {

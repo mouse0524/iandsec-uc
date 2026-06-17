@@ -1,8 +1,9 @@
 from urllib.parse import urlencode
 from typing import Optional
+import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
@@ -51,6 +52,11 @@ async def download_webdav_file(path: str = Query(..., description="文件路径"
     query = urlencode({"path": path, "ts": sign_data["ts"], "sig": sign_data["sig"]})
     return Success(data={"download_url": f"/api/v1/public/webdav/download?{query}"})
 
+@router.get("/preview-cache", summary="缓存WebDAV文件用于预览")
+async def cache_webdav_preview_file(path: str = Query(..., description="文件路径")):
+    logger.info("[api.webdav.preview_cache] request path={}", path)
+    data = await webdav_controller.cache_preview_file(path)
+    return Success(data={"preview_url": data["url_path"], "content_type": data["content_type"]})
 
 @router.get("/ops-password", summary="获取服务器运维工具密码")
 async def get_server_ops_password():
@@ -88,6 +94,42 @@ async def public_download_webdav_file(
     logger.info("[webdav.direct.download] redirect ip={} path={}", client_ip, path)
     return RedirectResponse(download_url, status_code=307)
 
+@public_router.get("/preview", summary="公开预览WebDAV文件")
+async def public_preview_webdav_file(
+    request: Request,
+    path: str = Query(..., description="文件路径"),
+    ts: Optional[int] = Query(None, description="时间戳(秒)"),
+    sig: Optional[str] = Query(None, description="签名"),
+):
+    if ts is None or not isinstance(ts, int) or ts <= 0 or not sig:
+        return Fail(code=400, msg="预览链接缺少签名参数，请重新点击文件")
+
+    client_ip = get_client_ip(request)
+    await webdav_controller.verify_direct_download_signature(path=path, ts=ts, sig=sig)
+    iterator, headers = await webdav_controller.download_stream(path)
+    content_type = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"
+    logger.info("[webdav.direct.preview] stream ip={} path={} content_type={}", client_ip, path, content_type)
+    return StreamingResponse(iterator(), media_type=content_type, headers={"Content-Disposition": "inline"})
+
+
+@public_router.get("/preview-cache/{cache_key}/{filename}", summary="Read WebDAV preview cache")
+async def read_webdav_preview_cache(
+    cache_key: str,
+    filename: str,
+    ts: Optional[int] = Query(None, description="timestamp seconds"),
+    sig: Optional[str] = Query(None, description="signature"),
+):
+    if ts is None or not isinstance(ts, int) or ts <= 0 or not sig:
+        return Fail(code=400, msg="preview cache signature is required")
+    if not cache_key or len(cache_key) != 24 or any(ch not in "0123456789abcdef" for ch in cache_key):
+        raise HTTPException(status_code=404, detail="preview cache not found")
+    safe_name = filename.replace("\\", "_").replace("/", "_")
+    await webdav_controller.verify_preview_cache_signature(cache_key=cache_key, filename=safe_name, ts=ts, sig=sig)
+    target_path = os.path.abspath(os.path.join(webdav_controller.PREVIEW_CACHE_DIR, cache_key, safe_name))
+    cache_root = os.path.abspath(webdav_controller.PREVIEW_CACHE_DIR)
+    if not target_path.startswith(cache_root + os.sep) or not os.path.isfile(target_path):
+        raise HTTPException(status_code=404, detail="preview cache not found")
+    return FileResponse(target_path, filename=None, headers={"Content-Disposition": "inline"})
 
 @router.post("/share/create", summary="创建WebDAV分享")
 async def create_webdav_share(payload: WebDavShareCreateIn):

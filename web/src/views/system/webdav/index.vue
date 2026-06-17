@@ -5,6 +5,7 @@ import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api'
 import { useUserStore } from '@/store'
+import { isWebdavPreviewSupported } from '@/utils/webdavPreview.mjs'
 
 defineOptions({ name: '外发网盘' })
 
@@ -68,7 +69,21 @@ const fileColumns = [
           [h('span', { class: 'file-icon' }, '📁'), h('span', { class: 'file-title' }, row.name)]
         )
       }
-      return h('div', { class: 'file-name-static' }, [h('span', { class: 'file-icon' }, '📄'), h('span', { class: 'file-title' }, row.name)])
+      if (!isWebdavPreviewSupported(row.name || row.path || '')) {
+        return h('div', { class: 'file-name-static unsupported' }, [
+          h('span', { class: 'file-icon' }, '\uD83D\uDCC4'),
+          h('span', { class: 'file-title' }, row.name),
+        ])
+      }
+      return h(
+        'button',
+        {
+          class: 'file-name-button file',
+          type: 'button',
+          onClick: () => previewFile(row),
+        },
+        [h('span', { class: 'file-icon' }, '📄'), h('span', { class: 'file-title' }, row.name)]
+      )
     },
   },
   {
@@ -197,6 +212,22 @@ function openDownloadUrl(url) {
   link.remove()
 }
 
+function buildAbsoluteApiUrl(apiUrl) {
+  if (!apiUrl) return ''
+  if (/^https?:\/\//i.test(apiUrl)) return apiUrl
+  const path = apiUrl.startsWith('/') ? apiUrl : `/${apiUrl}`
+  return `${window.location.origin}${path}`
+}
+
+function previewFile(row) {
+  if (!row?.path) return
+  const routeUrl = `/webdav/preview?${new URLSearchParams({
+    name: row.name || '',
+    path: row.path || '',
+  }).toString()}`
+  window.open(routeUrl, '_blank', 'noopener,noreferrer')
+}
+
 async function downloadFile(row) {
   if (!row?.path || downloadingPath.value) return
   try {
@@ -207,8 +238,7 @@ async function downloadFile(row) {
       $message.error('下载链接生成失败，请稍后重试')
       return
     }
-    const path = apiUrl.startsWith('/') ? apiUrl : `/${apiUrl}`
-    openDownloadUrl(`${window.location.origin}${path}`)
+    openDownloadUrl(buildAbsoluteApiUrl(apiUrl))
   } finally {
     downloadingPath.value = ''
   }
@@ -367,6 +397,16 @@ async function clearWebdavCache() {
 :deep(.file-name-button.folder) {
   color: #0369a1;
   font-weight: 800;
+}
+:deep(.file-name-button.file) {
+  color: var(--wd-text);
+}
+:deep(.file-name-button.file:hover) {
+  color: #0f766e;
+}
+:deep(.file-name-button:disabled) {
+  opacity: .62;
+  cursor: progress;
 }
 :deep(.file-icon) {
   width: 30px;

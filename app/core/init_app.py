@@ -894,6 +894,7 @@ async def init_roles():
             "/api/v1/webdav/list",
             "/api/v1/webdav/cache/clear",
             "/api/v1/webdav/download-url",
+            "/api/v1/webdav/preview-cache",
             "/api/v1/webdav/share/create",
             "/api/v1/webdav/share/list",
             "/api/v1/webdav/share/delete",

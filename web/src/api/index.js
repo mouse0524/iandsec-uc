@@ -143,6 +143,7 @@ export default {
   webdavList: (params = {}) => request.get('/webdav/list', { params }),
   webdavClearCache: () => request.post('/webdav/cache/clear'),
   webdavDownload: (params = {}) => request.get('/webdav/download-url', { params }),
+  webdavPreviewCache: (params = {}) => request.get('/webdav/preview-cache', { params, timeout: 300000 }),
   webdavOpsPassword: () => request.get('/webdav/ops-password'),
   webdavReplaceDecryptPassword: () => request.get('/webdav/replace-decrypt-password'),
   webdavCreateShare: (data = {}) => request.post('/webdav/share/create', data),

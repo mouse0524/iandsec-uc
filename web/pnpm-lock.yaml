@@ -83,6 +83,9 @@ importers:
       vue:
         specifier: ^3.3.4
         version: 3.4.34(typescript@5.5.4)
+      vue-files-preview:
+        specifier: 1.0.43
+        version: 1.0.43
       vue-i18n:
         specifier: '9'
         version: 9.13.1(vue@3.4.34(typescript@5.5.4))
@@ -2624,6 +2627,9 @@ packages:
     engines: {node: ^14.17.0 || >=16.0.0}
     peerDependencies:
       eslint: '>=6.0.0'
+
+  vue-files-preview@1.0.43:
+    resolution: {integrity: sha512-aClCRqq7ikQsPOx20JnUHQSHAb+12zMEBWPM1EWtMK/u6a4gJqWt6sbgGfFYyOgCjckzvKTE537zGm8t4R3P6g==}
 
   vue-i18n@9.13.1:
     resolution: {integrity: sha512-mh0GIxx0wPtPlcB1q4k277y0iKgo25xmDPWioVVYanjPufDBpvu5ySTjP5wOrSvlYQ2m1xI+CFhGdauv/61uQg==}
@@ -5500,6 +5506,8 @@ snapshots:
       semver: 7.6.3
     transitivePeerDependencies:
       - supports-color
+
+  vue-files-preview@1.0.43: {}
 
   vue-i18n@9.13.1(vue@3.4.34(typescript@5.5.4)):
     dependencies:
