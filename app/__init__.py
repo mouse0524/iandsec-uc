@@ -14,6 +14,7 @@ from app.services.database_backup_service import database_backup_scheduler
 from app.services.inactive_user_service import inactive_user_auto_disable_scheduler
 from app.services.redmine_sync_service import redmine_auto_pull_scheduler
 from app.services.skill_know.evolution_scheduler import skill_know_evolution_scheduler
+from app.services.ticket_reminder_service import ticket_daily_reminder_scheduler
 
 try:
     from app.settings.config import settings
@@ -28,9 +29,11 @@ async def lifespan(app: FastAPI):
     database_backup_scheduler.start()
     redmine_auto_pull_scheduler.start()
     skill_know_evolution_scheduler.start()
+    ticket_daily_reminder_scheduler.start()
     try:
         yield
     finally:
+        await ticket_daily_reminder_scheduler.stop()
         await inactive_user_auto_disable_scheduler.stop()
         await database_backup_scheduler.stop()
         await redmine_auto_pull_scheduler.stop()
