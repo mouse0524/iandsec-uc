@@ -186,6 +186,9 @@ async def create_ticket(payload: TicketCreate, request: Request):
         return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
+    version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+    if version_error:
+        return Fail(code=400, msg=version_error)
 
     body = payload.model_dump(exclude={"captcha_id", "captcha_code", "turnstile_token"})
     body["issue_type"] = issue_type
@@ -632,6 +635,10 @@ async def resubmit_ticket(payload: TicketResubmitIn, request: Request):
     if not valid:
         logger.warning("[api.ticket.resubmit] captcha_invalid user_id={} ticket_id={}", user.id, payload.ticket_id)
         return Fail(code=400, msg=challenge_error)
+    if payload.description:
+        version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+        if version_error:
+            return Fail(code=400, msg=version_error)
 
     ticket = await ticket_controller.resubmit_ticket(
         ticket_id=payload.ticket_id,
@@ -679,6 +686,9 @@ async def update_ticket(payload: TicketUpdateIn, request: Request):
         return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
+    version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+    if version_error:
+        return Fail(code=400, msg=version_error)
 
     body = payload.model_dump(exclude={"ticket_id", "attachment_ids", "captcha_id", "captcha_code", "turnstile_token"})
     if "issue_type" in payload.model_fields_set:

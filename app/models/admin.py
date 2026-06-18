@@ -129,6 +129,7 @@ class Ticket(BaseModel, TimestampMixin):
     redmine_last_updated_on = fields.DatetimeField(null=True, description="Redmine last updated on")
     redmine_status_id = fields.BigIntField(null=True, description="Redmine status ID", index=True)
     redmine_status_name = fields.CharField(max_length=120, null=True, description="Redmine status name")
+    redmine_closed = fields.BooleanField(default=False, description="Redmine closed flag", index=True)
 
     class Meta:
         table = "ticket"

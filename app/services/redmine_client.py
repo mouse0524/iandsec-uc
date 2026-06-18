@@ -50,6 +50,9 @@ class RedmineClient:
     async def list_issue_priorities(self) -> Any:
         return await self._call(lambda redmine: redmine.enumeration.filter(resource="issue_priorities"))
 
+    async def list_issue_statuses(self) -> Any:
+        return await self._call(lambda redmine: redmine.issue_status.all())
+
     async def list_users(self) -> Any:
         return await self._call(lambda redmine: redmine.user.all())
 

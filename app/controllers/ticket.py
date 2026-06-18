@@ -318,6 +318,7 @@ class TicketController:
             "redmine_last_updated_on",
             "redmine_status_id",
             "redmine_status_name",
+            "redmine_closed",
             "submitter_id",
             "reviewer_id",
             "tech_id",

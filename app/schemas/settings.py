@@ -97,12 +97,15 @@ class SystemSettingUpdateIn(BaseModel):
     redmine_tracker_id: int | None = None
     redmine_priority_id: int | None = None
     redmine_assigned_to_id: int | None = None
+    redmine_closed_status_id: int | None = None
     redmine_project_phase_field_id: int | None = None
     redmine_os_field_id: int | None = None
+    redmine_server_version_field_id: int | None = None
+    redmine_client_version_field_id: int | None = None
     redmine_sync_visible_fields: list[str] = Field(default_factory=list)
     redmine_sync_options: dict[str, list[str]] = Field(default_factory=dict)
     redmine_auto_pull_enabled: bool = False
-    redmine_auto_pull_interval_minutes: int = 30
+    redmine_auto_pull_interval_minutes: int = 120
     redmine_auto_pull_ticket_statuses: list[str] = Field(
         default_factory=lambda: [
             TicketStatus.TECH_PROCESSING.value,
@@ -331,8 +334,11 @@ class SystemSettingUpdateIn(BaseModel):
         "redmine_tracker_id",
         "redmine_priority_id",
         "redmine_assigned_to_id",
+        "redmine_closed_status_id",
         "redmine_project_phase_field_id",
         "redmine_os_field_id",
+        "redmine_server_version_field_id",
+        "redmine_client_version_field_id",
     )
     @classmethod
     def validate_redmine_ids(cls, value: int | None, info):

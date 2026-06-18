@@ -763,6 +763,7 @@ async def ensure_security_columns():
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_last_updated_on` DATETIME(6) NULL", "ticket.redmine_last_updated_on"),
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_id` BIGINT NULL", "ticket.redmine_status_id"),
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_name` VARCHAR(120) NULL", "ticket.redmine_status_name"),
+            ("ALTER TABLE `ticket` ADD COLUMN `redmine_closed` BOOL NOT NULL DEFAULT 0", "ticket.redmine_closed"),
             ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
             ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
             (

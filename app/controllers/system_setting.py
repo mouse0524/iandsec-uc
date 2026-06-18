@@ -170,12 +170,15 @@ class SystemSettingController:
             "redmine_tracker_id": _int_env("REDMINE_TRACKER_ID", 0) or None,
             "redmine_priority_id": _int_env("REDMINE_PRIORITY_ID", 0) or None,
             "redmine_assigned_to_id": _int_env("REDMINE_ASSIGNED_TO_ID", 0) or None,
+            "redmine_closed_status_id": _int_env("REDMINE_CLOSED_STATUS_ID", 0) or None,
             "redmine_project_phase_field_id": _int_env("REDMINE_PROJECT_PHASE_FIELD_ID", 0) or None,
             "redmine_os_field_id": _int_env("REDMINE_OS_FIELD_ID", 0) or None,
+            "redmine_server_version_field_id": _int_env("REDMINE_SERVER_VERSION_FIELD_ID", 0) or None,
+            "redmine_client_version_field_id": _int_env("REDMINE_CLIENT_VERSION_FIELD_ID", 0) or None,
             "redmine_sync_visible_fields": [],
             "redmine_sync_options": {},
             "redmine_auto_pull_enabled": False,
-            "redmine_auto_pull_interval_minutes": _int_env("REDMINE_AUTO_PULL_INTERVAL_MINUTES", 30),
+            "redmine_auto_pull_interval_minutes": _int_env("REDMINE_AUTO_PULL_INTERVAL_MINUTES", 120),
             "redmine_auto_pull_ticket_statuses": ["tech_processing", "field_verification", "pending_close"],
         },
     }
@@ -491,8 +494,11 @@ class SystemSettingController:
             "redmine_tracker_id",
             "redmine_priority_id",
             "redmine_assigned_to_id",
+            "redmine_closed_status_id",
             "redmine_project_phase_field_id",
             "redmine_os_field_id",
+            "redmine_server_version_field_id",
+            "redmine_client_version_field_id",
             "redmine_sync_visible_fields",
             "redmine_sync_options",
             "redmine_auto_pull_enabled",
@@ -542,6 +548,9 @@ class SystemSettingController:
             metadata = json.loads(raw)
             redmine = (await self._ensure_all_sections())["redmine"]
             metadata["redmine_os_field_id"] = redmine.get("redmine_os_field_id")
+            metadata["redmine_server_version_field_id"] = redmine.get("redmine_server_version_field_id")
+            metadata["redmine_client_version_field_id"] = redmine.get("redmine_client_version_field_id")
+            metadata["redmine_closed_status_id"] = redmine.get("redmine_closed_status_id")
             metadata["redmine_sync_options"] = redmine.get("redmine_sync_options") or {}
             await execute_redis(
                 "setex",

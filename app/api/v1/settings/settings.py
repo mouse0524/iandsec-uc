@@ -59,8 +59,11 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "redmine_tracker_id",
         "redmine_priority_id",
         "redmine_assigned_to_id",
+        "redmine_closed_status_id",
         "redmine_project_phase_field_id",
         "redmine_os_field_id",
+        "redmine_server_version_field_id",
+        "redmine_client_version_field_id",
         "redmine_sync_visible_fields",
         "redmine_sync_options",
         "redmine_auto_pull_enabled",
@@ -172,6 +175,7 @@ async def get_redmine_metadata(payload: RedmineMetadataIn):
     trackers = await client.list_trackers()
     priorities = await client.list_issue_priorities()
     users = await client.list_users()
+    statuses = await client.list_issue_statuses()
     custom_fields = [
         item
         for item in await client.list_custom_fields()
@@ -182,13 +186,17 @@ async def get_redmine_metadata(payload: RedmineMetadataIn):
         "trackers": [_redmine_item(item) for item in trackers],
         "priorities": [_redmine_item(item) for item in priorities],
         "users": [_redmine_item(item) for item in users],
+        "statuses": [_redmine_item(item) for item in statuses],
         "custom_fields": [_redmine_item(item) for item in custom_fields],
         "redmine_project_id": config.get("redmine_project_id"),
         "redmine_tracker_id": config.get("redmine_tracker_id"),
         "redmine_priority_id": config.get("redmine_priority_id"),
         "redmine_assigned_to_id": config.get("redmine_assigned_to_id"),
+        "redmine_closed_status_id": config.get("redmine_closed_status_id"),
         "redmine_project_phase_field_id": config.get("redmine_project_phase_field_id"),
         "redmine_os_field_id": config.get("redmine_os_field_id"),
+        "redmine_server_version_field_id": config.get("redmine_server_version_field_id"),
+        "redmine_client_version_field_id": config.get("redmine_client_version_field_id"),
         "redmine_sync_visible_fields": config.get("redmine_sync_visible_fields") or [],
         "redmine_sync_options": config.get("redmine_sync_options") or {},
     }

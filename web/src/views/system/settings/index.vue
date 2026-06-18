@@ -46,6 +46,7 @@ const redmineProjectOptions = ref([])
 const redmineTrackerOptions = ref([])
 const redminePriorityOptions = ref([])
 const redmineUserOptions = ref([])
+const redmineStatusOptions = ref([])
 const redmineCustomFieldOptions = ref([])
 const redmineOsValueOptions = ref([])
 const form = ref({
@@ -147,10 +148,12 @@ const form = ref({
   redmine_assigned_to_id: null,
   redmine_project_phase_field_id: null,
   redmine_os_field_id: null,
+  redmine_server_version_field_id: null,
+  redmine_client_version_field_id: null,
   redmine_sync_visible_fields: [],
   redmine_sync_options: {},
   redmine_auto_pull_enabled: false,
-  redmine_auto_pull_interval_minutes: 30,
+  redmine_auto_pull_interval_minutes: 120,
   redmine_auto_pull_ticket_statuses: ['tech_processing', 'field_verification', 'pending_close'],
 })
 
@@ -700,6 +703,11 @@ function ensureRedmineSelectedOptions() {
     form.value.redmine_assigned_to_id,
     '已保存指派人',
   )
+  redmineStatusOptions.value = mergeRedmineOption(
+    redmineStatusOptions.value,
+    form.value.redmine_closed_status_id,
+    '已保存状态',
+  )
   redmineCustomFieldOptions.value = mergeRedmineOption(
     redmineCustomFieldOptions.value,
     form.value.redmine_project_phase_field_id,
@@ -708,6 +716,16 @@ function ensureRedmineSelectedOptions() {
   redmineCustomFieldOptions.value = mergeRedmineOption(
     redmineCustomFieldOptions.value,
     form.value.redmine_os_field_id,
+    '已保存自定义字段',
+  )
+  redmineCustomFieldOptions.value = mergeRedmineOption(
+    redmineCustomFieldOptions.value,
+    form.value.redmine_server_version_field_id,
+    '已保存自定义字段',
+  )
+  redmineCustomFieldOptions.value = mergeRedmineOption(
+    redmineCustomFieldOptions.value,
+    form.value.redmine_client_version_field_id,
     '已保存自定义字段',
   )
 }
@@ -737,6 +755,7 @@ function applyRedmineMetadata(data = {}) {
   redmineTrackerOptions.value = normalizeRedmineOptions(data.trackers, true)
   redminePriorityOptions.value = normalizeRedmineOptions(data.priorities, true)
   redmineUserOptions.value = normalizeRedmineOptions(data.users, true)
+  redmineStatusOptions.value = normalizeRedmineOptions(data.statuses, true)
   redmineCustomFieldOptions.value = normalizeRedmineOptions(data.custom_fields, true)
   redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
   ensureRedmineSelectedOptions()
@@ -788,6 +807,18 @@ async function loadRedmineMetadata() {
         String(option.label || '').includes('操作系统'),
       )
       form.value.redmine_os_field_id = item?.value || null
+    }
+    if (!form.value.redmine_server_version_field_id && redmineCustomFieldOptions.value.length) {
+      const item = redmineCustomFieldOptions.value.find((option) =>
+        String(option.label || '').includes('服务端版本号') || String(option.label || '').includes('服务器版本'),
+      )
+      form.value.redmine_server_version_field_id = item?.value || null
+    }
+    if (!form.value.redmine_client_version_field_id && redmineCustomFieldOptions.value.length) {
+      const item = redmineCustomFieldOptions.value.find((option) =>
+        String(option.label || '').includes('客户端版本号') || String(option.label || '').includes('客户端版本'),
+      )
+      form.value.redmine_client_version_field_id = item?.value || null
     }
     redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
     $message.success('Redmine配置选项已更新')
@@ -1391,6 +1422,88 @@ function applyPresetHtmlTemplates() {
                 <NButton type="primary" ghost :loading="redmineMetadataLoading" @click="loadRedmineMetadata">
                   获取配置选项
                 </NButton>
+              </NFormItem>
+              <NDivider title-placement="left">字段映射</NDivider>
+              <NFormItem label="项目标识" path="redmine_project_id">
+                <NSelect
+                  v-model:value="form.redmine_project_id"
+                  :options="redmineProjectOptions"
+                  filterable
+                  clearable
+                  placeholder="选择默认Redmine项目标识"
+                />
+              </NFormItem>
+              <NFormItem label="跟踪" path="redmine_tracker_id">
+                <NSelect
+                  v-model:value="form.redmine_tracker_id"
+                  :options="redmineTrackerOptions"
+                  filterable
+                  clearable
+                  placeholder="选择默认Redmine跟踪"
+                />
+              </NFormItem>
+              <NFormItem label="优先级">
+                <NSelect
+                  v-model:value="form.redmine_priority_id"
+                  :options="redminePriorityOptions"
+                  filterable
+                  clearable
+                  placeholder="选择默认Redmine优先级"
+                />
+              </NFormItem>
+              <NFormItem label="指派给">
+                <NSelect
+                  v-model:value="form.redmine_assigned_to_id"
+                  :options="redmineUserOptions"
+                  filterable
+                  clearable
+                  placeholder="选择默认Redmine指派人"
+                />
+              </NFormItem>
+              <NFormItem label="关闭状态">
+                <NSelect
+                  v-model:value="form.redmine_closed_status_id"
+                  :options="redmineStatusOptions"
+                  filterable
+                  clearable
+                  placeholder="选择Redmine关闭状态"
+                />
+              </NFormItem>
+              <NFormItem label="项目阶段字段">
+                <NSelect
+                  v-model:value="form.redmine_project_phase_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="选择Redmine项目阶段自定义字段"
+                />
+              </NFormItem>
+              <NFormItem label="操作系统字段">
+                <NSelect
+                  v-model:value="form.redmine_os_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="选择Redmine操作系统自定义字段"
+                />
+              </NFormItem>
+              <NFormItem label="服务端版本号字段">
+                <NSelect
+                  v-model:value="form.redmine_server_version_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="选择Redmine服务端版本号自定义字段"
+                />
+              </NFormItem>
+              <NFormItem label="客户端版本号字段">
+                <NSelect
+                  v-model:value="form.redmine_client_version_field_id"
+                  :options="redmineCustomFieldOptions"
+                  filterable
+                  clearable
+                  placeholder="选择Redmine客户端版本号自定义字段"
+                />
               </NFormItem>
               <NDivider title-placement="left">技术可选</NDivider>
               <NAlert type="info" class="mb-12">

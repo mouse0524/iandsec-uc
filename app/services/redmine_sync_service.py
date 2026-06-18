@@ -16,6 +16,7 @@ import anyio
 from fastapi import HTTPException
 
 from app.controllers.system_setting import system_setting_controller
+from app.controllers.ticket import ticket_controller
 from app.core.redis_client import execute_redis
 from app.log import logger
 from app.models.admin import Ticket, TicketActionLog, TicketAttachment
@@ -27,6 +28,10 @@ RedisExecutor = Callable[..., Awaitable[Any]]
 
 
 class RedmineSyncService:
+    FIELD_VERIFICATION_REDMINE_STATUSES = {"现网问题-现场验证问题", "现网问题-现场协调定位"}
+    VERSION_PATTERN = r"([0-9]+(?:\.[0-9]+)+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)"
+    VERSION_TEMPLATE_MESSAGE = "请按照规范提交：服务器版本：6.0.8-20260422-1039，客户端版本：6.0.8.206"
+
     async def push_ticket(
         self,
         ticket: Ticket,
@@ -51,6 +56,9 @@ class RedmineSyncService:
                     "description": description,
                     "notes": note or f"工单 {ticket.ticket_no} 手动同步到 Redmine",
                 }
+                custom_fields = self._custom_fields(ticket, config, project_phase=project_phase, os_value=os_value)
+                if custom_fields:
+                    update_payload["custom_fields"] = custom_fields
                 if uploads:
                     update_payload["uploads"] = uploads
                 result = await client.update_issue(
@@ -102,6 +110,11 @@ class RedmineSyncService:
             ticket.redmine_sync_error = None
             ticket.redmine_synced_at = now
             await ticket.save()
+            await self._apply_redmine_status_to_ticket(
+                ticket,
+                status_name=ticket.redmine_status_name,
+                operator_id=operator_id,
+            )
             journals = await self._pending_journal_notes(ticket, issue)
             attachment_map = await self._sync_redmine_attachments(
                 ticket,
@@ -118,6 +131,73 @@ class RedmineSyncService:
                 raise
             await self._save_failure(ticket, str(exc), now=now)
             raise
+
+    async def close_redmine_issue_for_closed_ticket(
+        self,
+        ticket: Ticket,
+        *,
+        config: dict | None = None,
+        client: RedmineClient | None = None,
+    ) -> bool:
+        status_id = self._optional_int((config or {}).get("redmine_closed_status_id"))
+        if not status_id:
+            logger.warning(
+                "[redmine.close] skipped ticket_id={} redmine_issue_id={} reason=missing_closed_status_id",
+                getattr(ticket, "id", None),
+                getattr(ticket, "redmine_issue_id", None),
+            )
+            return False
+        issue_id = getattr(ticket, "redmine_issue_id", None)
+        if not issue_id:
+            return False
+        if getattr(ticket, "redmine_closed", False):
+            return False
+        client = client or RedmineClient(config or await self._config())
+        await client.update_issue(
+            int(issue_id),
+            {"status_id": status_id, "notes": "工单已在系统中关闭，定时同步关闭 Redmine。"},
+        )
+        return True
+
+    async def _apply_redmine_status_to_ticket(self, ticket: Ticket, *, status_name: str | None, operator_id: int) -> bool:
+        if not self._requires_field_verification(status_name):
+            return False
+        if ticket.status == TicketStatus.FIELD_VERIFICATION:
+            return False
+        if ticket.status in {TicketStatus.PENDING_CLOSE, TicketStatus.DONE}:
+            logger.info(
+                "[redmine.pull] skip_field_verification ticket_id={} current_status={} redmine_status={}",
+                ticket.id,
+                ticket.status,
+                status_name,
+            )
+            return False
+
+        old_status = ticket.status
+        ticket.status = TicketStatus.FIELD_VERIFICATION
+        await ticket.save()
+        await TicketActionLog.create(
+            ticket_id=ticket.id,
+            action=TicketActionType.FIELD_VERIFY,
+            from_status=old_status,
+            to_status=TicketStatus.FIELD_VERIFICATION,
+            operator_id=operator_id,
+            comment=f"Redmine状态同步为现场验证：{status_name}",
+        )
+        await self._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
+        logger.info(
+            "[redmine.pull] routed_to_field_verification ticket_id={} from_status={} redmine_status={}",
+            ticket.id,
+            old_status,
+            status_name,
+        )
+        return True
+
+    async def _notify_ticket_status_if_needed(self, *, ticket: Ticket, operator_id: int) -> None:
+        await ticket_controller._notify_ticket_status_if_needed(ticket=ticket, operator_id=operator_id)
+
+    def _requires_field_verification(self, status_name: str | None) -> bool:
+        return str(status_name or "").strip() in self.FIELD_VERIFICATION_REDMINE_STATUSES
 
     async def _config(self) -> dict:
         config = await system_setting_controller.get_full_dict()
@@ -176,7 +256,38 @@ class RedmineSyncService:
         os_text = str(os_value or "").strip()
         if os_field_id and os_text:
             fields.append({"id": os_field_id, "value": os_text})
+        versions = self.extract_product_versions(getattr(ticket, "description", None))
+        server_version_field_id = self._optional_int(config.get("redmine_server_version_field_id"))
+        if server_version_field_id and versions["server_version"]:
+            fields.append({"id": server_version_field_id, "value": versions["server_version"]})
+        client_version_field_id = self._optional_int(config.get("redmine_client_version_field_id"))
+        if client_version_field_id and versions["client_version"]:
+            fields.append({"id": client_version_field_id, "value": versions["client_version"]})
         return fields
+
+    def extract_product_versions(self, description: Any) -> dict[str, str]:
+        text = self._plain_description(description)
+        return {
+            "server_version": self._extract_labeled_version(text, "服务器版本"),
+            "client_version": self._extract_labeled_version(text, "客户端版本"),
+        }
+
+    def ticket_description_version_error(self, description: Any) -> str | None:
+        versions = self.extract_product_versions(description)
+        missing = []
+        if not versions["server_version"]:
+            missing.append("服务器版本")
+        if not versions["client_version"]:
+            missing.append("客户端版本")
+        if not missing:
+            return None
+        return f"问题描述缺少{'、'.join(missing)}，{self.VERSION_TEMPLATE_MESSAGE}"
+
+    @classmethod
+    def _extract_labeled_version(cls, text: str, label: str) -> str:
+        pattern = re.compile(rf"{re.escape(label)}\s*[:：]\s*{cls.VERSION_PATTERN}", flags=re.IGNORECASE)
+        match = pattern.search(text or "")
+        return match.group(1).strip() if match else ""
 
     def _subject(self, ticket: Ticket) -> str:
         project_name = self._text(getattr(ticket, "company_name", None))
@@ -658,6 +769,7 @@ class RedmineAutoPullScheduler:
         tickets = await query
         checked = len(tickets)
         pulled = 0
+        closed = 0
         failed = 0
         for ticket in tickets:
             try:
@@ -671,9 +783,49 @@ class RedmineAutoPullScheduler:
                     getattr(ticket, "redmine_issue_id", None),
                     str(exc),
                 )
+        closed, close_failed = await self._close_done_tickets(config)
+        failed += close_failed
         if checked:
-            logger.info("[redmine.auto_pull.scheduler] batch_done checked={} pulled={} failed={}", checked, pulled, failed)
-        return {"checked": checked, "pulled": pulled, "failed": failed, "enabled": True}
+            logger.info(
+                "[redmine.auto_pull.scheduler] batch_done checked={} pulled={} closed={} failed={}",
+                checked,
+                pulled,
+                closed,
+                failed,
+            )
+        return {"checked": checked, "pulled": pulled, "closed": closed, "failed": failed, "enabled": True}
+
+    async def _close_done_tickets(self, config: dict) -> tuple[int, int]:
+        if not self.service._optional_int(config.get("redmine_closed_status_id")):
+            return 0, 0
+        query = (
+            self.ticket_model.exclude(redmine_issue_id__isnull=True)
+            .filter(status=TicketStatus.DONE, redmine_closed=False)
+            .order_by("redmine_synced_at", "id")
+            .limit(self.MAX_BATCH_SIZE)
+        )
+        tickets = await query
+        closed = 0
+        failed = 0
+        client = RedmineClient(config)
+        for ticket in tickets:
+            try:
+                if await self.service.close_redmine_issue_for_closed_ticket(ticket, config=config, client=client):
+                    closed += 1
+                    ticket.redmine_sync_status = "success"
+                    ticket.redmine_sync_error = None
+                    ticket.redmine_synced_at = datetime.now()
+                    ticket.redmine_closed = True
+                    await ticket.save()
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "[redmine.auto_pull.scheduler] close_failed ticket_id={} redmine_issue_id={} error={}",
+                    getattr(ticket, "id", None),
+                    getattr(ticket, "redmine_issue_id", None),
+                    str(exc),
+                )
+        return closed, failed
 
     def _ticket_statuses(self, config: dict) -> list[str]:
         valid_statuses = {item.value for item in TicketStatus}
@@ -693,9 +845,9 @@ class RedmineAutoPullScheduler:
 
     def _interval_seconds(self, config: dict) -> int:
         try:
-            minutes = int(config.get("redmine_auto_pull_interval_minutes") or 30)
+            minutes = int(config.get("redmine_auto_pull_interval_minutes") or 120)
         except Exception:
-            minutes = 30
+            minutes = 120
         minutes = min(1440, max(1, minutes))
         return minutes * 60
 
