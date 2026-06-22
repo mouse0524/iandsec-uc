@@ -94,7 +94,11 @@ function handleTableDataChange(rows) {
 }
 
 async function getMyTicketList(params = {}) {
-  const res = await api.getTicketList(params)
+  const query = { ...(params || {}) }
+  if (!query.status) {
+    query.exclude_status = 'done'
+  }
+  const res = await api.getTicketList(query)
   summaryStats.value = {
     total: Number(res?.status_summary?.total || 0),
     pending_review: Number(res?.status_summary?.pending_review || 0),
@@ -265,7 +269,23 @@ const columns = [
   { title: '跟踪', key: 'issue_type', align: 'center' },
   { title: '影响范围', key: 'impact_scope', align: 'center' },
   { title: '问题分类', key: 'category', align: 'center' },
-  { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
+  {
+    title: '标题',
+    key: 'title',
+    align: 'center',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return h(
+        'a',
+        {
+          class: 'ticket-title-link',
+          href: 'javascript:void(0)',
+          onClick: () => openDetail(row),
+        },
+        row.title || '-'
+      )
+    },
+  },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
   {
     title: '状态',
@@ -505,6 +525,17 @@ const columns = [
   gap: 8px;
   flex-wrap: nowrap;
   white-space: nowrap;
+}
+
+.ticket-title-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ticket-title-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 
 .edit-shell {

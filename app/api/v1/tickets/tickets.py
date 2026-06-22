@@ -59,6 +59,7 @@ def _build_ticket_search(
     user: User,
     role_names: list[str],
     status: TicketStatus | None = None,
+    exclude_status: TicketStatus | None = None,
     project_phase: str | None = None,
     issue_type: str | None = None,
     impact_scope: str | None = None,
@@ -74,6 +75,8 @@ def _build_ticket_search(
     q = Q()
     if status:
         q &= Q(status=status)
+    elif exclude_status:
+        q &= ~Q(status=exclude_status)
     if project_phase:
         q &= Q(project_phase=project_phase)
     if issue_type:
@@ -227,6 +230,7 @@ async def list_ticket(
     page: int = Query(1, description="??"),
     page_size: int = Query(10, description="????"),
     status: TicketStatus | None = Query(None, description="??"),
+    exclude_status: TicketStatus | None = Query(None, description="排除状态"),
     project_phase: str | None = Query(None, description="????"),
     issue_type: str | None = Query(None, description="跟踪"),
     impact_scope: str | None = Query(None, description="影响范围"),
@@ -249,6 +253,7 @@ async def list_ticket(
         user=user,
         role_names=role_names,
         status=status,
+        exclude_status=exclude_status,
         project_phase=project_phase,
         issue_type=issue_type,
         impact_scope=impact_scope,
@@ -268,6 +273,7 @@ async def list_ticket(
         user=user,
         role_names=role_names,
         status=None,
+        exclude_status=None,
         project_phase=project_phase,
         issue_type=issue_type,
         impact_scope=impact_scope,

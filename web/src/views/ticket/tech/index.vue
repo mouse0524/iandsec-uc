@@ -577,7 +577,23 @@ function handleMoreAction(key, row) {
 
 const columns = [
   { title: '工单编号', key: 'ticket_no', align: 'center' },
-  { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
+  {
+    title: '标题',
+    key: 'title',
+    align: 'center',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return h(
+        'a',
+        {
+          class: 'ticket-title-link',
+          href: 'javascript:void(0)',
+          onClick: () => openDetail(row),
+        },
+        row.title || '-'
+      )
+    },
+  },
   {
     title: '联系人',
     key: 'contact_name',
@@ -942,6 +958,17 @@ const columns = [
   gap: 8px;
   flex-wrap: nowrap;
   white-space: nowrap;
+}
+
+.ticket-title-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ticket-title-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 
 .redmine-cell {

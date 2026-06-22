@@ -215,7 +215,23 @@ const columns = [
       return row.submitter_name || row.submitter_id || '-'
     },
   },
-  { title: '标题', key: 'title', align: 'center', ellipsis: { tooltip: true } },
+  {
+    title: '标题',
+    key: 'title',
+    align: 'center',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return h(
+        'a',
+        {
+          class: 'ticket-title-link',
+          href: 'javascript:void(0)',
+          onClick: () => openDetail(row),
+        },
+        row.title || '-'
+      )
+    },
+  },
   {
     title: '联系人',
     key: 'contact_name',
@@ -503,6 +519,17 @@ const columns = [
   justify-content: center;
   gap: 8px;
   flex-wrap: nowrap;
+}
+
+.ticket-title-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ticket-title-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 
 .modal-actions {
