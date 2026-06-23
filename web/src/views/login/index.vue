@@ -68,7 +68,7 @@
             <div>
               <span class="auth-kicker">SECURE ACCESS</span>
               <h3>账号登录</h3>
-              <p class="auth-tip">请输入邮箱、密码和验证码进入服务中心</p>
+              <p class="auth-tip">{{ loginTipText }}</p>
             </div>
             <icon-material-symbols:shield-lock-outline-rounded class="auth-head-icon" />
           </div>
@@ -425,6 +425,11 @@ const captchaRules = {
 const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
 const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
 const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
+const loginTipText = computed(() => {
+  if (!challengeEnabled.value) return '请输入邮箱和密码进入服务中心'
+  if (requiresCaptcha.value) return '请输入邮箱、密码和验证码进入服务中心'
+  return '请输入邮箱、密码并完成安全校验进入服务中心'
+})
 
 const canSendEmailCode = computed(() => {
   return !!partnerForm.value.email?.trim() && !emailCodeSending.value && emailCodeCooldown.value === 0
@@ -518,9 +523,10 @@ async function handleLogin() {
     })
     return
   }
+  let loadingMessage = null
   try {
     loading.value = true
-    $message.loading(t('views.login.message_verifying'))
+    loadingMessage = $message.loading(t('views.login.message_verifying'), { duration: 0 })
     const res = await api.login({
       username,
       password: password.toString(),
@@ -543,8 +549,10 @@ async function handleLogin() {
   } catch (e) {
     // ignore login error detail in production logs
     await refreshLoginChallenge()
+  } finally {
+    loadingMessage?.destroy?.()
+    loading.value = false
   }
-  loading.value = false
 }
 
 async function refreshLoginCaptcha() {

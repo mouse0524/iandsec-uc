@@ -51,10 +51,25 @@ def _format_lock_message(ttl_seconds: int) -> str:
     return f"登录失败次数过多，请 {minutes} 分钟后重试"
 
 
+def _generic_login_error_message(config: dict) -> str:
+    if not config.get("login_challenge_enabled", True):
+        return "用户名或密码错误"
+    challenge_type = str(config.get("login_challenge_type") or "captcha").strip().lower()
+    if challenge_type == "turnstile":
+        return "用户名、密码或安全校验错误"
+    return "用户名、密码或验证码错误"
+
+
 def _login_error_message(config: dict, fallback: str) -> str:
     if config.get("login_generic_error_enabled", True):
-        return "用户名、密码或验证码错误"
+        return _generic_login_error_message(config)
     return fallback
+
+
+def _login_auth_error_message(config: dict, fallback: str) -> str:
+    if fallback == "用户已被禁用" or "已自动禁用" in fallback:
+        return fallback
+    return _login_error_message(config, fallback)
 
 
 def _register_closed_message(register_type: RegisterType | None) -> str:
@@ -117,7 +132,7 @@ async def login_access_token(credentials: CredentialsSchema, request: Request):
                 fail_result.scope,
             )
             return Fail(code=423, msg=_format_lock_message(fail_result.ttl_seconds))
-        return Fail(code=400, msg=_login_error_message(config, str(getattr(exc, "detail", "登录失败"))))
+        return Fail(code=400, msg=_login_auth_error_message(config, str(getattr(exc, "detail", "登录失败"))))
 
     await login_security_controller.clear_success(username=credentials.username, ip=client_ip)
     await user_controller.update_last_login(user.id)
