@@ -77,6 +77,11 @@ export default {
   assignTicketTech: (data = {}) => request.post('/ticket/assign-tech', data),
   pushTicketRedmine: (data = {}) => request.post('/ticket/redmine/push', data),
   pullTicketRedmine: (data = {}) => request.post('/ticket/redmine/pull', data),
+  getRdTaskList: (params = {}) => request.get('/rd-task/list', { params }),
+  getRdTaskById: (params = {}) => request.get('/rd-task/get', { params }),
+  createRdTaskFromTicket: (data = {}) => request.post('/rd-task/create-from-ticket', data),
+  linkTicketToRdTask: (data = {}) => request.post('/rd-task/link-ticket', data),
+  transitionRdTask: (data = {}) => request.post('/rd-task/transition', data),
   downloadTicketAttachment: (params = {}) =>
     request.get('/ticket/attachment/download', {
       params,

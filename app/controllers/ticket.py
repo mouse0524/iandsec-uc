@@ -13,7 +13,7 @@ from app.log import logger
 from app.controllers.mail import mail_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
-from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
+from app.models.admin import RdTask, RdTaskTicket, Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
@@ -901,6 +901,24 @@ class TicketController:
         data["attachments"] = list(attachment_data)
         data["attachment_count"] = len(attachment_data)
         data["actions"] = list(action_data)
+        task_links = await RdTaskTicket.filter(ticket_id=ticket_id).order_by("-id").values("rd_task_id", "created_at")
+        rd_tasks = []
+        if task_links:
+            task_ids = [item["rd_task_id"] for item in task_links]
+            rd_tasks = await RdTask.filter(id__in=task_ids).order_by("-id").values(
+                "id",
+                "task_no",
+                "title",
+                "task_type",
+                "status",
+                "priority",
+                "product_owner_id",
+                "dev_owner_id",
+                "test_owner_id",
+                "planned_version",
+                "result_note",
+            )
+        data["rd_tasks"] = list(rd_tasks)
         data["submitter_name"] = user_map.get(ticket.submitter_id, "")
         data["reviewer_name"] = user_map.get(ticket.reviewer_id or 0, "")
         data["tech_name"] = user_map.get(ticket.tech_id or 0, "")

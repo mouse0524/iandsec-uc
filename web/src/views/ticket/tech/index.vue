@@ -8,7 +8,7 @@ import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import TicketEditModal from '@/views/ticket/components/TicketEditModal.vue'
 import api from '@/api'
-import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
+import { rdTaskTypeOptions, ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
 defineOptions({ name: '技术处理' })
 
@@ -30,9 +30,11 @@ const editingTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
 const redmineVisible = ref(false)
+const rdTaskVisible = ref(false)
 const pendingActionRow = ref(null)
 const pendingAssignRow = ref(null)
 const pendingRedmineRow = ref(null)
+const pendingRdTaskRow = ref(null)
 const pendingActionType = ref('finish')
 const actionComment = ref('')
 const assignTechId = ref(null)
@@ -46,6 +48,16 @@ const redmineForm = ref({
   project_phase: '',
   os_value: '',
 })
+const rdTaskForm = ref({
+  task_type: 'bug',
+  title: '',
+  description: '',
+  priority: 'normal',
+  product_owner_id: null,
+  dev_owner_id: null,
+  test_owner_id: null,
+  planned_version: '',
+})
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
 const issueTypeOptions = ref([])
@@ -53,6 +65,7 @@ const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const selectedRootCause = ref(null)
 const techOptions = ref([])
+const userOptions = ref([])
 const redmineDefaultTrackerId = ref(null)
 const redmineDefaultProjectId = ref(null)
 const redmineDefaultPriorityId = ref(null)
@@ -108,6 +121,7 @@ onMounted(() => {
   $table.value?.handleSearch()
   loadTicketMetaOptions()
   loadTechOptions()
+  loadUserOptions()
   refreshSummaryStats()
 })
 
@@ -142,6 +156,16 @@ async function loadTechOptions() {
       .map((item) => ({ label: item.alias || item.username, value: item.id }))
   } catch (error) {
     techOptions.value = []
+  }
+}
+
+async function loadUserOptions() {
+  try {
+    const res = await api.getUserList({ page: 1, page_size: 9999 })
+    const rows = Array.isArray(res?.data) ? res.data : []
+    userOptions.value = rows.map((item) => ({ label: item.alias || item.username, value: item.id }))
+  } catch (error) {
+    userOptions.value = []
   }
 }
 
@@ -531,14 +555,8 @@ function renderRedmineCell(row) {
 
 function redmineMoreOptions(row) {
   const options = [
-    { label: row.redmine_issue_id ? '更新Redmine' : '同步Redmine', key: 'push-redmine' },
+    { label: '转产研任务', key: 'create-rd-task' },
   ]
-  if (row.redmine_issue_id) {
-    options.push({ label: '拉取Redmine', key: 'pull-redmine' })
-    if (row.redmine_issue_url) {
-      options.push({ label: '打开Redmine', key: 'open-redmine' })
-    }
-  }
   if (row.status !== 'done') {
     options.push({ label: '编辑工单', key: 'edit-ticket' })
   }
@@ -562,6 +580,7 @@ function redmineMoreOptions(row) {
 }
 
 function handleMoreAction(key, row) {
+  if (key === 'create-rd-task') return openRdTaskModal(row)
   if (key === 'push-redmine') return openRedmineSync(row)
   if (key === 'pull-redmine') return pullRedmine(row)
   if (key === 'open-redmine') return openRedmine(row)
@@ -573,6 +592,38 @@ function handleMoreAction(key, row) {
   if (key === 'tech-reject') return openTechAction(row, 'tech_reject')
   if (key === 'assign-tech') return openAssignAction(row)
   if (key === 'close-ticket') return closeTicket(row)
+}
+
+function openRdTaskModal(row) {
+  pendingRdTaskRow.value = row
+  const issueType = String(row.issue_type || '')
+  rdTaskForm.value = {
+    task_type: issueType.includes('需求') || issueType.includes('建议') ? 'requirement' : 'bug',
+    title: row.title || '',
+    description: row.description || '',
+    priority: 'normal',
+    product_owner_id: null,
+    dev_owner_id: null,
+    test_owner_id: null,
+    planned_version: '',
+  }
+  rdTaskVisible.value = true
+}
+
+async function submitRdTask() {
+  if (!pendingRdTaskRow.value) return
+  if (!rdTaskForm.value.title?.trim()) {
+    $message.warning('请填写产研任务标题')
+    return
+  }
+  await api.createRdTaskFromTicket({
+    ticket_id: pendingRdTaskRow.value.id,
+    ...rdTaskForm.value,
+  })
+  $message.success('已转产研任务')
+  rdTaskVisible.value = false
+  pendingRdTaskRow.value = null
+  $table.value?.handleSearch()
 }
 
 const columns = [
@@ -618,7 +669,7 @@ const columns = [
   { title: '分类', key: 'category', align: 'center' },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
   {
-    title: 'Redmine',
+    title: '历史Redmine',
     key: 'redmine_issue_id',
     align: 'center',
     width: 160,
@@ -842,6 +893,42 @@ const columns = [
           <NButton color="#7c3aed" text-color="#fff" :loading="pendingRedmineRow && redmineLoading(pendingRedmineRow)" @click="submitRedmineSync">
             确认同步
           </NButton>
+        </div>
+      </NModal>
+      <NModal v-model:show="rdTaskVisible" preset="card" style="width: 620px" title="转产研任务">
+        <NSelect
+          v-model:value="rdTaskForm.task_type"
+          class="mb-12"
+          :options="rdTaskTypeOptions"
+          :clearable="false"
+          placeholder="请选择任务类型"
+        />
+        <NInput v-model:value="rdTaskForm.title" class="mb-12" placeholder="请输入产研任务标题" />
+        <NSelect
+          v-model:value="rdTaskForm.priority"
+          class="mb-12"
+          :options="[
+            { label: '低', value: 'low' },
+            { label: '普通', value: 'normal' },
+            { label: '高', value: 'high' },
+            { label: '紧急', value: 'urgent' },
+          ]"
+          :clearable="false"
+          placeholder="请选择优先级"
+        />
+        <NInput v-model:value="rdTaskForm.planned_version" class="mb-12" placeholder="计划版本" />
+        <NSelect v-model:value="rdTaskForm.product_owner_id" class="mb-12" :options="userOptions" clearable filterable placeholder="产品负责人" />
+        <NSelect v-model:value="rdTaskForm.dev_owner_id" class="mb-12" :options="userOptions" clearable filterable placeholder="研发负责人" />
+        <NSelect v-model:value="rdTaskForm.test_owner_id" class="mb-12" :options="userOptions" clearable filterable placeholder="测试负责人" />
+        <NInput
+          v-model:value="rdTaskForm.description"
+          type="textarea"
+          :autosize="{ minRows: 4, maxRows: 8 }"
+          placeholder="请输入任务描述"
+        />
+        <div class="modal-actions">
+          <NButton @click="rdTaskVisible = false">取消</NButton>
+          <NButton type="primary" @click="submitRdTask">确认转产研</NButton>
         </div>
       </NModal>
       <NModal

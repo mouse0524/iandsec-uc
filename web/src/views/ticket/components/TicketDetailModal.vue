@@ -4,7 +4,14 @@ import { NButton, NEmpty, NModal, NSpin, NTag } from 'naive-ui'
 import CrudModal from '@/components/table/CrudModal.vue'
 import api from '@/api'
 import { isImageName, sanitizeHtml } from '@/utils'
-import { mapTicketActionText, ticketStatusTextMap, ticketStatusTypeMap } from './ticket-meta'
+import {
+  mapTicketActionText,
+  rdTaskStatusTextMap,
+  rdTaskStatusTypeMap,
+  rdTaskTypeTextMap,
+  ticketStatusTextMap,
+  ticketStatusTypeMap,
+} from './ticket-meta'
 
 defineEmits(['update:visible'])
 
@@ -34,6 +41,7 @@ const descriptionImagePreviewSrc = ref('')
 const descriptionImagePreviewAlt = ref('')
 const safeDescription = computed(() => sanitizeHtml(props.ticket?.description || '-'))
 const hasActions = computed(() => Array.isArray(props.ticket?.actions) && props.ticket.actions.length > 0)
+const rdTasks = computed(() => (Array.isArray(props.ticket?.rd_tasks) ? props.ticket.rd_tasks : []))
 const redmineStatusTextMap = {
   never: '未同步',
   success: '同步成功',
@@ -309,6 +317,22 @@ function getActionIconClass(action) {
     </div>
 
     <div class="description-card">
+      <div class="section-title">关联产研任务</div>
+      <div v-if="rdTasks.length" class="rd-task-list">
+        <div v-for="item in rdTasks" :key="item.id" class="rd-task-item">
+          <div>
+            <strong>{{ item.task_no }} / {{ item.title }}</strong>
+            <span>{{ rdTaskTypeTextMap[item.task_type] || item.task_type || '-' }}</span>
+          </div>
+          <NTag :type="rdTaskStatusTypeMap[item.status] || 'default'">
+            {{ rdTaskStatusTextMap[item.status] || item.status || '-' }}
+          </NTag>
+        </div>
+      </div>
+      <NEmpty v-else description="暂无关联产研任务" size="small" />
+    </div>
+
+    <div class="description-card">
       <div class="section-title">问题描述</div>
       <div v-if="loading" class="detail-loading">
         <NSpin size="small" />
@@ -467,6 +491,35 @@ function getActionIconClass(action) {
 .attachment-card,
 .timeline-card {
   margin-top: 10px;
+}
+
+.rd-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rd-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.rd-task-item strong,
+.rd-task-item span {
+  display: block;
+}
+
+.rd-task-item span {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .detail-secondary-grid {

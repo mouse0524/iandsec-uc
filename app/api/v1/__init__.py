@@ -10,6 +10,7 @@ from .menus import menus_router
 from .monitor import monitor_router
 from .notices import notices_router
 from .partner import partner_router
+from .rd_tasks import rd_tasks_router
 from .roles import roles_router
 from .settings import settings_router
 from .skill_know import skill_know_router
@@ -32,6 +33,7 @@ v1_router.include_router(notices_router, prefix="/notice", dependencies=[DependP
 v1_router.include_router(depts_router, prefix="/dept", dependencies=[DependPermission])
 v1_router.include_router(auditlog_router, prefix="/auditlog", dependencies=[DependPermission])
 v1_router.include_router(tickets_router, prefix="/ticket", dependencies=[DependPermission])
+v1_router.include_router(rd_tasks_router, prefix="/rd-task", dependencies=[DependPermission])
 v1_router.include_router(settings_router, prefix="/settings", dependencies=[DependPermission])
 v1_router.include_router(monitor_router, prefix="/monitor", dependencies=[DependPermission])
 v1_router.include_router(webdav_router, prefix="/webdav", dependencies=[DependPermission])

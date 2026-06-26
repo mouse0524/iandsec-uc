@@ -72,6 +72,16 @@ def _ticket_redmine_api_paths() -> list[str]:
     ]
 
 
+def _rd_task_api_paths() -> list[str]:
+    return [
+        "/api/v1/rd-task/list",
+        "/api/v1/rd-task/get",
+        "/api/v1/rd-task/create-from-ticket",
+        "/api/v1/rd-task/link-ticket",
+        "/api/v1/rd-task/transition",
+    ]
+
+
 def _ticket_submit_api_paths() -> list[str]:
     return [
         "/api/v1/ticket/upload",
@@ -315,6 +325,13 @@ async def init_menus():
             "order": 4,
             "icon": "mdi:tools",
             "component": "/ticket/tech",
+        },
+        {
+            "name": "产研任务",
+            "path": "rd-task",
+            "order": 5,
+            "icon": "material-symbols:task-alt-rounded",
+            "component": "/ticket/rd-task",
         },
     ]
     for child in ticket_children:
@@ -774,6 +791,9 @@ async def ensure_security_columns():
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `action` VARCHAR(32) NOT NULL", "ticket_action_log.action.width"),
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `from_status` VARCHAR(32) NULL", "ticket_action_log.from_status.width"),
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `to_status` VARCHAR(32) NOT NULL", "ticket_action_log.to_status.width"),
+            ("ALTER TABLE `rd_task` MODIFY COLUMN `status` VARCHAR(32) NOT NULL DEFAULT 'pending_dev'", "rd_task.status.width"),
+            ("ALTER TABLE `rd_task_log` MODIFY COLUMN `from_status` VARCHAR(32) NULL", "rd_task_log.from_status.width"),
+            ("ALTER TABLE `rd_task_log` MODIFY COLUMN `to_status` VARCHAR(32) NOT NULL", "rd_task_log.to_status.width"),
         ]:
             try:
                 await conn.execute_query(sql)
@@ -798,6 +818,9 @@ async def init_roles():
         "用户": "用户角色",
         "技术": "技术角色",
         "客服": "客服角色",
+        "产品": "产品角色",
+        "研发": "研发角色",
+        "测试": "测试角色",
     }
 
     role_names = list(role_desc_map.keys())
@@ -823,13 +846,14 @@ async def init_roles():
                 await admin_role.apis.add(*await Api.filter(path__in=_terminal_api_paths()))
                 await admin_role.apis.add(
                     *await Api.filter(
-                        path__in=[
+                path__in=[
                             "/api/v1/settings/time-sync/status",
                             "/api/v1/settings/time-sync/sync",
                             "/api/v1/settings/database-backup/status",
                             "/api/v1/settings/database-backup/test",
                             "/api/v1/settings/database-backup/run",
                             *_webdav_password_api_paths(),
+                            *_rd_task_api_paths(),
                         ]
                     )
                 )
@@ -838,8 +862,15 @@ async def init_roles():
                 await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
             await _backfill_existing_role_permissions(
                 role_name="技术",
-                api_paths=_ticket_redmine_api_paths(),
+                api_paths=[*_ticket_redmine_api_paths(), *_rd_task_api_paths()],
+                component_paths=["/ticket/rd-task"],
             )
+            for role_name in ["产品", "研发", "测试", "客服"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_rd_task_api_paths(),
+                    component_paths=["/ticket/rd-task"],
+                )
             for role_name in ["用户", "渠道商"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
@@ -888,6 +919,7 @@ async def init_roles():
             "/api/v1/settings/database-backup/status",
             "/api/v1/settings/database-backup/test",
             "/api/v1/settings/database-backup/run",
+            *_rd_task_api_paths(),
         ]
     )
     webdav_apis = await Api.filter(
@@ -928,6 +960,7 @@ async def init_roles():
 
     submit_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/submit") | Q(component="/ticket/my"))
     tech_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/tech") | Q(component="/ticket/my"))
+    rd_task_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/rd-task"))
     review_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/review"))
     partner_review_menus = await Menu.filter(Q(path="/partner") | Q(component="/partner/review"))
     settings_menus = await Menu.filter(Q(component="/system/settings"))
@@ -954,7 +987,9 @@ async def init_roles():
 
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)
+    await role_map["技术"].apis.add(*await Api.filter(path__in=_rd_task_api_paths()))
     await role_map["技术"].menus.add(*tech_menus)
+    await role_map["技术"].menus.add(*rd_task_menus)
 
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
@@ -963,6 +998,14 @@ async def init_roles():
     )
     await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)
+    await role_map["客服"].apis.add(*await Api.filter(path__in=["/api/v1/rd-task/list", "/api/v1/rd-task/get"]))
+    await role_map["客服"].menus.add(*rd_task_menus)
+
+    for role_name in ["产品", "研发", "测试"]:
+        await role_map[role_name].apis.add(*basic_apis)
+        await role_map[role_name].apis.add(*notice_user_apis)
+        await role_map[role_name].apis.add(*await Api.filter(path__in=_rd_task_api_paths()))
+        await role_map[role_name].menus.add(*rd_task_menus)
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)
@@ -970,12 +1013,14 @@ async def init_roles():
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*webdav_password_apis)
     await role_map["管理员"].apis.add(*notice_apis)
+    await role_map["管理员"].apis.add(*await Api.filter(path__in=_rd_task_api_paths()))
     await role_map["管理员"].menus.add(*settings_menus)
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
     await role_map["管理员"].menus.add(*webdav_password_menus)
+    await role_map["管理员"].menus.add(*rd_task_menus)
 
 
 async def init_skill_know_config_defaults():

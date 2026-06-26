@@ -9,6 +9,8 @@ from .enums import (
     RegisterType,
     SkillKnowDocumentStatus,
     SkillKnowMessageRole,
+    RdTaskStatus,
+    RdTaskType,
     TicketActionType,
     TicketStatus,
 )
@@ -157,6 +159,53 @@ class TicketActionLog(BaseModel, TimestampMixin):
 
     class Meta:
         table = "ticket_action_log"
+
+
+class RdTask(BaseModel, TimestampMixin):
+    task_no = fields.CharField(max_length=40, unique=True, description="产研任务编号", index=True)
+    title = fields.CharField(max_length=200, description="任务标题", index=True)
+    task_type = fields.CharEnumField(RdTaskType, max_length=32, description="任务类型", index=True)
+    status = fields.CharEnumField(
+        RdTaskStatus,
+        max_length=32,
+        default=RdTaskStatus.PENDING_DEV,
+        description="任务状态",
+        index=True,
+    )
+    priority = fields.CharField(max_length=20, default="normal", description="优先级", index=True)
+    product_owner_id = fields.BigIntField(null=True, description="产品负责人ID", index=True)
+    dev_owner_id = fields.BigIntField(null=True, description="研发负责人ID", index=True)
+    test_owner_id = fields.BigIntField(null=True, description="测试负责人ID", index=True)
+    planned_version = fields.CharField(max_length=80, null=True, description="计划版本", index=True)
+    description = fields.TextField(null=True, description="任务描述")
+    result_note = fields.TextField(null=True, description="处理结论")
+    created_by = fields.BigIntField(description="创建人ID", index=True)
+    finished_at = fields.DatetimeField(null=True, description="完成时间", index=True)
+
+    class Meta:
+        table = "rd_task"
+
+
+class RdTaskTicket(BaseModel, TimestampMixin):
+    rd_task_id = fields.BigIntField(description="产研任务ID", index=True)
+    ticket_id = fields.BigIntField(description="工单ID", index=True)
+    created_by = fields.BigIntField(description="关联人ID", index=True)
+
+    class Meta:
+        table = "rd_task_ticket"
+        unique_together = ("rd_task_id", "ticket_id")
+
+
+class RdTaskLog(BaseModel, TimestampMixin):
+    rd_task_id = fields.BigIntField(description="产研任务ID", index=True)
+    action = fields.CharField(max_length=40, description="动作类型", index=True)
+    from_status = fields.CharEnumField(RdTaskStatus, null=True, max_length=32, description="变更前状态", index=True)
+    to_status = fields.CharEnumField(RdTaskStatus, max_length=32, description="变更后状态", index=True)
+    operator_id = fields.BigIntField(description="操作人ID", index=True)
+    comment = fields.TextField(null=True, description="备注")
+
+    class Meta:
+        table = "rd_task_log"
 
 
 class PartnerRegistration(BaseModel, TimestampMixin):

@@ -13,6 +13,9 @@ Skill-Know-main
 .uploads/
 logs/
 tests/
+!tests/
+tests/*
+!tests/test_rd_task_workflow.py
 
 db.sqlite3
 db.sqlite3-journal

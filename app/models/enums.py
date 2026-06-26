@@ -44,6 +44,24 @@ class TicketActionType(StrEnum):
     CLOSE = "close"
 
 
+class RdTaskType(StrEnum):
+    BUG = "bug"
+    REQUIREMENT = "requirement"
+    TECH_TASK = "tech_task"
+
+
+class RdTaskStatus(StrEnum):
+    PENDING_PRODUCT_REVIEW = "pending_product_review"
+    PENDING_DEV = "pending_dev"
+    DEV_PROCESSING = "dev_processing"
+    PENDING_TEST = "pending_test"
+    TEST_REJECTED = "test_rejected"
+    TEST_PASSED = "test_passed"
+    PENDING_RELEASE = "pending_release"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+
+
 class PartnerRegisterStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"

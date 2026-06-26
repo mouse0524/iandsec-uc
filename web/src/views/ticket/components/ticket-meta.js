@@ -23,6 +23,39 @@ export const ticketStatusOptions = Object.entries(ticketStatusTextMap).map(([val
   label,
 }))
 
+export const rdTaskTypeTextMap = {
+  bug: '缺陷',
+  requirement: '需求',
+  tech_task: '技术任务',
+}
+
+export const rdTaskStatusTextMap = {
+  pending_product_review: '待产品确认',
+  pending_dev: '待研发处理',
+  dev_processing: '研发处理中',
+  pending_test: '待测试验证',
+  test_rejected: '测试不通过',
+  test_passed: '测试通过',
+  pending_release: '待发布',
+  completed: '已完成',
+  rejected: '已驳回',
+}
+
+export const rdTaskStatusTypeMap = {
+  pending_product_review: 'warning',
+  pending_dev: 'info',
+  dev_processing: 'info',
+  pending_test: 'warning',
+  test_rejected: 'error',
+  test_passed: 'success',
+  pending_release: 'warning',
+  completed: 'success',
+  rejected: 'error',
+}
+
+export const rdTaskTypeOptions = Object.entries(rdTaskTypeTextMap).map(([value, label]) => ({ value, label }))
+export const rdTaskStatusOptions = Object.entries(rdTaskStatusTextMap).map(([value, label]) => ({ value, label }))
+
 export function mapTicketActionText(action) {
   const actionMap = {
     submit: '提交工单',
