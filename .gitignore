@@ -17,6 +17,7 @@ tests/
 tests/*
 !tests/test_rd_task_workflow.py
 !tests/test_webdav_public_download.py
+!tests/test_project_management.py
 
 db.sqlite3
 db.sqlite3-journal

@@ -16,6 +16,7 @@ const $table = ref(null)
 const route = useRoute()
 const queryItems = ref({
   company_name: route.query.company_name || undefined,
+  issue_type: route.query.issue_type || undefined,
   status: route.query.status || undefined,
   created_start: route.query.created_start || undefined,
   created_end: route.query.created_end || undefined,
@@ -29,6 +30,7 @@ watch(
     queryItems.value = {
       ...queryItems.value,
       company_name: query.company_name || undefined,
+      issue_type: query.issue_type || undefined,
       status: query.status || undefined,
       created_start: query.created_start || undefined,
       created_end: query.created_end || undefined,

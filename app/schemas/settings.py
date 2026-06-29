@@ -19,6 +19,10 @@ class SystemSettingUpdateIn(BaseModel):
     customer_service_auto_approve_ticket: bool = Field(default=False, description="客服是否自动审批工单")
     ticket_root_causes: list[str] = Field(default_factory=list, description="工单问题根因")
     ticket_description_templates: list[str] = Field(default_factory=list, description="工单问题描述模板")
+    project_products: list[str] = Field(default_factory=list, description="项目产品")
+    project_statuses: list[str] = Field(default_factory=list, description="项目状态")
+    project_regions: list[str] = Field(default_factory=list, description="项目区域")
+    project_activity_types: list[str] = Field(default_factory=list, description="项目运维类型")
     login_security_enabled: bool = Field(default=True, description="是否启用登录安全策略")
     login_challenge_enabled: bool = Field(default=True, description="是否启用人机校验")
     login_challenge_type: str = Field(default="captcha", description="人机校验方式")
@@ -126,10 +130,18 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("允许上传类型至少保留一项")
         return items
 
-    @field_validator("ticket_root_causes", "ticket_description_templates")
+    @field_validator("ticket_root_causes", "ticket_description_templates", "project_products", "project_statuses", "project_regions", "project_activity_types")
     @classmethod
     def validate_required_ticket_items(cls, value: list[str], info):
-        field_name = "问题根因" if info.field_name == "ticket_root_causes" else "问题描述模板"
+        field_names = {
+            "ticket_root_causes": "问题根因",
+            "ticket_description_templates": "问题描述模板",
+            "project_products": "项目产品",
+            "project_statuses": "项目状态",
+            "project_regions": "项目区域",
+            "project_activity_types": "项目运维类型",
+        }
+        field_name = field_names.get(info.field_name, info.field_name)
         items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
         if not items:
             raise ValueError(f"{field_name}至少保留一项")
@@ -417,6 +429,10 @@ class PublicSiteConfigOut(BaseModel):
     ticket_categories: list[str]
     customer_service_auto_approve_ticket: bool
     ticket_description_templates: list[str]
+    project_products: list[str]
+    project_statuses: list[str]
+    project_regions: list[str]
+    project_activity_types: list[str]
     login_security_enabled: bool
     login_challenge_enabled: bool
     login_challenge_type: str

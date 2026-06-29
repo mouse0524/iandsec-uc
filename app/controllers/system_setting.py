@@ -75,6 +75,10 @@ class SystemSettingController:
                 "问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：",
                 "发生时间：\n操作账号：\n所属模块：\n错误提示：\n已尝试方案：",
             ],
+            "project_products": ["安得卫士"],
+            "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"],
+            "project_regions": ["华东", "华南", "华北", "华中", "西南", "西北"],
+            "project_activity_types": ["迁移库", "重做系统", "运维", "其他"],
         },
         "login_security": {
             "login_security_enabled": True,
@@ -264,6 +268,10 @@ class SystemSettingController:
             "customer_service_auto_approve_ticket": ticket.get("customer_service_auto_approve_ticket", False),
             "ticket_root_causes": ticket.get("ticket_root_causes") or [],
             "ticket_description_templates": ticket.get("ticket_description_templates") or [],
+            "project_products": ticket.get("project_products") or [],
+            "project_statuses": ticket.get("project_statuses") or [],
+            "project_regions": ticket.get("project_regions") or [],
+            "project_activity_types": ticket.get("project_activity_types") or [],
             "login_security_enabled": login_security.get("login_security_enabled", True),
             "login_challenge_enabled": login_security.get("login_challenge_enabled", True),
             "login_challenge_type": login_security.get("login_challenge_type") or "captcha",
@@ -409,6 +417,10 @@ class SystemSettingController:
             "customer_service_auto_approve_ticket",
             "ticket_root_causes",
             "ticket_description_templates",
+            "project_products",
+            "project_statuses",
+            "project_regions",
+            "project_activity_types",
         }
         login_keys = {
             "login_security_enabled",

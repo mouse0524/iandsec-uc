@@ -26,6 +26,7 @@
 <script setup>
 import ContextMenu from './ContextMenu.vue'
 import { useTagsStore, usePermissionStore } from '@/store'
+import { WITHOUT_TAG_PATHS } from '@/store/modules/tags/helpers'
 import ScrollX from '@/components/common/ScrollX.vue'
 
 const route = useRoute()
@@ -42,6 +43,13 @@ const contextMenuOption = reactive({
   currentPath: '',
 })
 
+const cleanTags = () => {
+  const filtered = tagsStore.tags.filter((tag) => !WITHOUT_TAG_PATHS.includes(tag.path))
+  if (filtered.length !== tagsStore.tags.length) tagsStore.setTags(filtered)
+}
+
+cleanTags()
+
 watch(
   () => route.path,
   () => {
@@ -54,9 +62,8 @@ watch(
       })
       return bucket
     }
-    const menuPaths = new Set(collectPaths(permissionStore.menus || []))
-    const allowExtra = new Set(['/ticket/my', '/ticket/review', '/ticket/tech'])
-    if (!menuPaths.has(path) && !allowExtra.has(path)) {
+    const menuPaths = new Set(collectPaths(permissionStore.menus || []).filter((item) => !WITHOUT_TAG_PATHS.includes(item)))
+    if (!menuPaths.has(path)) {
       return
     }
     tagsStore.addTag({ name, path, title })
@@ -87,7 +94,7 @@ const handleTagClick = (path) => {
   const menuPaths = [...new Set(collectPaths(permissionStore.menus || []))]
   const hasPermissionPath = menuPaths.includes(path)
 
-  if (!hasPermissionPath && path !== '/ticket/my' && path !== '/ticket/review' && path !== '/ticket/tech') {
+  if (!hasPermissionPath) {
     $message.warning('当前账号无该页面权限，无法打开')
     return
   }

@@ -84,6 +84,16 @@ export default {
     }),
   resubmitTicket: (data = {}) => request.post('/ticket/resubmit', data),
   getTicketActions: (params = {}) => request.get('/ticket/actions', { params }),
+  // project
+  projectList: (params = {}) => request.get('/project/list', { params }),
+  projectGet: (params = {}) => request.get('/project/get', { params }),
+  projectCreate: (data = {}) => request.post('/project/create', data),
+  projectUpdate: (data = {}) => request.post('/project/update', data),
+  projectSetStatus: (data = {}) => request.post('/project/status', data),
+  projectAssign: (data = {}) => request.post('/project/assign', data),
+  projectActivityList: (params = {}) => request.get('/project/activity/list', { params }),
+  projectActivityCreate: (data = {}) => request.post('/project/activity/create', data),
+  projectActivityUpdate: (data = {}) => request.post('/project/activity/update', data),
   // partner
   channelRegister: (data = {}) =>
     request.post('/partner/register', { ...data, register_type: 'channel' }, { noNeedToken: true }),

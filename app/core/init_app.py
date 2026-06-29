@@ -91,6 +91,20 @@ def _ticket_field_verification_api_paths() -> list[str]:
     ]
 
 
+def _project_api_paths() -> list[str]:
+    return [
+        "/api/v1/project/list",
+        "/api/v1/project/get",
+        "/api/v1/project/create",
+        "/api/v1/project/update",
+        "/api/v1/project/status",
+        "/api/v1/project/assign",
+        "/api/v1/project/activity/list",
+        "/api/v1/project/activity/create",
+        "/api/v1/project/activity/update",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -329,13 +343,81 @@ async def init_menus():
                 **child,
             )
 
+    project_parent = await Menu.filter(path="/project").first()
+    if not project_parent:
+        project_parent = await Menu.create(
+            menu_type=MenuType.CATALOG,
+            name="项目管理",
+            path="/project",
+            order=4,
+            parent_id=0,
+            icon="material-symbols:folder-managed-outline",
+            is_hidden=False,
+            component="Layout",
+            keepalive=False,
+            redirect="/project/list",
+        )
+    else:
+        project_parent.menu_type = MenuType.CATALOG
+        project_parent.name = "项目管理"
+        project_parent.order = 4
+        project_parent.parent_id = 0
+        project_parent.icon = "material-symbols:folder-managed-outline"
+        project_parent.is_hidden = False
+        project_parent.component = "Layout"
+        project_parent.keepalive = False
+        project_parent.redirect = "/project/list"
+        await project_parent.save()
+
+    project_children = [
+        {
+            "name": "项目列表",
+            "path": "list",
+            "order": 1,
+            "icon": "material-symbols:format-list-bulleted-rounded",
+            "component": "/project/list",
+        },
+        {
+            "name": "运维记录",
+            "path": "activity",
+            "order": 2,
+            "icon": "material-symbols:fact-check-outline-rounded",
+            "component": "/project/activity",
+        },
+    ]
+    for child in project_children:
+        project_menu = await Menu.filter(
+            Q(component=child["component"]) | Q(path=child["path"], parent_id=project_parent.id)
+        ).first()
+        if project_menu:
+            project_menu.menu_type = MenuType.MENU
+            project_menu.name = child["name"]
+            project_menu.path = child["path"]
+            project_menu.order = child["order"]
+            project_menu.parent_id = project_parent.id
+            project_menu.icon = child["icon"]
+            project_menu.is_hidden = False
+            project_menu.component = child["component"]
+            project_menu.keepalive = False
+            project_menu.redirect = ""
+            await project_menu.save()
+        else:
+            await Menu.create(
+                menu_type=MenuType.MENU,
+                parent_id=project_parent.id,
+                is_hidden=False,
+                keepalive=False,
+                redirect="",
+                **child,
+            )
+
     partner_parent = await Menu.filter(path="/partner").first()
     if not partner_parent:
         partner_parent = await Menu.create(
             menu_type=MenuType.CATALOG,
             name="代理商中心",
             path="/partner",
-            order=4,
+            order=5,
             parent_id=0,
             icon="mdi:account-group-outline",
             is_hidden=False,
@@ -425,7 +507,7 @@ async def init_menus():
             menu_type=MenuType.CATALOG,
             name="外发管理",
             path="/outbound",
-            order=5,
+            order=6,
             parent_id=0,
             icon="material-symbols:outbox-outline",
             is_hidden=False,
@@ -436,7 +518,7 @@ async def init_menus():
     else:
         outbound_parent.menu_type = MenuType.CATALOG
         outbound_parent.name = "外发管理"
-        outbound_parent.order = 5
+        outbound_parent.order = 6
         outbound_parent.parent_id = 0
         outbound_parent.icon = "material-symbols:outbox-outline"
         outbound_parent.is_hidden = False
@@ -532,7 +614,7 @@ async def init_menus():
             menu_type=MenuType.CATALOG,
             name="AI知识库",
             path="/skill-know",
-            order=6,
+            order=7,
             parent_id=0,
             icon="carbon:machine-learning-model",
             is_hidden=False,
@@ -543,7 +625,7 @@ async def init_menus():
     else:
         skill_know_parent.menu_type = MenuType.CATALOG
         skill_know_parent.name = "AI知识库"
-        skill_know_parent.order = 6
+        skill_know_parent.order = 7
         skill_know_parent.parent_id = 0
         skill_know_parent.icon = "carbon:machine-learning-model"
         skill_know_parent.is_hidden = False
@@ -631,7 +713,7 @@ async def init_menus():
             menu_type=MenuType.CATALOG,
             name="终端管理",
             path="/terminal",
-            order=7,
+            order=8,
             parent_id=0,
             icon="material-symbols:devices-outline",
             is_hidden=False,
@@ -642,7 +724,7 @@ async def init_menus():
     else:
         terminal_parent.menu_type = MenuType.CATALOG
         terminal_parent.name = "终端管理"
-        terminal_parent.order = 7
+        terminal_parent.order = 8
         terminal_parent.parent_id = 0
         terminal_parent.icon = "material-symbols:devices-outline"
         terminal_parent.is_hidden = False
@@ -774,13 +856,23 @@ async def ensure_security_columns():
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `action` VARCHAR(32) NOT NULL", "ticket_action_log.action.width"),
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `from_status` VARCHAR(32) NULL", "ticket_action_log.from_status.width"),
             ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `to_status` VARCHAR(32) NOT NULL", "ticket_action_log.to_status.width"),
+            ("ALTER TABLE `project` MODIFY COLUMN `company_name` VARCHAR(120) NULL", "project.company_name.nullable"),
+            ("ALTER TABLE `project` MODIFY COLUMN `product_name` VARCHAR(120) NULL", "project.product_name.nullable"),
+            ("ALTER TABLE `project` MODIFY COLUMN `version` VARCHAR(80) NULL", "project.version.nullable"),
+            ("ALTER TABLE `project` MODIFY COLUMN `points` INT NULL", "project.points.nullable"),
+            ("ALTER TABLE `project` ADD COLUMN `product_points` JSON NULL", "project.product_points"),
+            ("ALTER TABLE `project` ADD COLUMN `region` VARCHAR(30) NULL", "project.region"),
+            ("ALTER TABLE `project` ADD COLUMN `server_version` VARCHAR(80) NULL", "project.server_version"),
+            ("ALTER TABLE `project` ADD COLUMN `client_version` VARCHAR(80) NULL", "project.client_version"),
+            ("ALTER TABLE `project` ADD COLUMN `start_time` DATETIME NULL", "project.start_time"),
+            ("ALTER TABLE `project` ADD COLUMN `end_time` DATETIME NULL", "project.end_time"),
         ]:
             try:
                 await conn.execute_query(sql)
                 logger.info("[init_db] added missing column {}", label)
             except Exception as exc:
                 message = str(exc).lower()
-                if "duplicate" in message or "exists" in message:
+                if "duplicate" in message or "exists" in message or "unknown column" in message:
                     continue
                 logger.warning("[init_db] ensure column {} skipped error={}", label, exc)
 
@@ -849,6 +941,12 @@ async def init_roles():
                 role_name="技术",
                 api_paths=_ticket_field_verification_api_paths(),
             )
+            for role_name in ["客服", "技术"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_project_api_paths(),
+                    component_paths=["/project/list", "/project/activity"],
+                )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -916,6 +1014,7 @@ async def init_roles():
     )
     monitor_apis = await Api.filter(path__in=_monitor_api_paths())
     terminal_apis = await Api.filter(path__in=_terminal_api_paths())
+    project_apis = await Api.filter(path__in=_project_api_paths())
     notice_user_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/inbox",
@@ -934,6 +1033,7 @@ async def init_roles():
     notice_menus = await Menu.filter(Q(component="/system/notice"))
     monitor_menus = await Menu.filter(Q(component="/system/monitor"))
     terminal_menus = await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
+    project_menus = await Menu.filter(Q(path="/project") | Q(component__in=["/project/list", "/project/activity"]))
     webdav_menus = await Menu.filter(
         Q(path="/outbound")
         | Q(component="/system/webdav")
@@ -954,25 +1054,31 @@ async def init_roles():
 
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)
+    await role_map["技术"].apis.add(*project_apis)
     await role_map["技术"].menus.add(*tech_menus)
+    await role_map["技术"].menus.add(*project_menus)
 
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
     await role_map["客服"].apis.add(
         *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/export", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
     )
+    await role_map["客服"].apis.add(*project_apis)
     await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)
+    await role_map["客服"].menus.add(*project_menus)
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)
     await role_map["管理员"].apis.add(*terminal_apis)
+    await role_map["管理员"].apis.add(*project_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*webdav_password_apis)
     await role_map["管理员"].apis.add(*notice_apis)
     await role_map["管理员"].menus.add(*settings_menus)
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
+    await role_map["管理员"].menus.add(*project_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
     await role_map["管理员"].menus.add(*webdav_password_menus)

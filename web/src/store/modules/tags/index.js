@@ -61,7 +61,7 @@ export const useTagsStore = defineStore('tag', {
       this.setTags(this.tags.filter((tag) => tag.path !== path))
     },
     sanitizeByMenus(menus = []) {
-      const allow = new Set([...collectPaths(menus || []), '/ticket/my', '/ticket/review', '/ticket/tech'])
+      const allow = new Set(collectPaths(menus || []).filter((path) => !WITHOUT_TAG_PATHS.includes(path)))
       const filtered = (this.tags || []).filter((tag) => allow.has(tag.path))
       this.setTags(filtered)
       if (!filtered.find((item) => item.path === this.activeTag)) {

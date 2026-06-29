@@ -159,6 +159,43 @@ class TicketActionLog(BaseModel, TimestampMixin):
         table = "ticket_action_log"
 
 
+class Project(BaseModel, TimestampMixin):
+    project_name = fields.CharField(max_length=120, description="项目名称", index=True)
+    product_points = fields.JSONField(default=list, description="产品点数")
+    region = fields.CharField(max_length=30, null=True, description="区域", index=True)
+    server_version = fields.CharField(max_length=80, null=True, description="服务器版本")
+    client_version = fields.CharField(max_length=80, null=True, description="客户端版本")
+    start_time = fields.DatetimeField(null=True, description="开始时间")
+    end_time = fields.DatetimeField(null=True, description="结束时间")
+    customer_contact = fields.CharField(max_length=60, null=True, description="客户侧对接人")
+    customer_phone = fields.CharField(max_length=20, null=True, description="客户联系电话")
+    customer_email = fields.CharField(max_length=255, null=True, description="客户联系邮箱")
+    status = fields.CharField(max_length=30, description="项目状态", index=True)
+    assignee_id = fields.BigIntField(null=True, description="负责人ID", index=True)
+    assigned_by = fields.BigIntField(null=True, description="指派人ID", index=True)
+    assigned_at = fields.DatetimeField(null=True, description="指派时间")
+    created_by = fields.BigIntField(description="创建人ID", index=True)
+    remark = fields.TextField(null=True, description="备注")
+
+    class Meta:
+        table = "project"
+
+
+class ProjectActivity(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(description="项目ID", index=True)
+    activity_type = fields.CharField(max_length=50, description="活动类型", index=True)
+    title = fields.CharField(max_length=200, description="活动标题", index=True)
+    content = fields.TextField(null=True, description="活动内容")
+    status = fields.CharField(max_length=30, default="待处理", description="活动状态", index=True)
+    operator_id = fields.BigIntField(null=True, description="处理人ID", index=True)
+    started_at = fields.DatetimeField(null=True, description="开始时间")
+    finished_at = fields.DatetimeField(null=True, description="完成时间")
+    created_by = fields.BigIntField(description="创建人ID", index=True)
+
+    class Meta:
+        table = "project_activity"
+
+
 class PartnerRegistration(BaseModel, TimestampMixin):
     register_type = fields.CharEnumField(RegisterType, default=RegisterType.CHANNEL, description="注册类型", index=True)
     company_name = fields.CharField(max_length=120, description="公司名称")

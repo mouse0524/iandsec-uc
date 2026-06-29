@@ -65,6 +65,10 @@ const form = ref({
   customer_service_auto_approve_ticket: false,
   ticket_root_causes: ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖'],
   ticket_description_templates: ['问题现象：\n复现步骤：\n期望结果：\n实际结果：\n影响范围：'],
+  project_products: ['安得卫士'],
+  project_statuses: ['售前', '待实施', '实施中', '待验收', '已验收', '丢单'],
+  project_regions: ['华东', '华南', '华北', '华中', '西南', '西北'],
+  project_activity_types: ['迁移库', '重做系统', '运维', '其他'],
   login_security_enabled: true,
   login_challenge_enabled: true,
   login_challenge_type: 'captcha',
@@ -570,6 +574,12 @@ async function loadData() {
       ticket_description_templates: Array.isArray(res.data?.ticket_description_templates)
         ? res.data.ticket_description_templates
         : form.value.ticket_description_templates,
+      project_products: res.data?.project_products?.length ? res.data.project_products : form.value.project_products,
+      project_statuses: res.data?.project_statuses?.length ? res.data.project_statuses : form.value.project_statuses,
+      project_regions: res.data?.project_regions?.length ? res.data.project_regions : form.value.project_regions,
+      project_activity_types: res.data?.project_activity_types?.length
+        ? res.data.project_activity_types
+        : form.value.project_activity_types,
       ticket_notify_by_role: normalizeTicketNotifyByRole(
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
@@ -1063,6 +1073,19 @@ function applyPresetHtmlTemplates() {
                   </div>
                   <NButton dashed @click="addDescriptionTemplate">新增模板</NButton>
                 </div>
+              </NFormItem>
+              <NDivider title-placement="left">项目管理</NDivider>
+              <NFormItem label="项目产品" path="project_products">
+                <NDynamicTags v-model:value="form.project_products" />
+              </NFormItem>
+              <NFormItem label="项目状态" path="project_statuses">
+                <NDynamicTags v-model:value="form.project_statuses" />
+              </NFormItem>
+              <NFormItem label="项目区域" path="project_regions">
+                <NDynamicTags v-model:value="form.project_regions" />
+              </NFormItem>
+              <NFormItem label="运维类型" path="project_activity_types">
+                <NDynamicTags v-model:value="form.project_activity_types" />
               </NFormItem>
               <NDivider title-placement="left">工单提醒</NDivider>
               <NAlert type="info" class="mb-12">

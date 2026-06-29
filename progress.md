@@ -42,3 +42,37 @@
 - `tests/test_webdav_public_download.py`: added a regression case for non-Latin upstream download filenames.
 - `progress.md`: appended this production-error fix record.
 - Rollback: restore upstream `Content-Disposition` passthrough in `_download_headers`, remove the new non-Latin filename test, and remove this `progress.md` entry.
+
+## 2026-06-29 - Task: Add project management module
+### What was done
+- Added project and project activity backend models, controller validation, authenticated APIs, dynamic menu initialization, and role permission backfill for 管理员/客服/技术.
+- Added configurable project products, project statuses, and project activity types under system settings/public config.
+- Added frontend project list and activity record pages, including create/edit, status flow, assignment, and count links to ticket/activity details.
+- Linked project issue/requirement counts to existing tickets by customer company and issue type instead of adding duplicate issue/requirement tables.
+
+### Testing
+- `python -m compileall app` passed.
+- `python -m pytest tests\test_project_management.py` passed: 2 tests passed.
+- `cd web && pnpm.cmd run build` passed with existing Vite chunk-size/UnoCSS deprecation warnings.
+- `git diff --check` reported only Windows LF-to-CRLF working-copy warnings.
+
+### Notes
+- `docs/project-management.md`: documents permissions, configurable values, and ticket linkage rules.
+- `.gitignore`: allowlisted `tests/test_project_management.py` so the focused regression test can be tracked.
+- Rollback: remove the `project` API/router/pages/tests/docs, remove the project menu/API permission additions, and remove project-related settings/model fields.
+
+## 2026-06-29 - Task: Adjust project fields
+### What was done
+- Removed the project-level customer company field from the project management flow.
+- Split project version into server version and client version.
+- Changed project products to a multi-select product-points list so each selected product has its own point count.
+- Kept ticket linkage by matching existing ticket `company_name` against the project name.
+
+### Testing
+- `python -m py_compile app\models\admin.py app\schemas\projects.py app\controllers\project.py app\api\v1\projects\projects.py app\core\init_app.py` passed.
+- `python -m pytest tests\test_project_management.py` passed: 2 tests passed.
+- `cd web && pnpm.cmd run build` passed with existing Vite chunk-size/UnoCSS deprecation warnings.
+
+### Notes
+- Existing project table compatibility is handled by adding nullable `product_points`, `server_version`, and `client_version` columns if the earlier table already exists.
+- Old project columns are intentionally not dropped during startup.
