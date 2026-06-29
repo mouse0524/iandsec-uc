@@ -1,4 +1,5 @@
-from urllib.parse import urlencode
+from pathlib import PurePosixPath
+from urllib.parse import quote, urlencode
 from typing import Optional
 import os
 
@@ -19,6 +20,19 @@ from app.utils.request import get_client_ip
 router = APIRouter(dependencies=[DependAuth])
 public_router = APIRouter()
 PUBLIC_SHARE_DOWNLOAD_PATH = "/public/webdav/share/download"
+
+
+def _is_apple_device(request: Request) -> bool:
+    user_agent = request.headers.get("user-agent", "")
+    return any(token in user_agent for token in ("iPhone", "iPad", "iPod", "Macintosh"))
+
+
+def _download_headers(file_path: str, upstream_headers: dict) -> dict[str, str]:
+    content_disposition = upstream_headers.get("content-disposition") or upstream_headers.get("Content-Disposition")
+    if content_disposition:
+        return {"Content-Disposition": content_disposition}
+    filename = PurePosixPath(file_path).name or "download"
+    return {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
 
 
 def _build_public_share_download_url(code: str, sign_data: dict) -> str:
@@ -234,6 +248,16 @@ async def webdav_share_download(
         raise
 
     share = await webdav_controller.get_share(code)
+    if _is_apple_device(request):
+        iterator, headers = await webdav_controller.download_stream(share.file_path)
+        content_type = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"
+        logger.info("[webdav.share.download] stream ip={} code={} file_path={}", client_ip, code, share.file_path)
+        return StreamingResponse(
+            iterator(),
+            media_type=content_type,
+            headers=_download_headers(share.file_path, headers),
+        )
+
     download_url = await webdav_controller.get_direct_download_url(share.file_path)
     logger.info("[webdav.share.download] redirect ip={} code={} file_path={}", client_ip, code, share.file_path)
     return RedirectResponse(download_url, status_code=307)
