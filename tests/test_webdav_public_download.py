@@ -85,3 +85,42 @@ async def test_share_download_streams_for_apple_devices(monkeypatch):
     assert response.media_type == "application/zip"
     assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''demo.zip"
     assert "location" not in response.headers
+
+
+@pytest.mark.anyio
+async def test_share_download_replaces_non_latin_upstream_download_filename(monkeypatch):
+    async def fake_execute_redis(*args, **kwargs):
+        if args and args[0] == "get":
+            return None
+        return 1
+
+    async def fake_verify_share_signature(*, code, ts, sig):
+        return None
+
+    async def fake_get_share(code):
+        return SimpleNamespace(file_path="/files/Windows安装包必须认证通过.rtf")
+
+    async def fake_download_stream(file_path):
+        async def iterator():
+            yield b"demo"
+
+        return iterator, {
+            "content-type": "application/rtf",
+            "content-disposition": 'attachment; filename="Windows安装包必须认证通过.rtf"',
+        }
+
+    monkeypatch.setattr(webdav_api, "execute_redis", fake_execute_redis)
+    monkeypatch.setattr(webdav_api.webdav_controller, "verify_share_signature", fake_verify_share_signature)
+    monkeypatch.setattr(webdav_api.webdav_controller, "get_share", fake_get_share)
+    monkeypatch.setattr(webdav_api.webdav_controller, "download_stream", fake_download_stream)
+
+    response = await webdav_api.webdav_share_download(
+        FakeRequest("Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15"),
+        code="abc123",
+        ts=1782702696,
+        sig="sig",
+    )
+
+    assert isinstance(response, StreamingResponse)
+    assert response.headers["content-disposition"].startswith("attachment; filename*=UTF-8''Windows")
+    response.headers["content-disposition"].encode("latin-1")

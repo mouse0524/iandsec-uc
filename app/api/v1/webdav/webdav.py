@@ -28,9 +28,6 @@ def _is_apple_device(request: Request) -> bool:
 
 
 def _download_headers(file_path: str, upstream_headers: dict) -> dict[str, str]:
-    content_disposition = upstream_headers.get("content-disposition") or upstream_headers.get("Content-Disposition")
-    if content_disposition:
-        return {"Content-Disposition": content_disposition}
     filename = PurePosixPath(file_path).name or "download"
     return {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
 

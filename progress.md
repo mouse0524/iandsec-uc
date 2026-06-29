@@ -26,3 +26,19 @@
 - `.gitignore`: added `tests/test_webdav_public_download.py` to the explicit allowlist under the ignored `tests/*` rule.
 - `progress.md`: appended this review-fix record.
 - Rollback: remove the `.gitignore` allowlist entry and this `progress.md` entry.
+
+## 2026-06-29 - Task: Fix Apple WebDAV stream filename header
+### What was done
+- Fixed Apple-device WebDAV share streaming when the upstream WebDAV response provides a non-Latin `Content-Disposition` filename.
+- The streamed download now always generates a safe RFC 5987 `filename*` header from the share file path instead of forwarding an upstream header that Starlette cannot encode.
+- Added a regression test for Chinese filenames in Apple-device streaming downloads.
+
+### Testing
+- `python -m pytest tests\test_webdav_public_download.py` passed: 3 tests passed.
+- `python -m compileall app` passed.
+
+### Notes
+- `app/api/v1/webdav/webdav.py`: stopped forwarding upstream `Content-Disposition` in the Apple streaming response and always emits an encoded download filename.
+- `tests/test_webdav_public_download.py`: added a regression case for non-Latin upstream download filenames.
+- `progress.md`: appended this production-error fix record.
+- Rollback: restore upstream `Content-Disposition` passthrough in `_download_headers`, remove the new non-Latin filename test, and remove this `progress.md` entry.
