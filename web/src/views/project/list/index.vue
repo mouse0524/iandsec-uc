@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NSelect } from 'naive-ui'
+import { NButton, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NSelect, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
@@ -209,12 +209,12 @@ const columns = [
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 150,
+    width: 140,
     render(row) {
-      return h('div', { class: 'actions' }, [
-        h(NButton, { size: 'small', type: 'info', ghost: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
-        h(NButton, { size: 'small', type: 'primary', ghost: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-      ])
+      return [
+        h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
+        h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+      ]
     },
   },
 ]
@@ -282,9 +282,19 @@ const columns = [
       :show-footer="!readonly"
       @save="submitProject"
     >
+      <div class="project-modal-head">
+        <div>
+          <div class="modal-eyebrow">{{ readonly ? 'PROJECT DETAIL' : editingId ? 'PROJECT EDIT' : 'PROJECT CREATE' }}</div>
+          <div class="modal-project-name">{{ form.project_name || '未命名项目' }}</div>
+        </div>
+        <div class="modal-tags">
+          <NTag v-if="form.region" size="small" round>{{ form.region }}</NTag>
+          <NTag v-if="form.status" size="small" round type="info">{{ form.status }}</NTag>
+        </div>
+      </div>
       <NForm class="project-form" label-placement="top">
         <div class="form-section">
-          <div class="section-title">基础信息</div>
+          <div class="section-title"><span>基础信息</span></div>
           <div class="form-grid">
             <NFormItem label="项目名称" class="span-2"><NInput v-model:value="form.project_name" :disabled="readonly" /></NFormItem>
             <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
@@ -297,7 +307,7 @@ const columns = [
         </div>
 
         <div class="form-section">
-          <div class="section-title">产品点数</div>
+          <div class="section-title"><span>产品点数</span></div>
           <NFormItem label="使用产品">
             <NSelect v-model:value="selectedProducts" :options="productOptions" multiple clearable :disabled="readonly" />
           </NFormItem>
@@ -309,7 +319,7 @@ const columns = [
         </div>
 
         <div class="form-section">
-          <div class="section-title">对接信息</div>
+          <div class="section-title"><span>对接信息</span></div>
           <div class="form-grid">
             <NFormItem label="负责人"><NSelect v-model:value="form.assignee_id" :options="userOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="客户对接人"><NInput v-model:value="form.customer_contact" :disabled="readonly" /></NFormItem>
@@ -319,7 +329,7 @@ const columns = [
         </div>
 
         <div class="form-section">
-          <div class="section-title">备注</div>
+          <div class="section-title"><span>备注</span></div>
           <NFormItem label="备注">
             <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" :disabled="readonly" />
           </NFormItem>
@@ -336,23 +346,73 @@ const columns = [
   gap: 12px;
 }
 
+.project-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 18px;
+  padding: 16px 18px;
+  border: 1px solid #e6edf7;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f7fbff 0%, #ffffff 58%, #f7fff9 100%);
+}
+
+.modal-eyebrow {
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.modal-project-name {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.modal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 220px;
+}
+
 .project-form {
   max-height: 68vh;
   overflow-y: auto;
-  padding-right: 4px;
+  padding: 0 4px 2px 0;
+}
+
+.form-section {
+  padding: 14px 16px 2px;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  background: #fff;
 }
 
 .form-section + .form-section {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid #eef0f4;
+  margin-top: 14px;
 }
 
 .section-title {
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
   font-size: 14px;
   font-weight: 600;
   color: #1f2937;
+}
+
+.section-title::before {
+  width: 4px;
+  height: 14px;
+  border-radius: 999px;
+  background: #18a058;
+  content: '';
 }
 
 .form-grid,
@@ -360,6 +420,7 @@ const columns = [
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 16px;
+  row-gap: 2px;
 }
 
 .span-2 {

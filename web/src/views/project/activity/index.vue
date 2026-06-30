@@ -1,27 +1,25 @@
 <script setup>
 import { h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NForm, NFormItem, NInput, NSelect, NTag } from 'naive-ui'
+import { NButton, NDatePicker, NForm, NFormItem, NInput, NSelect, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
+import { useUserStore } from '@/store'
 import api from '@/api'
 
 defineOptions({ name: '运维记录' })
 
 const route = useRoute()
+const userStore = useUserStore()
 const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
+const readonly = ref(false)
 const projectOptions = ref([])
 const activityTypeOptions = ref([])
-const summary = ref({ total: 0, pending: 0, processing: 0, done: 0 })
-const statusOptions = [
-  { label: '待处理', value: '待处理' },
-  { label: '处理中', value: '处理中' },
-  { label: '已完成', value: '已完成' },
-]
+const userOptions = ref([])
 const queryItems = ref({
   project_id: route.query.project_id ? Number(route.query.project_id) : undefined,
 })
@@ -48,36 +46,56 @@ function defaultForm() {
     content: '',
     status: '待处理',
     operator_id: null,
+    started_at: null,
   }
 }
 
 async function loadOptions() {
-  const [configRes, projectRes] = await Promise.all([
+  const [configRes, projectRes, userRes] = await Promise.all([
     api.getPublicConfig(),
     api.projectList({ page: 1, page_size: 9999 }),
+    api.getUserList({ page: 1, page_size: 9999 }),
   ])
   const types = configRes?.data?.project_activity_types?.length
     ? configRes.data.project_activity_types
     : ['迁移库', '重做系统', '运维', '其他']
   activityTypeOptions.value = types.map((item) => ({ label: item, value: item }))
   projectOptions.value = (projectRes?.data || []).map((item) => ({ label: item.project_name, value: item.id }))
+  userOptions.value = (userRes?.data || [])
+    .filter((item) => item.is_active !== false)
+    .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
+    .map((item) => ({ label: item.alias || item.username, value: item.id, username: item.username }))
 }
 
 async function getActivityList(params) {
   const res = await api.projectActivityList(params)
-  summary.value = res?.summary || { total: 0, pending: 0, processing: 0, done: 0 }
   return res
 }
 
 function openCreate() {
+  const currentUser = userOptions.value.find((item) => item.value === userStore.userId)
   editingId.value = null
-  form.value = { ...defaultForm(), activity_type: activityTypeOptions.value[0]?.value }
+  readonly.value = false
+  form.value = {
+    ...defaultForm(),
+    activity_type: activityTypeOptions.value[0]?.value,
+    operator_id: currentUser?.value || null,
+    started_at: Date.now(),
+  }
+  modalVisible.value = true
+}
+
+function openDetail(row) {
+  editingId.value = row.id
+  readonly.value = true
+  form.value = { ...defaultForm(), ...row, started_at: row.started_at ? Date.parse(row.started_at) : null }
   modalVisible.value = true
 }
 
 function openEdit(row) {
   editingId.value = row.id
-  form.value = { ...defaultForm(), ...row }
+  readonly.value = false
+  form.value = { ...defaultForm(), ...row, started_at: row.started_at ? Date.parse(row.started_at) : null }
   modalVisible.value = true
 }
 
@@ -86,11 +104,16 @@ async function submitActivity() {
     $message.warning('请选择项目、运维类型并填写标题')
     return
   }
+  const payload = {
+    ...form.value,
+    started_at: form.value.started_at ? new Date(form.value.started_at).toISOString() : null,
+  }
+  delete payload.finished_at
   if (editingId.value) {
-    await api.projectActivityUpdate({ ...form.value, activity_id: editingId.value })
+    await api.projectActivityUpdate({ ...payload, activity_id: editingId.value })
     $message.success('运维记录已更新')
   } else {
-    await api.projectActivityCreate(form.value)
+    await api.projectActivityCreate(payload)
     $message.success('运维记录已创建')
   }
   modalVisible.value = false
@@ -100,28 +123,26 @@ async function submitActivity() {
 const columns = [
   { title: '项目', key: 'project_name', align: 'center', width: 180 },
   { title: '运维类型', key: 'activity_type', align: 'center', width: 120 },
-  { title: '标题', key: 'title', align: 'center', minWidth: 180 },
   {
-    title: '状态',
-    key: 'status',
+    title: '标题',
+    key: 'title',
     align: 'center',
-    width: 110,
-    render(row) {
-      const type = row.status === '已完成' ? 'success' : row.status === '处理中' ? 'info' : 'warning'
-      return h(NTag, { type, bordered: false }, { default: () => row.status })
-    },
+    minWidth: 180,
+    render: (row) => h(NButton, { text: true, type: 'primary', onClick: () => openDetail(row) }, { default: () => row.title || '-' }),
   },
   { title: '处理人', key: 'operator_name', align: 'center', width: 120, render: (row) => row.operator_name || '-' },
-  { title: '开始时间', key: 'started_at', align: 'center', width: 170, render: (row) => row.started_at || '-' },
-  { title: '完成时间', key: 'finished_at', align: 'center', width: 170, render: (row) => row.finished_at || '-' },
+  { title: '处理时间', key: 'started_at', align: 'center', width: 170, render: (row) => row.started_at || '-' },
   {
     title: '操作',
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 90,
+    width: 140,
     render(row) {
-      return h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openEdit(row) }, { default: () => '编辑' })
+      return [
+        h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
+        h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+      ]
     },
   },
 ]
@@ -129,24 +150,6 @@ const columns = [
 
 <template>
   <CommonPage title="运维记录">
-    <div class="summary-grid">
-      <div class="summary-card">
-        <span>运维总数</span>
-        <strong>{{ summary.total || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="warning">
-        <span>待处理</span>
-        <strong>{{ summary.pending || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="info">
-        <span>处理中</span>
-        <strong>{{ summary.processing || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="success">
-        <span>已完成</span>
-        <strong>{{ summary.done || 0 }}</strong>
-      </div>
-    </div>
     <CrudTable
       ref="$table"
       v-model:query-items="queryItems"
@@ -161,9 +164,6 @@ const columns = [
         <QueryBarItem label="类型" :label-width="40">
           <NSelect v-model:value="queryItems.activity_type" :options="activityTypeOptions" clearable style="width: 160px" />
         </QueryBarItem>
-        <QueryBarItem label="状态" :label-width="40">
-          <NSelect v-model:value="queryItems.status" :options="statusOptions" clearable style="width: 140px" />
-        </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <NButton type="primary" @click="openCreate">新增运维</NButton>
         </QueryBarItem>
@@ -172,72 +172,124 @@ const columns = [
 
     <CrudModal
       v-model:visible="modalVisible"
-      :title="editingId ? '编辑运维' : '新增运维'"
+      :title="readonly ? '运维详情' : editingId ? '编辑运维' : '新增运维'"
+      :show-footer="!readonly"
+      width="760px"
       @save="submitActivity"
     >
-      <NForm label-placement="left" label-align="left" :label-width="80">
-        <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" filterable /></NFormItem>
-        <NFormItem label="运维类型"><NSelect v-model:value="form.activity_type" :options="activityTypeOptions" /></NFormItem>
-        <NFormItem label="标题"><NInput v-model:value="form.title" /></NFormItem>
-        <NFormItem label="状态"><NSelect v-model:value="form.status" :options="statusOptions" /></NFormItem>
-        <NFormItem label="内容"><NInput v-model:value="form.content" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
+      <div class="activity-modal-head">
+        <div>
+          <div class="modal-eyebrow">{{ readonly ? 'OPS DETAIL' : editingId ? 'OPS EDIT' : 'OPS CREATE' }}</div>
+          <div class="modal-activity-name">{{ form.title || '未命名运维' }}</div>
+        </div>
+        <div class="modal-tags">
+          <NTag v-if="form.activity_type" size="small" round type="info">{{ form.activity_type }}</NTag>
+        </div>
+      </div>
+      <NForm class="activity-form" label-placement="top">
+        <div class="form-section">
+          <div class="section-title"><span>基础信息</span></div>
+          <div class="form-grid">
+            <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" :disabled="readonly" filterable /></NFormItem>
+            <NFormItem label="运维类型"><NSelect v-model:value="form.activity_type" :options="activityTypeOptions" :disabled="readonly" /></NFormItem>
+            <NFormItem label="标题" class="span-2"><NInput v-model:value="form.title" :disabled="readonly" /></NFormItem>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="section-title"><span>处理信息</span></div>
+          <div class="form-grid">
+            <NFormItem label="处理人"><NSelect v-model:value="form.operator_id" :options="userOptions" :disabled="readonly" clearable filterable /></NFormItem>
+            <NFormItem label="处理时间"><NDatePicker v-model:value="form.started_at" type="datetime" :disabled="readonly" clearable style="width: 100%" /></NFormItem>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="section-title"><span>运维内容</span></div>
+          <NFormItem label="内容"><NInput v-model:value="form.content" type="textarea" :disabled="readonly" :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
+        </div>
       </NForm>
     </CrudModal>
   </CommonPage>
 </template>
 
 <style scoped>
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+.activity-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 18px;
+  padding: 16px 18px;
+  border: 1px solid #e6edf7;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f7fbff 0%, #ffffff 58%, #f7fff9 100%);
 }
 
-.summary-card {
-  min-width: 0;
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid #ebeef5;
-  background: #fff;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
-}
-
-.summary-card span {
-  display: block;
-  color: #6b7280;
-  font-size: 13px;
-}
-
-.summary-card strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 28px;
+.modal-eyebrow {
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
   line-height: 1;
-  color: #111827;
 }
 
-.summary-card[data-tone='warning'] {
-  background: linear-gradient(180deg, #fffaf0 0%, #ffffff 100%);
+.modal-activity-name {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
-.summary-card[data-tone='success'] {
-  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+.modal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 220px;
 }
 
-.summary-card[data-tone='info'] {
-  background: linear-gradient(180deg, #f3f8ff 0%, #ffffff 100%);
+.activity-form {
+  max-height: 68vh;
+  overflow-y: auto;
+  padding: 0 4px 2px 0;
 }
 
-@media (max-width: 900px) {
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.form-section {
+  padding: 14px 16px 2px;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  background: #fff;
 }
 
-@media (max-width: 640px) {
-  .summary-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.form-section + .form-section {
+  margin-top: 14px;
 }
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.section-title::before {
+  width: 4px;
+  height: 14px;
+  border-radius: 999px;
+  background: #18a058;
+  content: '';
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 2px;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
 </style>
