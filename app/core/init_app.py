@@ -862,10 +862,12 @@ async def ensure_security_columns():
             ("ALTER TABLE `project` MODIFY COLUMN `points` INT NULL", "project.points.nullable"),
             ("ALTER TABLE `project` ADD COLUMN `product_points` JSON NULL", "project.product_points"),
             ("ALTER TABLE `project` ADD COLUMN `region` VARCHAR(30) NULL", "project.region"),
+            ("ALTER TABLE `project` ADD COLUMN `agent_id` BIGINT NULL", "project.agent_id"),
             ("ALTER TABLE `project` ADD COLUMN `server_version` VARCHAR(80) NULL", "project.server_version"),
             ("ALTER TABLE `project` ADD COLUMN `client_version` VARCHAR(80) NULL", "project.client_version"),
             ("ALTER TABLE `project` ADD COLUMN `start_time` DATETIME NULL", "project.start_time"),
             ("ALTER TABLE `project` ADD COLUMN `end_time` DATETIME NULL", "project.end_time"),
+            ("ALTER TABLE `project` ADD COLUMN `maintenance_time` DATETIME NULL", "project.maintenance_time"),
         ]:
             try:
                 await conn.execute_query(sql)

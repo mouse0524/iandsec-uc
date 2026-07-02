@@ -10,6 +10,7 @@ from app.models.admin import Project, ProjectActivity, Ticket, User
 
 PROJECT_ROLES = {"管理员", "客服", "技术"}
 ASSIGNEE_ROLES = {"技术"}
+AGENT_ROLES = {"代理商", "渠道商"}
 ACTIVITY_STATUSES = {"待处理", "处理中", "已完成"}
 PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"]
 
@@ -39,6 +40,8 @@ class ProjectController:
             q &= Q(status=filters["status"])
         if filters.get("region"):
             q &= Q(region=filters["region"])
+        if filters.get("agent_id"):
+            q &= Q(agent_id=filters["agent_id"])
         if filters.get("assignee_id"):
             q &= Q(assignee_id=filters["assignee_id"])
         return q
@@ -74,6 +77,16 @@ class ProjectController:
         if not ASSIGNEE_ROLES.intersection(role_names):
             raise HTTPException(status_code=400, detail="负责人必须是技术")
 
+    async def _validate_agent(self, agent_id: int | None) -> None:
+        if not agent_id:
+            return
+        user = await User.filter(id=agent_id, is_active=True).prefetch_related("roles").first()
+        if not user:
+            raise HTTPException(status_code=400, detail="所属代理商不存在或未启用")
+        role_names = {role.name for role in await user.roles}
+        if not AGENT_ROLES.intersection(role_names):
+            raise HTTPException(status_code=400, detail="所属代理商必须是代理商或渠道商")
+
     async def _validate_payload(self, payload: dict, *, partial: bool = False) -> dict:
         config = await self._config()
         data = dict(payload)
@@ -100,6 +113,7 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="项目状态不在配置范围内")
         if data.get("region") and data["region"] not in config["regions"]:
             raise HTTPException(status_code=400, detail="项目区域不在配置范围内")
+        await self._validate_agent(data.get("agent_id"))
         await self._validate_assignee(data.get("assignee_id"))
         return data
 
@@ -193,11 +207,21 @@ class ProjectController:
                 "issue_count": issue_count,
                 "requirement_count": requirement_count,
                 "activity_count": activity_count,
+                "agent_name": await self._agent_name(project.agent_id),
                 "assignee_name": await self._user_name(project.assignee_id),
                 "creator_name": await self._user_name(project.created_by),
             }
         )
         return data
+
+    @staticmethod
+    async def _agent_name(user_id: int | None) -> str:
+        if not user_id:
+            return ""
+        user = await User.filter(id=user_id).first()
+        if not user:
+            return ""
+        return str(user.company_name or user.alias or user.username or "")
 
     async def get_project(self, project_id: int) -> dict:
         return await self._project_row(await Project.get(id=project_id))

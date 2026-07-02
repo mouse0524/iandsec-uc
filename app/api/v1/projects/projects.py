@@ -48,6 +48,7 @@ async def list_projects(
     page_size: int = Query(10, description="每页数量"),
     project_name: str | None = Query(None, description="项目名称"),
     region: str | None = Query(None, description="区域"),
+    agent_id: int | None = Query(None, description="所属代理商ID"),
     status: str | None = Query(None, description="项目状态"),
     assignee_id: int | None = Query(None, description="负责人ID"),
 ):
@@ -57,6 +58,7 @@ async def list_projects(
     filters = {
         "project_name": project_name,
         "region": region,
+        "agent_id": agent_id,
         "status": status,
         "assignee_id": assignee_id,
     }

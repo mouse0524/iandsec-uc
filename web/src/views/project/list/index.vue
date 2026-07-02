@@ -20,6 +20,7 @@ const productOptions = ref([])
 const statusOptions = ref([])
 const regionOptions = ref([])
 const userOptions = ref([])
+const agentOptions = ref([])
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0 }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
@@ -34,10 +35,12 @@ function defaultForm() {
     project_name: '',
     product_points: [],
     region: null,
+    agent_id: null,
     server_version: '',
     client_version: '',
     start_time: null,
     end_time: null,
+    maintenance_time: null,
     customer_contact: '',
     customer_phone: '',
     customer_email: '',
@@ -65,6 +68,10 @@ async function loadOptions() {
     .filter((item) => item.is_active !== false)
     .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
     .map((item) => ({ label: item.alias || item.username, value: item.id }))
+  agentOptions.value = (userRes?.data || [])
+    .filter((item) => item.is_active !== false)
+    .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => ['代理商', '渠道商'].includes(role?.name)))
+    .map((item) => ({ label: item.company_name || item.alias || item.username, value: item.id }))
 }
 
 async function getProjectList(params) {
@@ -86,6 +93,10 @@ const selectedProducts = computed({
   },
 })
 
+function formatDate(value) {
+  return value ? String(value).slice(0, 10) : '-'
+}
+
 function openCreate() {
   editingId.value = null
   readonly.value = false
@@ -106,6 +117,7 @@ function openProject(row, isReadonly) {
     ...row,
     start_time: row.start_time ? Date.parse(row.start_time) : null,
     end_time: row.end_time ? Date.parse(row.end_time) : null,
+    maintenance_time: row.maintenance_time ? Date.parse(row.maintenance_time) : null,
   }
   modalVisible.value = true
 }
@@ -132,6 +144,7 @@ async function submitProject() {
     })),
     start_time: form.value.start_time ? new Date(form.value.start_time).toISOString() : null,
     end_time: form.value.end_time ? new Date(form.value.end_time).toISOString() : null,
+    maintenance_time: form.value.maintenance_time ? new Date(form.value.maintenance_time).toISOString() : null,
   }
   if (editingId.value) {
     await api.projectUpdate({ ...payload, project_id: editingId.value })
@@ -154,6 +167,7 @@ function jumpActivities(row) {
 
 const columns = [
   { title: '区域', key: 'region', align: 'center', width: 90, render: (row) => row.region || '-' },
+  { title: '所属代理商', key: 'agent_name', align: 'center', width: 150, render: (row) => row.agent_name || '-' },
   {
     title: '项目名称',
     key: 'project_name',
@@ -175,6 +189,7 @@ const columns = [
   { title: '服务器版本', key: 'server_version', align: 'center', width: 130, render: (row) => row.server_version || '-' },
   { title: '客户端版本', key: 'client_version', align: 'center', width: 130, render: (row) => row.client_version || '-' },
   { title: '客户对接人', key: 'customer_contact', align: 'center', width: 130 },
+  { title: '维保时间', key: 'maintenance_time', align: 'center', width: 120, render: (row) => formatDate(row.maintenance_time) },
   { title: '状态', key: 'status', align: 'center', width: 110, render: (row) => row.status || '-' },
   { title: '负责人', key: 'assignee_name', align: 'center', width: 120, render: (row) => row.assignee_name || '-' },
   {
@@ -257,7 +272,7 @@ const columns = [
       v-model:query-items="queryItems"
       :columns="columns"
       :get-data="getProjectList"
-      :scroll-x="1600"
+      :scroll-x="1870"
     >
       <template #queryBar>
         <QueryBarItem label="项目名称" :label-width="64">
@@ -268,6 +283,12 @@ const columns = [
         </QueryBarItem>
         <QueryBarItem label="区域" :label-width="40">
           <NSelect v-model:value="queryItems.region" :options="regionOptions" clearable style="width: 140px" />
+        </QueryBarItem>
+        <QueryBarItem label="所属代理商" :label-width="72">
+          <NSelect v-model:value="queryItems.agent_id" :options="agentOptions" clearable filterable style="width: 180px" />
+        </QueryBarItem>
+        <QueryBarItem label="负责人" :label-width="48">
+          <NSelect v-model:value="queryItems.assignee_id" :options="userOptions" clearable filterable style="width: 160px" />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <NButton type="primary" @click="openCreate">新增项目</NButton>
@@ -298,11 +319,13 @@ const columns = [
           <div class="form-grid">
             <NFormItem label="项目名称" class="span-2"><NInput v-model:value="form.project_name" :disabled="readonly" /></NFormItem>
             <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
+            <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" :disabled="readonly" /></NFormItem>
             <NFormItem label="服务器版本"><NInput v-model:value="form.server_version" :disabled="readonly" /></NFormItem>
             <NFormItem label="客户端版本"><NInput v-model:value="form.client_version" :disabled="readonly" /></NFormItem>
             <NFormItem label="开始时间"><NDatePicker v-model:value="form.start_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
             <NFormItem label="结束时间"><NDatePicker v-model:value="form.end_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
+            <NFormItem label="维保时间"><NDatePicker v-model:value="form.maintenance_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
           </div>
         </div>
 

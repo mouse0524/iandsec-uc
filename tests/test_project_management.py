@@ -77,6 +77,7 @@ async def test_project_row_counts_linked_tickets_and_activities(monkeypatch):
     project = SimpleNamespace(
         id=9,
         project_name="项目A",
+        agent_id=None,
         assignee_id=None,
         created_by=1,
     )
@@ -121,3 +122,9 @@ async def test_visible_projects_filter_by_assignee(monkeypatch):
     await project_controller.visible_projects_for_user(7)
 
     assert calls["q"].filters == {"assignee_id": 7}
+
+
+def test_project_query_supports_agent_filter():
+    q = project_controller._project_q({"agent_id": 11})
+
+    assert any(child.filters == {"agent_id": 11} for child in q.children)

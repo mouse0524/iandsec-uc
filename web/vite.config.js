@@ -29,6 +29,11 @@ export default defineConfig(({ command, mode }) => {
       host: '0.0.0.0',
       port: VITE_PORT,
       open: shouldOpen,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      },
       proxy: VITE_USE_PROXY
         ? {
             [VITE_BASE_API]: PROXY_CONFIG[VITE_BASE_API],
