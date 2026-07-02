@@ -53,6 +53,10 @@ const ticketDetailLoading = ref(false)
 const currentTicket = ref({})
 const activityDetailVisible = ref(false)
 const currentActivity = ref({})
+const activityForm = computed(() => ({
+  ...currentActivity.value,
+  started_at: currentActivity.value?.started_at ? Date.parse(currentActivity.value.started_at) : null,
+}))
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0 }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
@@ -574,14 +578,37 @@ const columns = [
 
     <TicketDetailModal v-model:visible="ticketDetailVisible" :ticket="currentTicket" :loading="ticketDetailLoading" />
 
-    <CrudModal v-model:visible="activityDetailVisible" title="运维详情" :show-footer="false" width="640px">
-      <div class="activity-detail">
-        <div><span>标题</span><strong>{{ currentActivity.title || '-' }}</strong></div>
-        <div><span>运维类型</span><strong>{{ currentActivity.activity_type || '-' }}</strong></div>
-        <div><span>处理人</span><strong>{{ currentActivity.operator_name || '-' }}</strong></div>
-        <div><span>处理时间</span><strong>{{ currentActivity.started_at || '-' }}</strong></div>
-        <div class="span-2"><span>内容</span><p>{{ currentActivity.content || '-' }}</p></div>
+    <CrudModal v-model:visible="activityDetailVisible" title="运维详情" :show-footer="false" width="760px">
+      <div class="project-modal-head">
+        <div>
+          <div class="modal-eyebrow">OPS DETAIL</div>
+          <div class="modal-project-name">{{ currentActivity.title || '未命名运维' }}</div>
+        </div>
+        <div class="modal-tags">
+          <NTag v-if="currentActivity.activity_type" size="small" round type="info">{{ currentActivity.activity_type }}</NTag>
+        </div>
       </div>
+      <NForm class="project-form" label-placement="top">
+        <div class="form-section">
+          <div class="section-title"><span>基础信息</span></div>
+          <div class="form-grid">
+            <NFormItem label="项目"><NInput :value="currentActivity.project_name || '-'" disabled /></NFormItem>
+            <NFormItem label="运维类型"><NInput :value="currentActivity.activity_type || '-'" disabled /></NFormItem>
+            <NFormItem label="标题" class="span-2"><NInput :value="currentActivity.title || '-'" disabled /></NFormItem>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="section-title"><span>处理信息</span></div>
+          <div class="form-grid">
+            <NFormItem label="处理人"><NInput :value="currentActivity.operator_name || '-'" disabled /></NFormItem>
+            <NFormItem label="处理时间"><NDatePicker :value="activityForm.started_at" type="datetime" disabled clearable style="width: 100%" /></NFormItem>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="section-title"><span>运维内容</span></div>
+          <NFormItem label="内容"><NInput :value="currentActivity.content || '-'" type="textarea" disabled :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
+        </div>
+      </NForm>
     </CrudModal>
   </CommonPage>
 </template>
@@ -672,25 +699,6 @@ const columns = [
 
 .span-2 {
   grid-column: 1 / -1;
-}
-
-.activity-detail {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 18px;
-}
-
-.activity-detail span {
-  display: block;
-  margin-bottom: 6px;
-  color: #6b7280;
-}
-
-.activity-detail strong,
-.activity-detail p {
-  margin: 0;
-  color: #111827;
-  white-space: pre-wrap;
 }
 
 .summary-grid {

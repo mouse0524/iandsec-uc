@@ -1,0 +1,1 @@
+import{d as o,e as r,bo as n,g as c,cc as t}from"./index-7ec78040.js";const u={__name:"TheIcon",props:{icon:{type:String,required:!0},size:{type:Number,default:14},color:{type:String,default:void 0}},setup(e){return(a,i)=>(o(),r(n(c(t)(e.icon,{size:e.size,color:e.color}))))}};export{u as _};
