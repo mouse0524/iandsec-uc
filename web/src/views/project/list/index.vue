@@ -96,7 +96,7 @@ async function loadOptions() {
   const products = config.project_products?.length ? config.project_products : ['安得卫士']
   const statuses = config.project_statuses?.length
     ? config.project_statuses
-    : ['售前', '待实施', '实施中', '待验收', '已验收', '丢单']
+    : ['售前', '待实施', '实施中', '待验收', '已验收', '关闭']
   const regions = config.project_regions?.length ? config.project_regions : ['华东', '华南', '华北', '华中', '西南', '西北']
   const serverVersions = config.project_server_versions?.length ? config.project_server_versions : ['5.6.1']
   const clientVersions = config.project_client_versions?.length ? config.project_client_versions : ['2.25']
@@ -416,7 +416,7 @@ const columns = [
         <strong>{{ summary.accepted || 0 }}</strong>
       </div>
       <div class="summary-card" data-tone="error">
-        <span>丢单</span>
+        <span>关闭</span>
         <strong>{{ summary.lost || 0 }}</strong>
       </div>
     </div>

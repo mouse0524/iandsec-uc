@@ -17,7 +17,7 @@ async def test_project_payload_uses_configured_products_and_statuses(monkeypatch
     async def fake_config():
         return {
             "project_products": ["安得卫士"],
-            "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"],
+            "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"],
             "project_regions": ["华东"],
             "project_activity_types": ["迁移库"],
             "project_server_versions": ["5.6.1"],

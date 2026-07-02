@@ -76,7 +76,7 @@ class SystemSettingController:
                 "发生时间：\n操作账号：\n所属模块：\n错误提示：\n已尝试方案：",
             ],
             "project_products": ["安得卫士"],
-            "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"],
+            "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"],
             "project_regions": ["华东", "华南", "华北", "华中", "西南", "西北"],
             "project_activity_types": ["迁移库", "重做系统", "运维", "其他"],
             "project_server_versions": ["5.6.1"],

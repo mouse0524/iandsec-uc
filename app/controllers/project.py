@@ -18,7 +18,7 @@ PROJECT_ROLES = {"管理员", "客服", "技术"}
 ASSIGNEE_ROLES = {"技术"}
 AGENT_ROLES = {"代理商", "渠道商"}
 ACTIVITY_STATUSES = {"待处理", "处理中", "已完成"}
-PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"]
+PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"]
 
 
 class ProjectController:
@@ -212,7 +212,7 @@ class ProjectController:
             "implementing": await Project.filter(q & Q(status="实施中")).count(),
             "pending_acceptance": await Project.filter(q & Q(status="待验收")).count(),
             "accepted": await Project.filter(q & Q(status="已验收")).count(),
-            "lost": await Project.filter(q & Q(status="丢单")).count(),
+            "lost": await Project.filter(q & Q(status="关闭")).count(),
         }
 
     async def _project_row(self, project: Project) -> dict:
