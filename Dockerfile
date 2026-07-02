@@ -15,7 +15,6 @@ FROM python:3.11-slim-bookworm
 WORKDIR /opt/iandsec-uc
 ENV TZ=Asia/Shanghai
 COPY requirements.txt run.py ./
-COPY app ./app
 COPY deploy/entrypoint.sh .
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
@@ -37,7 +36,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core tzdata docker.io \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=core-pip \
+    pip install --disable-pip-version-check -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --disable-pip-version-check --no-deps chinese-days==0.0.2 -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+COPY app ./app
 
 COPY --from=web /opt/iandsec-uc/web/dist /opt/iandsec-uc/web/dist
 ADD /deploy/web.conf /etc/nginx/sites-available/web.conf
