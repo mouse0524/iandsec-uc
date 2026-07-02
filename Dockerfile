@@ -41,6 +41,7 @@ RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY --from=web /opt/iandsec-uc/web/dist /opt/iandsec-uc/web/dist
 ADD /deploy/web.conf /etc/nginx/sites-available/web.conf
+ADD /deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 RUN rm -f /etc/nginx/sites-enabled/default \
     && ln -s /etc/nginx/sites-available/web.conf /etc/nginx/sites-enabled/ \
     && useradd --system --create-home --home-dir /home/app app \

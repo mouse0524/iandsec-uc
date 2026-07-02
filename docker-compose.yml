@@ -36,9 +36,10 @@ services:
       # Bind mount release artifacts so routine git updates do not require rebuilding the image.
       - ./app:/opt/iandsec-uc/app
       - ./run.py:/opt/iandsec-uc/run.py
-      - ./web/dist:/opt/iandsec-uc/web/dist
+      - ./web:/opt/iandsec-uc/web
       - ./deploy/entrypoint.sh:/opt/iandsec-uc/entrypoint.sh
       - ./deploy/web.conf:/etc/nginx/sites-available/web.conf
+      - ./deploy/security-headers.conf:/etc/nginx/snippets/security-headers.conf
       - app_storage:/opt/iandsec-uc/storage
       - app_logs:/opt/iandsec-uc/app/logs
       # Database backup uses docker exec to run mysqldump inside the MySQL container.
