@@ -23,6 +23,8 @@ class SystemSettingUpdateIn(BaseModel):
     project_statuses: list[str] = Field(default_factory=list, description="项目状态")
     project_regions: list[str] = Field(default_factory=list, description="项目区域")
     project_activity_types: list[str] = Field(default_factory=list, description="项目运维类型")
+    project_server_versions: list[str] = Field(default_factory=list, description="项目服务器版本")
+    project_client_versions: list[str] = Field(default_factory=list, description="项目客户端版本")
     login_security_enabled: bool = Field(default=True, description="是否启用登录安全策略")
     login_challenge_enabled: bool = Field(default=True, description="是否启用人机校验")
     login_challenge_type: str = Field(default="captcha", description="人机校验方式")
@@ -130,7 +132,16 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("允许上传类型至少保留一项")
         return items
 
-    @field_validator("ticket_root_causes", "ticket_description_templates", "project_products", "project_statuses", "project_regions", "project_activity_types")
+    @field_validator(
+        "ticket_root_causes",
+        "ticket_description_templates",
+        "project_products",
+        "project_statuses",
+        "project_regions",
+        "project_activity_types",
+        "project_server_versions",
+        "project_client_versions",
+    )
     @classmethod
     def validate_required_ticket_items(cls, value: list[str], info):
         field_names = {
@@ -140,6 +151,8 @@ class SystemSettingUpdateIn(BaseModel):
             "project_statuses": "项目状态",
             "project_regions": "项目区域",
             "project_activity_types": "项目运维类型",
+            "project_server_versions": "项目服务器版本",
+            "project_client_versions": "项目客户端版本",
         }
         field_name = field_names.get(info.field_name, info.field_name)
         items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
@@ -433,6 +446,8 @@ class PublicSiteConfigOut(BaseModel):
     project_statuses: list[str]
     project_regions: list[str]
     project_activity_types: list[str]
+    project_server_versions: list[str]
+    project_client_versions: list[str]
     login_security_enabled: bool
     login_challenge_enabled: bool
     login_challenge_type: str

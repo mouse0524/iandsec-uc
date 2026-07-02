@@ -95,6 +95,8 @@ def _project_api_paths() -> list[str]:
     return [
         "/api/v1/project/list",
         "/api/v1/project/get",
+        "/api/v1/project/upload",
+        "/api/v1/project/attachment/download",
         "/api/v1/project/create",
         "/api/v1/project/update",
         "/api/v1/project/status",

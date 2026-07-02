@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from app.controllers.project import project_controller
 from app.core.ctx import CTX_USER_ID
@@ -83,6 +84,21 @@ async def get_project(project_id: int = Query(..., description="项目ID")):
     return Success(data=await project_controller.get_project(project_id))
 
 
+@router.post("/upload", summary="上传项目附件", dependencies=[DependAuth])
+async def upload_project_attachment(file: UploadFile = File(...)):
+    user = await _require_project_manager()
+    attachment = await project_controller.upload_attachment(uploader_id=user.id, file=file)
+    return Success(data=await attachment.to_dict())
+
+
+@router.get("/attachment/download", summary="下载项目附件", dependencies=[DependAuth])
+async def download_project_attachment(attachment_id: int = Query(..., description="附件ID")):
+    user = await _require_project_manager()
+    data = await project_controller.get_attachment_download(attachment_id=attachment_id)
+    await _ensure_project_visible(user, data["project_id"])
+    return FileResponse(data["abs_path"], media_type=data["media_type"], filename=None, headers=data["headers"])
+
+
 @router.post("/create", summary="创建项目", dependencies=[DependAuth])
 async def create_project(payload: ProjectCreateIn):
     user = await _require_project_manager()
@@ -95,6 +111,8 @@ async def update_project(payload: ProjectUpdateIn):
     user = await _require_project_manager()
     await _ensure_project_visible(user, payload.project_id)
     data = payload.model_dump(exclude={"project_id"})
+    if "attachment_ids" not in payload.model_fields_set:
+        data.pop("attachment_ids", None)
     project = await project_controller.update_project(project_id=payload.project_id, user_id=user.id, payload=data)
     return Success(data=await project_controller.get_project(project.id))
 

@@ -24,6 +24,7 @@ class ProjectCreateIn(BaseModel):
     status: str | None = Field(default=None, description="项目状态")
     assignee_id: int | None = Field(default=None, description="负责人ID")
     remark: str | None = Field(default=None, description="备注")
+    attachment_ids: list[int] = Field(default_factory=list, description="附件ID列表")
 
 
 class ProjectUpdateIn(ProjectCreateIn):

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NSelect, NTag } from 'naive-ui'
+import { NButton, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NSelect, NTag, NUpload } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
@@ -19,8 +19,12 @@ const queryItems = ref({})
 const productOptions = ref([])
 const statusOptions = ref([])
 const regionOptions = ref([])
+const serverVersionOptions = ref([])
+const clientVersionOptions = ref([])
 const userOptions = ref([])
 const agentOptions = ref([])
+const uploadLoading = ref(false)
+const fileList = ref([])
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0 }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
@@ -46,6 +50,7 @@ function defaultForm() {
     customer_email: '',
     status: null,
     assignee_id: null,
+    attachment_ids: [],
     remark: '',
   }
 }
@@ -61,9 +66,13 @@ async function loadOptions() {
     ? config.project_statuses
     : ['售前', '待实施', '实施中', '待验收', '已验收', '丢单']
   const regions = config.project_regions?.length ? config.project_regions : ['华东', '华南', '华北', '华中', '西南', '西北']
+  const serverVersions = config.project_server_versions?.length ? config.project_server_versions : ['5.6.1']
+  const clientVersions = config.project_client_versions?.length ? config.project_client_versions : ['2.25']
   productOptions.value = products.map((item) => ({ label: item, value: item }))
   statusOptions.value = statuses.map((item) => ({ label: item, value: item }))
   regionOptions.value = regions.map((item) => ({ label: item, value: item }))
+  serverVersionOptions.value = serverVersions.map((item) => ({ label: item, value: item }))
+  clientVersionOptions.value = clientVersions.map((item) => ({ label: item, value: item }))
   userOptions.value = (userRes?.data || [])
     .filter((item) => item.is_active !== false)
     .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
@@ -106,10 +115,12 @@ function openCreate() {
     region: regionOptions.value[0]?.value || null,
     status: statusOptions.value[0]?.value,
   }
+  fileList.value = []
   modalVisible.value = true
 }
 
 function openProject(row, isReadonly) {
+  const attachments = Array.isArray(row.attachments) ? row.attachments : []
   editingId.value = row.id
   readonly.value = isReadonly
   form.value = {
@@ -118,7 +129,14 @@ function openProject(row, isReadonly) {
     start_time: row.start_time ? Date.parse(row.start_time) : null,
     end_time: row.end_time ? Date.parse(row.end_time) : null,
     maintenance_time: row.maintenance_time ? Date.parse(row.maintenance_time) : null,
+    attachment_ids: attachments.map((item) => Number(item.id)).filter((id) => id > 0),
   }
+  fileList.value = attachments.map((item) => ({
+    id: String(item.id),
+    name: item.origin_name || `附件${item.id}`,
+    status: 'finished',
+    attachmentId: Number(item.id),
+  }))
   modalVisible.value = true
 }
 
@@ -155,6 +173,44 @@ async function submitProject() {
   }
   modalVisible.value = false
   $table.value?.handleSearch()
+}
+
+async function customUpload({ file, onFinish, onError }) {
+  try {
+    uploadLoading.value = true
+    const res = await api.uploadProjectAttachment(file.file)
+    const attachmentId = Number(res?.data?.id || 0)
+    if (!attachmentId) throw new Error('missing attachment id')
+    file.attachmentId = attachmentId
+    if (!form.value.attachment_ids.includes(attachmentId)) {
+      form.value.attachment_ids.push(attachmentId)
+    }
+    onFinish()
+  } catch {
+    onError()
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
+function handleRemove({ file }) {
+  const attachmentId = Number(file?.attachmentId || 0)
+  if (attachmentId > 0) {
+    form.value.attachment_ids = form.value.attachment_ids.filter((id) => id !== attachmentId)
+  }
+}
+
+async function downloadAttachment(file) {
+  const attachmentId = Number(file?.attachmentId || file?.id || 0)
+  if (!attachmentId) return
+  const res = await api.downloadProjectAttachment({ attachment_id: attachmentId })
+  const blob = res instanceof Blob ? res : new Blob([res])
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name || 'download'
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function jumpTickets(row, issueType) {
@@ -321,8 +377,8 @@ const columns = [
             <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
             <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" :disabled="readonly" /></NFormItem>
-            <NFormItem label="服务器版本"><NInput v-model:value="form.server_version" :disabled="readonly" /></NFormItem>
-            <NFormItem label="客户端版本"><NInput v-model:value="form.client_version" :disabled="readonly" /></NFormItem>
+            <NFormItem label="服务器版本"><NSelect v-model:value="form.server_version" :options="serverVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
+            <NFormItem label="客户端版本"><NSelect v-model:value="form.client_version" :options="clientVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="开始时间"><NDatePicker v-model:value="form.start_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
             <NFormItem label="结束时间"><NDatePicker v-model:value="form.end_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
             <NFormItem label="维保时间"><NDatePicker v-model:value="form.maintenance_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
@@ -356,6 +412,32 @@ const columns = [
           <NFormItem label="备注">
             <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" :disabled="readonly" />
           </NFormItem>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title"><span>附件</span></div>
+          <NFormItem label="项目附件">
+            <NUpload
+              v-model:file-list="fileList"
+              :custom-request="customUpload"
+              :disabled="readonly"
+              :show-remove-button="!readonly"
+              @remove="handleRemove"
+            >
+              <NButton :loading="uploadLoading" :disabled="readonly">上传附件</NButton>
+            </NUpload>
+          </NFormItem>
+          <div v-if="fileList.length" class="attachment-list">
+            <NButton
+              v-for="file in fileList"
+              :key="file.id"
+              text
+              type="primary"
+              @click="downloadAttachment(file)"
+            >
+              {{ file.name }}
+            </NButton>
+          </div>
         </div>
       </NForm>
     </CrudModal>

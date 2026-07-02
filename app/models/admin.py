@@ -183,6 +183,18 @@ class Project(BaseModel, TimestampMixin):
         table = "project"
 
 
+class ProjectAttachment(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(null=True, description="项目ID", index=True)
+    origin_name = fields.CharField(max_length=255, description="原始文件名")
+    file_path = fields.CharField(max_length=500, description="文件相对路径")
+    file_size = fields.BigIntField(default=0, description="文件大小")
+    mime_type = fields.CharField(max_length=100, default="application/octet-stream", description="MIME类型")
+    uploader_id = fields.BigIntField(description="上传人ID", index=True)
+
+    class Meta:
+        table = "project_attachment"
+
+
 class ProjectActivity(BaseModel, TimestampMixin):
     project_id = fields.BigIntField(description="项目ID", index=True)
     activity_type = fields.CharField(max_length=50, description="活动类型", index=True)

@@ -87,6 +87,18 @@ export default {
   // project
   projectList: (params = {}) => request.get('/project/list', { params }),
   projectGet: (params = {}) => request.get('/project/get', { params }),
+  uploadProjectAttachment: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/project/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  downloadProjectAttachment: (params = {}) =>
+    request.get('/project/attachment/download', {
+      params,
+      responseType: 'blob',
+    }),
   projectCreate: (data = {}) => request.post('/project/create', data),
   projectUpdate: (data = {}) => request.post('/project/update', data),
   projectSetStatus: (data = {}) => request.post('/project/status', data),

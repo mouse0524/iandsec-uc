@@ -69,6 +69,8 @@ const form = ref({
   project_statuses: ['售前', '待实施', '实施中', '待验收', '已验收', '丢单'],
   project_regions: ['华东', '华南', '华北', '华中', '西南', '西北'],
   project_activity_types: ['迁移库', '重做系统', '运维', '其他'],
+  project_server_versions: ['5.6.1'],
+  project_client_versions: ['2.25'],
   login_security_enabled: true,
   login_challenge_enabled: true,
   login_challenge_type: 'captcha',
@@ -580,6 +582,12 @@ async function loadData() {
       project_activity_types: res.data?.project_activity_types?.length
         ? res.data.project_activity_types
         : form.value.project_activity_types,
+      project_server_versions: res.data?.project_server_versions?.length
+        ? res.data.project_server_versions
+        : form.value.project_server_versions,
+      project_client_versions: res.data?.project_client_versions?.length
+        ? res.data.project_client_versions
+        : form.value.project_client_versions,
       ticket_notify_by_role: normalizeTicketNotifyByRole(
         res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
       ),
@@ -1086,6 +1094,12 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="运维类型" path="project_activity_types">
                 <NDynamicTags v-model:value="form.project_activity_types" />
+              </NFormItem>
+              <NFormItem label="服务器版本" path="project_server_versions">
+                <NDynamicTags v-model:value="form.project_server_versions" />
+              </NFormItem>
+              <NFormItem label="客户端版本" path="project_client_versions">
+                <NDynamicTags v-model:value="form.project_client_versions" />
               </NFormItem>
               <NDivider title-placement="left">工单提醒</NDivider>
               <NAlert type="info" class="mb-12">

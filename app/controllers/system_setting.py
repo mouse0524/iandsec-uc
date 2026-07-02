@@ -79,6 +79,8 @@ class SystemSettingController:
             "project_statuses": ["售前", "待实施", "实施中", "待验收", "已验收", "丢单"],
             "project_regions": ["华东", "华南", "华北", "华中", "西南", "西北"],
             "project_activity_types": ["迁移库", "重做系统", "运维", "其他"],
+            "project_server_versions": ["5.6.1"],
+            "project_client_versions": ["2.25"],
         },
         "login_security": {
             "login_security_enabled": True,
@@ -272,6 +274,8 @@ class SystemSettingController:
             "project_statuses": ticket.get("project_statuses") or [],
             "project_regions": ticket.get("project_regions") or [],
             "project_activity_types": ticket.get("project_activity_types") or [],
+            "project_server_versions": ticket.get("project_server_versions") or [],
+            "project_client_versions": ticket.get("project_client_versions") or [],
             "login_security_enabled": login_security.get("login_security_enabled", True),
             "login_challenge_enabled": login_security.get("login_challenge_enabled", True),
             "login_challenge_type": login_security.get("login_challenge_type") or "captcha",
@@ -421,6 +425,8 @@ class SystemSettingController:
             "project_statuses",
             "project_regions",
             "project_activity_types",
+            "project_server_versions",
+            "project_client_versions",
         }
         login_keys = {
             "login_security_enabled",
