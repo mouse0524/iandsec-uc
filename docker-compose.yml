@@ -31,7 +31,7 @@ services:
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD is required}
       TZ: Asia/Shanghai
     ports:
-      - "80:8080"
+      - "3100:8080"
     volumes:
       # Bind mount release artifacts so routine git updates do not require rebuilding the image.
       - ./app:/opt/iandsec-uc/app
