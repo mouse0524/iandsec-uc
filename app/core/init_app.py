@@ -801,7 +801,7 @@ async def _backfill_existing_role_permissions(
             changed = True
 
     if component_paths:
-        menus = await Menu.filter(Q(component__in=component_paths))
+        menus = await Menu.filter(Q(component__in=component_paths) | Q(path__in=component_paths))
         if menus:
             existing_menu_ids = {menu.id for menu in await role.menus.filter(id__in=[menu.id for menu in menus])}
             missing_menus = [menu for menu in menus if menu.id not in existing_menu_ids]
@@ -941,11 +941,11 @@ async def init_roles():
                 role_name="技术",
                 api_paths=_ticket_field_verification_api_paths(),
             )
-            for role_name in ["客服", "技术"]:
+            for role_name in ["客服", "技术", "管理员"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=_project_api_paths(),
-                    component_paths=["/project/list", "/project/activity"],
+                    component_paths=["/project", "/project/list", "/project/activity"],
                 )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
