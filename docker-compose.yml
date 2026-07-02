@@ -43,8 +43,6 @@ services:
       - app_logs:/opt/iandsec-uc/app/logs
       # Database backup uses docker exec to run mysqldump inside the MySQL container.
       - /var/run/docker.sock:/var/run/docker.sock
-    cap_drop:
-      - ALL
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
