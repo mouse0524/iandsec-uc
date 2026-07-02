@@ -11,4 +11,4 @@ if errorlevel 1 exit /b 1
 call pnpm run build
 if errorlevel 1 exit /b 1
 
-powershell -NoProfile -Command "Compress-Archive -Path dist\* -DestinationPath dist.zip -Force"
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip='dist.zip'; if (Test-Path $zip) { Remove-Item $zip -Force }; $archive=[System.IO.Compression.ZipFile]::Open($zip, 'Create'); try { Get-ChildItem dist -Recurse -File | ForEach-Object { $entry=$_.FullName.Substring((Resolve-Path dist).Path.Length + 1).Replace('\','/'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry) | Out-Null } } finally { $archive.Dispose() }"
