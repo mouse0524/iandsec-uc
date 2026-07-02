@@ -1,16 +1,31 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { NButton, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NSelect, NTag, NUpload } from 'naive-ui'
+import {
+  NButton,
+  NDataTable,
+  NDatePicker,
+  NDrawer,
+  NDrawerContent,
+  NForm,
+  NFormItem,
+  NInput,
+  NInputNumber,
+  NSelect,
+  NTabPane,
+  NTabs,
+  NTag,
+  NUpload,
+} from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
+import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
+import { ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 import api from '@/api'
 
 defineOptions({ name: '项目列表' })
 
-const router = useRouter()
 const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
@@ -25,6 +40,19 @@ const userOptions = ref([])
 const agentOptions = ref([])
 const uploadLoading = ref(false)
 const fileList = ref([])
+const workOrderVisible = ref(false)
+const workOrderProject = ref(null)
+const activeWorkOrderTab = ref('issues')
+const workOrderLoading = ref(false)
+const workOrders = ref({ issues: [], requirements: [], activities: [] })
+const workOrderTotals = ref({ issues: 0, requirements: 0, activities: 0 })
+const workOrderPages = ref({ issues: 1, requirements: 1, activities: 1 })
+const workOrderPageSize = 10
+const ticketDetailVisible = ref(false)
+const ticketDetailLoading = ref(false)
+const currentTicket = ref({})
+const activityDetailVisible = ref(false)
+const currentActivity = ref({})
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0 }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
@@ -148,6 +176,11 @@ function openEdit(row) {
   openProject(row, false)
 }
 
+function openActivityDetail(row) {
+  currentActivity.value = row
+  activityDetailVisible.value = true
+}
+
 async function submitProject() {
   if (readonly.value) return
   if (!form.value.project_name?.trim() || !form.value.product_points?.length) {
@@ -213,13 +246,99 @@ async function downloadAttachment(file) {
   URL.revokeObjectURL(url)
 }
 
-function jumpTickets(row, issueType) {
-  router.push({ path: '/ticket/my', query: { company_name: row.project_name, issue_type: issueType } })
+async function openWorkOrders(row) {
+  workOrderProject.value = row
+  activeWorkOrderTab.value = 'issues'
+  workOrders.value = { issues: [], requirements: [], activities: [] }
+  workOrderTotals.value = { issues: 0, requirements: 0, activities: 0 }
+  workOrderPages.value = { issues: 1, requirements: 1, activities: 1 }
+  workOrderVisible.value = true
+  await loadWorkOrders(row)
 }
 
-function jumpActivities(row) {
-  router.push({ path: '/project/activity', query: { project_id: row.id } })
+async function loadWorkOrders(row, type = null) {
+  if (!row) return
+  workOrderLoading.value = true
+  try {
+    const loaders = {
+      issues: () => api.getTicketList({ page: workOrderPages.value.issues, page_size: workOrderPageSize, company_name: row.project_name, issue_type: '现网问题' }),
+      requirements: () => api.getTicketList({ page: workOrderPages.value.requirements, page_size: workOrderPageSize, company_name: row.project_name, issue_type: '现网需求' }),
+      activities: () => api.projectActivityList({ page: workOrderPages.value.activities, page_size: workOrderPageSize, project_id: row.id }),
+    }
+    const types = type ? [type] : ['issues', 'requirements', 'activities']
+    const responses = await Promise.all(types.map((item) => loaders[item]()))
+    const nextOrders = { ...workOrders.value }
+    const nextTotals = { ...workOrderTotals.value }
+    types.forEach((item, index) => {
+      nextOrders[item] = responses[index]?.data || []
+      nextTotals[item] = responses[index]?.total || 0
+    })
+    workOrders.value = nextOrders
+    workOrderTotals.value = nextTotals
+  } finally {
+    workOrderLoading.value = false
+  }
 }
+
+function workOrderPagination(type) {
+  return {
+    page: workOrderPages.value[type],
+    pageSize: workOrderPageSize,
+    itemCount: workOrderTotals.value[type],
+    prefix: ({ itemCount }) => `共 ${itemCount} 条`,
+    onChange: (page) => {
+      workOrderPages.value[type] = page
+      loadWorkOrders(workOrderProject.value, type)
+    },
+  }
+}
+
+async function openTicketDetail(row) {
+  currentTicket.value = row
+  ticketDetailVisible.value = true
+  ticketDetailLoading.value = true
+  try {
+    const res = await api.getTicketById({ ticket_id: row.id })
+    if (currentTicket.value?.id === row.id) currentTicket.value = res.data
+  } finally {
+    ticketDetailLoading.value = false
+  }
+}
+
+const ticketColumns = [
+  { title: '工单编号', key: 'ticket_no', align: 'center', width: 130, ellipsis: { tooltip: true } },
+  {
+    title: '标题',
+    key: 'title',
+    align: 'center',
+    minWidth: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h(NButton, { text: true, type: 'primary', onClick: () => openTicketDetail(row) }, { default: () => row.title || '-' }),
+  },
+  {
+    title: '状态',
+    key: 'status',
+    align: 'center',
+    width: 120,
+    render: (row) => h(NTag, { type: ticketStatusTypeMap[row.status] || 'default' }, { default: () => ticketStatusTextMap[row.status] || row.status || '-' }),
+  },
+  { title: '处理人', key: 'tech_name', align: 'center', width: 110, render: (row) => row.tech_name || '-' },
+  { title: '创建时间', key: 'created_at', align: 'center', width: 170, render: (row) => row.created_at || '-' },
+]
+
+const activityColumns = [
+  { title: '运维类型', key: 'activity_type', align: 'center', width: 120, ellipsis: { tooltip: true } },
+  {
+    title: '标题',
+    key: 'title',
+    align: 'center',
+    minWidth: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h(NButton, { text: true, type: 'primary', onClick: () => openActivityDetail(row) }, { default: () => row.title || '-' }),
+  },
+  { title: '处理人', key: 'operator_name', align: 'center', width: 110, render: (row) => row.operator_name || '-' },
+  { title: '处理时间', key: 'started_at', align: 'center', width: 170, render: (row) => row.started_at || '-' },
+]
 
 const columns = [
   { title: '区域', key: 'region', align: 'center', width: 90, render: (row) => row.region || '-' },
@@ -249,42 +368,16 @@ const columns = [
   { title: '状态', key: 'status', align: 'center', width: 110, render: (row) => row.status || '-' },
   { title: '负责人', key: 'assignee_name', align: 'center', width: 120, render: (row) => row.assignee_name || '-' },
   {
-    title: '问题单',
-    key: 'issue_count',
-    align: 'center',
-    width: 90,
-    render(row) {
-      return h(NButton, { text: true, type: 'primary', onClick: () => jumpTickets(row, '现网问题') }, { default: () => row.issue_count || 0 })
-    },
-  },
-  {
-    title: '需求单',
-    key: 'requirement_count',
-    align: 'center',
-    width: 90,
-    render(row) {
-      return h(NButton, { text: true, type: 'primary', onClick: () => jumpTickets(row, '现网需求') }, { default: () => row.requirement_count || 0 })
-    },
-  },
-  {
-    title: '运维单',
-    key: 'activity_count',
-    align: 'center',
-    width: 90,
-    render(row) {
-      return h(NButton, { text: true, type: 'primary', onClick: () => jumpActivities(row) }, { default: () => row.activity_count || 0 })
-    },
-  },
-  {
     title: '操作',
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 140,
+    width: 190,
     render(row) {
       return [
         h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
         h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+        h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 10px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
       ]
     },
   },
@@ -441,6 +534,55 @@ const columns = [
         </div>
       </NForm>
     </CrudModal>
+
+    <NDrawer v-model:show="workOrderVisible" placement="right" :width="920">
+      <NDrawerContent :title="`${workOrderProject?.project_name || '-'} - 工单汇总`" closable>
+        <NTabs v-model:value="activeWorkOrderTab" type="line" animated>
+          <NTabPane name="issues" :tab="`问题单 (${workOrderTotals.issues})`">
+            <NDataTable
+              :columns="ticketColumns"
+              :data="workOrders.issues"
+              :loading="workOrderLoading"
+              :pagination="workOrderPagination('issues')"
+              remote
+              size="small"
+            />
+          </NTabPane>
+          <NTabPane name="requirements" :tab="`需求单 (${workOrderTotals.requirements})`">
+            <NDataTable
+              :columns="ticketColumns"
+              :data="workOrders.requirements"
+              :loading="workOrderLoading"
+              :pagination="workOrderPagination('requirements')"
+              remote
+              size="small"
+            />
+          </NTabPane>
+          <NTabPane name="activities" :tab="`运维单 (${workOrderTotals.activities})`">
+            <NDataTable
+              :columns="activityColumns"
+              :data="workOrders.activities"
+              :loading="workOrderLoading"
+              :pagination="workOrderPagination('activities')"
+              remote
+              size="small"
+            />
+          </NTabPane>
+        </NTabs>
+      </NDrawerContent>
+    </NDrawer>
+
+    <TicketDetailModal v-model:visible="ticketDetailVisible" :ticket="currentTicket" :loading="ticketDetailLoading" />
+
+    <CrudModal v-model:visible="activityDetailVisible" title="运维详情" :show-footer="false" width="640px">
+      <div class="activity-detail">
+        <div><span>标题</span><strong>{{ currentActivity.title || '-' }}</strong></div>
+        <div><span>运维类型</span><strong>{{ currentActivity.activity_type || '-' }}</strong></div>
+        <div><span>处理人</span><strong>{{ currentActivity.operator_name || '-' }}</strong></div>
+        <div><span>处理时间</span><strong>{{ currentActivity.started_at || '-' }}</strong></div>
+        <div class="span-2"><span>内容</span><p>{{ currentActivity.content || '-' }}</p></div>
+      </div>
+    </CrudModal>
   </CommonPage>
 </template>
 
@@ -530,6 +672,25 @@ const columns = [
 
 .span-2 {
   grid-column: 1 / -1;
+}
+
+.activity-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.activity-detail span {
+  display: block;
+  margin-bottom: 6px;
+  color: #6b7280;
+}
+
+.activity-detail strong,
+.activity-detail p {
+  margin: 0;
+  color: #111827;
+  white-space: pre-wrap;
 }
 
 .summary-grid {

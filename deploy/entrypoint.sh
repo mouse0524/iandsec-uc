@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 
-nginx -g "pid /tmp/nginx.pid;"
+nginx
 python run.py
