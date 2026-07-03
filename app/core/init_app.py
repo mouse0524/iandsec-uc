@@ -104,6 +104,7 @@ def _project_api_paths() -> list[str]:
         "/api/v1/project/activity/list",
         "/api/v1/project/activity/create",
         "/api/v1/project/activity/update",
+        "/api/v1/project/activity/delete",
     ]
 
 

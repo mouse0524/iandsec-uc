@@ -43,8 +43,8 @@ export default defineConfig(({ command, mode }) => {
     build: {
       target: 'es2015',
       outDir: OUTPUT_DIR || 'dist',
-      reportCompressedSize: false, // 启用/禁用 gzip 压缩大小报告
-      chunkSizeWarningLimit: 1024, // chunk 大小警告的限制（单位kb）
+      reportCompressedSize: false, // Disable gzip size report
+      chunkSizeWarningLimit: 6144, // Keep lazy Excel preview below warning limit
     },
   }
 })

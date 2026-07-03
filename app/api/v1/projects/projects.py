@@ -8,6 +8,7 @@ from app.models.admin import User
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.projects import (
     ProjectActivityCreateIn,
+    ProjectActivityDeleteIn,
     ProjectActivityUpdateIn,
     ProjectBatchDeleteIn,
     ProjectAssignIn,
@@ -222,3 +223,12 @@ async def update_project_activity(payload: ProjectActivityUpdateIn):
         activity_id=payload.activity_id,
     )
     return Success(data=await project_controller._activity_row(activity))
+
+
+@router.post("/activity/delete", summary="删除项目活动", dependencies=[DependAuth])
+async def delete_project_activity(payload: ProjectActivityDeleteIn):
+    user = await _require_project_manager()
+    activity = await project_controller.get_activity(payload.activity_id)
+    await _ensure_project_visible(user, activity.project_id)
+    await project_controller.delete_activity(payload.activity_id)
+    return Success(data={"count": 1})

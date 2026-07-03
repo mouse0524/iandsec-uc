@@ -62,7 +62,7 @@ const activityForm = computed(() => ({
   ...currentActivity.value,
   started_at: currentActivity.value?.started_at ? Date.parse(currentActivity.value.started_at) : null,
 }))
-const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0 }
+const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0, product_points: [] }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
 
@@ -134,8 +134,14 @@ function channelDeptOptions(rows) {
 
 async function getProjectList(params) {
   const res = await api.projectList(params)
-  summary.value = res?.summary || { ...defaultSummary }
+  summary.value = normalizeSummary(res?.summary)
   return res
+}
+
+function normalizeSummary(value) {
+  const next = { ...defaultSummary, ...(value || {}) }
+  next.product_points = Array.isArray(next.product_points) ? next.product_points : []
+  return next
 }
 
 const selectedProducts = computed({
@@ -211,6 +217,13 @@ function openEdit(row) {
 function openActivityDetail(row) {
   currentActivity.value = row
   activityDetailVisible.value = true
+}
+
+async function deleteActivity(row) {
+  await api.projectActivityDelete({ activity_id: row.id })
+  $message.success('运维记录已删除')
+  await loadWorkOrders(workOrderProject.value, 'activities')
+  $table.value?.handleSearch()
 }
 
 async function submitProject() {
@@ -440,6 +453,23 @@ const activityColumns = [
   },
   { title: '处理人', key: 'operator_name', align: 'center', width: 110, render: (row) => row.operator_name || '-' },
   { title: '处理时间', key: 'started_at', align: 'center', width: 170, render: (row) => row.started_at || '-' },
+  {
+    title: '操作',
+    key: 'actions',
+    align: 'center',
+    fixed: 'right',
+    width: 90,
+    render(row) {
+      return h(
+        NPopconfirm,
+        { onPositiveClick: () => deleteActivity(row) },
+        {
+          trigger: () => h(NButton, { size: 'small', type: 'error', text: true }, { default: () => '删除' }),
+          default: () => '删除后不可恢复，是否继续？',
+        }
+      )
+    },
+  },
 ]
 
 const columns = [
@@ -499,33 +529,45 @@ const columns = [
 <template>
   <CommonPage title="项目管理">
     <div class="summary-grid">
-      <div class="summary-card">
-        <span>项目总数</span>
-        <strong>{{ summary.total || 0 }}</strong>
+      <div class="summary-row product-summary">
+        <span class="summary-label product-summary-title">使用产品/点数汇总</span>
+        <div class="product-summary-list">
+          <div v-for="item in summary.product_points.slice(0, 8)" :key="item.product_name" class="product-summary-item">
+            <span class="product-summary-name">{{ item.product_name }}</span>
+            <span class="product-summary-count">{{ item.points || 0 }}</span>
+          </div>
+          <span v-if="!summary.product_points?.length" class="product-summary-empty">暂无</span>
+        </div>
       </div>
-      <div class="summary-card" data-tone="warning">
-        <span>售前</span>
-        <strong>{{ summary.presale || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="warning">
-        <span>待实施</span>
-        <strong>{{ summary.pending || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="info">
-        <span>实施中</span>
-        <strong>{{ summary.implementing || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="info">
-        <span>待验收</span>
-        <strong>{{ summary.pending_acceptance || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="success">
-        <span>已验收</span>
-        <strong>{{ summary.accepted || 0 }}</strong>
-      </div>
-      <div class="summary-card" data-tone="error">
-        <span>关闭</span>
-        <strong>{{ summary.lost || 0 }}</strong>
+      <div class="summary-row">
+        <div class="summary-item">
+          <span class="summary-label">项目总数</span>
+          <strong>{{ summary.total || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="warning">
+          <span class="summary-label">售前</span>
+          <strong>{{ summary.presale || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="warning">
+          <span class="summary-label">待实施</span>
+          <strong>{{ summary.pending || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="info">
+          <span class="summary-label">实施中</span>
+          <strong>{{ summary.implementing || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="info">
+          <span class="summary-label">待验收</span>
+          <strong>{{ summary.pending_acceptance || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="success">
+          <span class="summary-label">已验收</span>
+          <strong>{{ summary.accepted || 0 }}</strong>
+        </div>
+        <div class="summary-item" data-tone="error">
+          <span class="summary-label">关闭</span>
+          <strong>{{ summary.lost || 0 }}</strong>
+        </div>
       </div>
     </div>
     <CrudTable
@@ -848,60 +890,115 @@ const columns = [
 }
 
 .summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.summary-card {
+.summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 8px 12px;
   border: 1px solid #ebeef5;
+  border-radius: 10px;
   background: #fff;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
 }
 
-.summary-card span {
-  display: block;
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.summary-label {
   color: #6b7280;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
-.summary-card strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 28px;
-  line-height: 1;
+.summary-item strong {
   color: #111827;
+  font-size: 14px;
+  line-height: 1;
 }
 
-.summary-card[data-tone='warning'] {
-  background: linear-gradient(180deg, #fffaf0 0%, #ffffff 100%);
+.product-summary {
+  align-items: center;
 }
 
-.summary-card[data-tone='success'] {
-  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+.product-summary-list {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
-.summary-card[data-tone='info'] {
-  background: linear-gradient(180deg, #f3f8ff 0%, #ffffff 100%);
+.product-summary-title {
+  flex: 0 0 auto;
 }
 
-.summary-card[data-tone='error'] {
-  background: linear-gradient(180deg, #fff1f2 0%, #ffffff 100%);
+.product-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-@media (max-width: 900px) {
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.product-summary-name {
+  overflow: hidden;
+  max-width: 120px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-summary-count {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.product-summary-empty {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.summary-item[data-tone='warning'] {
+  background: #fff7ed;
+}
+
+.summary-item[data-tone='success'] {
+  background: #f0fdf4;
+}
+
+.summary-item[data-tone='info'] {
+  background: #eff6ff;
+}
+
+.summary-item[data-tone='error'] {
+  background: #fff1f2;
 }
 
 @media (max-width: 640px) {
-  .summary-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .product-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 }
 </style>

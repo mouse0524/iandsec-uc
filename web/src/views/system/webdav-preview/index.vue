@@ -1,12 +1,48 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { VueFilesPreview } from 'vue-files-preview'
 import 'vue-files-preview/lib/style.css'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import api from '@/api'
 
 defineOptions({ name: 'WebdavFilePreview' })
+
+const previewLoaders = {
+  audio: () => import('vue-files-preview/es/packages/preview/supports/audio-preview/index.vue.mjs'),
+  code: () => import('vue-files-preview/es/packages/preview/supports/code-preview/index.vue.mjs'),
+  docx: () => import('vue-files-preview/es/packages/preview/supports/docx-preview/index.vue.mjs'),
+  epub: () => import('vue-files-preview/es/packages/preview/supports/epub-preview/index.vue.mjs'),
+  md: () => import('vue-files-preview/es/packages/preview/supports/md-preview/index.vue.mjs'),
+  msg: () => import('vue-files-preview/es/packages/preview/supports/msg-preview/index.vue.mjs'),
+  pdf: () => import('vue-files-preview/es/packages/preview/supports/pdf-preview/index.vue.mjs'),
+  pic: () => import('vue-files-preview/es/packages/preview/supports/pic-preview/index.vue.mjs'),
+  ppt: () => import('vue-files-preview/es/packages/preview/supports/ppt-preview/index.vue.mjs'),
+  txt: () => import('vue-files-preview/es/packages/preview/supports/txt-preview/index.vue.mjs'),
+  unknown: () => import('vue-files-preview/es/packages/preview/supports/unknown-preview/index.vue.mjs'),
+  video: () => import('vue-files-preview/es/packages/preview/supports/video-preview/index.vue.mjs'),
+  xlsx: () => import('vue-files-preview/es/packages/preview/supports/xlsx-preview/index.vue.mjs'),
+}
+
+const previewTypes = {
+  audio: ['mp3', 'wav', 'wma', 'ogg', 'aac', 'flac'],
+  code: ['html', 'css', 'less', 'scss', 'js', 'json', 'ts', 'vue', 'c', 'cpp', 'java', 'py', 'go', 'php', 'lua', 'rb', 'pl', 'swift', 'vb', 'cs', 'sh', 'rs', 'vim', 'log', 'lock', 'mod', 'mht', 'mhtml', 'xml'],
+  docx: ['docx'],
+  epub: ['epub'],
+  md: ['md'],
+  msg: ['msg'],
+  pdf: ['pdf'],
+  pic: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'ico'],
+  ppt: ['ppt', 'pptx', 'fodp', 'odp', 'otp', 'pot', 'potm', 'potx', 'pps', 'ppsm', 'ppsx', 'pptm'],
+  txt: ['txt'],
+  unknown: ['doc', 'docm', 'dot', 'dotm', 'dotx', 'fodt', 'odt', 'ott', 'rtf', 'djvu', 'xps'],
+  video: ['mp4', 'webm', 'ogg', 'mkv', 'avi', 'mpeg', 'flv', 'mov', 'wmv'],
+  xlsx: ['xlsx', 'xls', 'csv', 'fods', 'ods', 'ots', 'xlsm', 'xlt', 'xltm'],
+}
+
+function previewType(name) {
+  const ext = String(name || '').split('.').pop()?.toLowerCase()
+  return Object.keys(previewTypes).find((type) => previewTypes[type].includes(ext)) || 'unknown'
+}
 
 const route = useRoute()
 const fileUrl = ref('')
@@ -22,6 +58,8 @@ const filePath = computed(() => {
   const value = route.query.path
   return Array.isArray(value) ? value[0] || '' : value || ''
 })
+
+const PreviewComponent = computed(() => defineAsyncComponent(previewLoaders[previewType(fileName.value)]))
 
 function buildAbsoluteApiUrl(apiUrl) {
   if (!apiUrl) return ''
@@ -86,7 +124,7 @@ onMounted(() => {
     </header>
 
     <section v-if="fileUrl" class="preview-shell">
-      <VueFilesPreview :url="fileUrl" :name="fileName" height="100%" overflow="auto" />
+      <component :is="PreviewComponent" :url="fileUrl" :name="fileName" height="100%" overflow="auto" />
     </section>
     <section v-else class="empty-state">
       <TheIcon

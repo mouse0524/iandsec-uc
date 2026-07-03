@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.controllers import project as project_module
 from app.controllers.project import project_controller
+from app.core.init_app import _project_api_paths
 from app.models.enums import PartnerLevel
 from app.schemas.depts import DeptCreate
 from app.schemas.partner import PartnerRegisterIn
@@ -14,6 +15,10 @@ from app.schemas.partner import PartnerRegisterIn
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_project_activity_delete_api_is_in_permission_seed():
+    assert "/api/v1/project/activity/delete" in _project_api_paths()
 
 
 @pytest.mark.anyio
@@ -169,6 +174,51 @@ def test_project_query_supports_agent_filter():
     assert any(child.filters == {"agent_id": 11} for child in q.children)
 
 
+@pytest.mark.anyio
+async def test_project_summary_aggregates_product_points(monkeypatch):
+    async def fake_redis(command, *args, **kwargs):
+        return None
+
+    class ProjectQuery:
+        async def count(self):
+            return 2
+
+        async def all(self):
+            return [
+                SimpleNamespace(product_points=[{"product_name": "EDG", "points": 2}]),
+                SimpleNamespace(product_points=[{"product_name": "EDG", "points": 3}, {"product_name": "ASG", "points": 1}]),
+            ]
+
+    class FakeProject:
+        @staticmethod
+        def filter(*args, **kwargs):
+            return ProjectQuery()
+
+    monkeypatch.setattr(project_module, "execute_redis", fake_redis)
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+
+    summary = await project_controller.project_summary({})
+
+    assert summary["product_points"] == [
+        {"product_name": "ASG", "points": 1},
+        {"product_name": "EDG", "points": 5},
+    ]
+
+
+@pytest.mark.anyio
+async def test_project_summary_uses_redis_cache(monkeypatch):
+    async def fake_redis(command, *args, **kwargs):
+        assert command == "get"
+        return '{"total": 3, "product_points": [{"product_name": "EDG", "points": 7}]}'
+
+    monkeypatch.setattr(project_module, "execute_redis", fake_redis)
+
+    summary = await project_controller.project_summary({})
+
+    assert summary["total"] == 3
+    assert summary["product_points"] == [{"product_name": "EDG", "points": 7}]
+
+
 def test_partner_register_company_name_must_be_full_company_name():
     payload = {
         "company_name": "安得",
@@ -195,6 +245,9 @@ def test_dept_accepts_channel_level():
 @pytest.mark.anyio
 async def test_delete_projects_removes_activities_and_unbinds_attachments(monkeypatch):
     calls = []
+
+    async def fake_clear_summary_cache():
+        return None
 
     class DeleteQuery:
         def __init__(self, label):
@@ -229,6 +282,7 @@ async def test_delete_projects_removes_activities_and_unbinds_attachments(monkey
     monkeypatch.setattr(project_module, "Project", FakeProject)
     monkeypatch.setattr(project_module, "ProjectActivity", FakeProjectActivity)
     monkeypatch.setattr(project_module, "ProjectAttachment", FakeProjectAttachment)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
 
     assert await project_controller.delete_projects.__wrapped__(project_controller, [1, 2]) == 2
     assert calls == [
@@ -239,6 +293,27 @@ async def test_delete_projects_removes_activities_and_unbinds_attachments(monkey
         ("project", {"id__in": [1, 2]}),
         ("project", "delete"),
     ]
+
+
+@pytest.mark.anyio
+async def test_delete_activity_removes_activity(monkeypatch):
+    calls = []
+
+    class DeleteQuery:
+        async def delete(self):
+            calls.append("delete")
+            return 1
+
+    class FakeProjectActivity:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(kwargs)
+            return DeleteQuery()
+
+    monkeypatch.setattr(project_module, "ProjectActivity", FakeProjectActivity)
+
+    assert await project_controller.delete_activity(9) == 1
+    assert calls == [{"id": 9}, "delete"]
 
 
 def test_import_points_ignore_server_count_and_map_products():
@@ -293,6 +368,9 @@ async def test_sync_project_attachments_unbinds_removed_ids(monkeypatch):
 async def test_batch_update_projects_only_updates_batch_fields(monkeypatch):
     calls = {}
 
+    async def fake_clear_summary_cache():
+        return None
+
     async def fake_config():
         return {
             "project_products": ["EDG"],
@@ -320,6 +398,7 @@ async def test_batch_update_projects_only_updates_batch_fields(monkeypatch):
     monkeypatch.setattr(project_module.system_setting_controller, "get_full_dict", fake_config)
     monkeypatch.setattr(project_module, "Project", FakeProject)
     monkeypatch.setattr(project_controller, "_validate_assignee", fake_validate_assignee)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
 
     count = await project_controller.batch_update_projects(
         project_ids=[1, 2],
@@ -339,6 +418,9 @@ async def test_batch_update_projects_only_updates_batch_fields(monkeypatch):
 @pytest.mark.anyio
 async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
     calls = []
+
+    async def fake_clear_summary_cache():
+        return None
 
     class FakeSheet:
         def iter_rows(self, values_only=True):
@@ -385,6 +467,7 @@ async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
     monkeypatch.setattr(project_module.dept_controller, "get_or_create", fake_get_or_create)
     monkeypatch.setattr(project_controller, "_config", fake_config)
     monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
 
     result = await project_controller.import_projects(user_id=7, file=FakeFile())
 
@@ -425,6 +508,9 @@ async def test_validate_agent_requires_channel_child(monkeypatch):
 @pytest.mark.anyio
 async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypatch):
     calls = []
+
+    async def fake_clear_summary_cache():
+        return None
 
     class FakeSheet:
         def iter_rows(self, values_only=True):
@@ -482,6 +568,7 @@ async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypat
     monkeypatch.setattr(project_module.dept_controller, "clear_dept_dict_cache", fake_clear_cache)
     monkeypatch.setattr(project_controller, "_config", fake_config)
     monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
 
     result = await project_controller.import_projects(user_id=7, file=FakeFile())
 
@@ -493,6 +580,9 @@ async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypat
 @pytest.mark.anyio
 async def test_import_projects_leaves_missing_assignee_blank(monkeypatch):
     calls = []
+
+    async def fake_clear_summary_cache():
+        return None
 
     class FakeSheet:
         def iter_rows(self, values_only=True):
@@ -543,6 +633,7 @@ async def test_import_projects_leaves_missing_assignee_blank(monkeypatch):
     monkeypatch.setattr(project_controller, "_config", fake_config)
     monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
     monkeypatch.setattr(project_controller, "_resolve_import_assignee", fake_resolve_assignee)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
 
     result = await project_controller.import_projects(user_id=7, file=FakeFile())
 

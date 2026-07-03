@@ -65,3 +65,7 @@ class ProjectActivityCreateIn(BaseModel):
 
 class ProjectActivityUpdateIn(ProjectActivityCreateIn):
     activity_id: int = Field(..., description="活动ID")
+
+
+class ProjectActivityDeleteIn(BaseModel):
+    activity_id: int = Field(..., description="活动ID")

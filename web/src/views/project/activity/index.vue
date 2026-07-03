@@ -1,7 +1,7 @@
 <script setup>
 import { h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NDatePicker, NForm, NFormItem, NInput, NSelect, NTag } from 'naive-ui'
+import { NButton, NDatePicker, NForm, NFormItem, NInput, NPopconfirm, NSelect, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
@@ -120,6 +120,12 @@ async function submitActivity() {
   $table.value?.handleSearch()
 }
 
+async function deleteActivity(row) {
+  await api.projectActivityDelete({ activity_id: row.id })
+  $message.success('运维记录已删除')
+  $table.value?.handleSearch()
+}
+
 const columns = [
   { title: '项目', key: 'project_name', align: 'center', width: 180 },
   { title: '运维类型', key: 'activity_type', align: 'center', width: 120 },
@@ -137,11 +143,19 @@ const columns = [
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 140,
+    width: 190,
     render(row) {
       return [
         h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
         h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => deleteActivity(row) },
+          {
+            trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 10px' }, { default: () => '删除' }),
+            default: () => '删除后不可恢复，是否继续？',
+          }
+        ),
       ]
     },
   },

@@ -323,7 +323,7 @@ const columns = [
   <CommonPage title="工单审核" show-footer>
     <div class="ticket-review-page">
       <div class="summary-grid review-grid">
-        <div v-for="item in summaryCards" :key="item.label" class="summary-card" :data-tone="item.tone">
+        <div v-for="item in summaryCards" :key="item.label" class="summary-item" :data-tone="item.tone">
           <span>{{ item.label }}</span>
           <strong>{{ item.value }}</strong>
         </div>
@@ -468,46 +468,47 @@ const columns = [
 }
 
 .summary-grid {
-  display: grid;
-  gap: 14px;
-}
-
-.review-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.summary-card {
-  padding: 16px 18px;
-  border-radius: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
   border: 1px solid #ebeef5;
+  border-radius: 10px;
   background: #fff;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
 }
 
-.summary-card span {
-  display: block;
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.summary-item span {
   color: #6b7280;
-  font-size: 13px;
 }
 
-.summary-card strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 28px;
-  line-height: 1;
+.summary-item strong {
   color: #111827;
+  font-size: 14px;
+  line-height: 1;
 }
 
-.summary-card[data-tone='warning'] {
-  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+.summary-item[data-tone='warning'] {
+  background: #fff7ed;
 }
 
-.summary-card[data-tone='error'] {
-  background: linear-gradient(180deg, #fff1f2 0%, #ffffff 100%);
+.summary-item[data-tone='error'] {
+  background: #fff1f2;
 }
 
-.summary-card[data-tone='info'] {
-  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+.summary-item[data-tone='info'] {
+  background: #eff6ff;
 }
 
 .table-shell {
@@ -539,10 +540,4 @@ const columns = [
   margin-top: 16px;
 }
 
-@media (max-width: 900px) {
-  .review-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-}
 </style>

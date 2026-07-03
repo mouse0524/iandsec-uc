@@ -115,6 +115,7 @@ export default {
   projectActivityList: (params = {}) => request.get('/project/activity/list', { params }),
   projectActivityCreate: (data = {}) => request.post('/project/activity/create', data),
   projectActivityUpdate: (data = {}) => request.post('/project/activity/update', data),
+  projectActivityDelete: (data = {}) => request.post('/project/activity/delete', data),
   // partner
   channelRegister: (data = {}) =>
     request.post('/partner/register', { ...data, register_type: 'channel' }, { noNeedToken: true }),

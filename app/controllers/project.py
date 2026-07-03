@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 from io import BytesIO
 from datetime import datetime
 from mimetypes import guess_type
@@ -9,6 +10,7 @@ from openpyxl import load_workbook
 from tortoise.expressions import Q
 from tortoise.transactions import atomic
 
+from app.core.redis_client import execute_redis
 from app.controllers.dept import dept_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
@@ -28,9 +30,28 @@ IMPORT_AGENT_PARENT_DEPT_NAME = "渠道部门"
 
 
 class ProjectController:
+    SUMMARY_CACHE_PREFIX = "project:summary:"
+    SUMMARY_CACHE_TTL_SECONDS = 300
+
     @staticmethod
     def _clean(value) -> str:
         return str(value or "").strip()
+
+    def _summary_cache_key(self, filters: dict) -> str:
+        items = [(key, filters.get(key)) for key in sorted(filters or {}) if filters.get(key) not in (None, "")]
+        return f"{self.SUMMARY_CACHE_PREFIX}{json.dumps(items, ensure_ascii=False, sort_keys=True)}"
+
+    async def clear_summary_cache(self) -> None:
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await execute_redis("scan", cursor=cursor, match=f"{self.SUMMARY_CACHE_PREFIX}*", count=200)
+                if keys:
+                    await execute_redis("delete", *keys)
+                if int(cursor) == 0:
+                    break
+        except Exception as exc:
+            logger.warning("[project.summary] cache_clear_failed error={}", str(exc))
 
     @staticmethod
     def _can_manage(user: User, role_names: list[str]) -> bool:
@@ -267,6 +288,8 @@ class ProjectController:
                     project_name,
                     exc.detail,
                 )
+        if created or updated:
+            await self.clear_summary_cache()
         return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
     async def create_project(self, *, user_id: int, payload: dict) -> Project:
@@ -280,6 +303,7 @@ class ProjectController:
             assigned_at=datetime.now() if assignee_id else None,
         )
         await self._bind_attachments(project_id=project.id, attachment_ids=attachment_ids, owner_ids=[user_id])
+        await self.clear_summary_cache()
         return project
 
     async def update_project(self, *, project_id: int, user_id: int, payload: dict) -> Project:
@@ -296,6 +320,7 @@ class ProjectController:
         await project.save()
         if sync_attachments:
             await self._sync_attachments(project_id=project.id, attachment_ids=attachment_ids, owner_ids=[user_id, project.created_by])
+        await self.clear_summary_cache()
         return project
 
     async def set_status(self, *, project_id: int, status: str) -> Project:
@@ -306,6 +331,7 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="项目状态不在配置范围内")
         project.status = normalized
         await project.save()
+        await self.clear_summary_cache()
         return project
 
     async def assign(self, *, project_id: int, user_id: int, assignee_id: int | None) -> Project:
@@ -315,6 +341,7 @@ class ProjectController:
         project.assigned_by = user_id if assignee_id else None
         project.assigned_at = datetime.now() if assignee_id else None
         await project.save()
+        await self.clear_summary_cache()
         return project
 
     async def batch_update_projects(self, *, project_ids: list[int], user_id: int, payload: dict) -> int:
@@ -337,7 +364,10 @@ class ProjectController:
             await self._validate_assignee(data.get("assignee_id"))
             data["assigned_by"] = user_id if data.get("assignee_id") else None
             data["assigned_at"] = datetime.now() if data.get("assignee_id") else None
-        return await Project.filter(id__in=ids).update(**data)
+        count = await Project.filter(id__in=ids).update(**data)
+        if count:
+            await self.clear_summary_cache()
+        return count
 
     @atomic()
     async def delete_projects(self, project_ids: list[int]) -> int:
@@ -346,7 +376,10 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="请选择项目")
         await ProjectActivity.filter(project_id__in=ids).delete()
         await ProjectAttachment.filter(project_id__in=ids).update(project_id=None)
-        return await Project.filter(id__in=ids).delete()
+        count = await Project.filter(id__in=ids).delete()
+        if count:
+            await self.clear_summary_cache()
+        return count
 
     async def list_projects(self, *, page: int, page_size: int, filters: dict) -> tuple[int, list[dict]]:
         q = self._project_q(filters)
@@ -357,8 +390,29 @@ class ProjectController:
         return total, rows
 
     async def project_summary(self, filters: dict) -> dict:
+        cache_key = self._summary_cache_key(filters)
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("[project.summary] cache_read_failed key={} error={}", cache_key, str(exc))
+        data = await self._project_summary_uncached(filters)
+        try:
+            await execute_redis("setex", cache_key, self.SUMMARY_CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[project.summary] cache_write_failed key={} error={}", cache_key, str(exc))
+        return data
+
+    async def _project_summary_uncached(self, filters: dict) -> dict:
         q = self._project_q(filters)
         total = await Project.filter(q).count()
+        product_points: dict[str, int] = {}
+        for project in await Project.filter(q).all():
+            for item in project.product_points or []:
+                name = self._clean((item or {}).get("product_name"))
+                if name:
+                    product_points[name] = product_points.get(name, 0) + int((item or {}).get("points") or 0)
         return {
             "total": total,
             "presale": await Project.filter(q & Q(status="售前")).count(),
@@ -367,6 +421,10 @@ class ProjectController:
             "pending_acceptance": await Project.filter(q & Q(status="待验收")).count(),
             "accepted": await Project.filter(q & Q(status="已验收")).count(),
             "lost": await Project.filter(q & Q(status="关闭")).count(),
+            "product_points": [
+                {"product_name": name, "points": points}
+                for name, points in sorted(product_points.items())
+            ],
         }
 
     async def _project_row(self, project: Project) -> dict:
@@ -435,6 +493,9 @@ class ProjectController:
 
     async def get_activity(self, activity_id: int) -> ProjectActivity:
         return await ProjectActivity.get(id=activity_id)
+
+    async def delete_activity(self, activity_id: int) -> int:
+        return await ProjectActivity.filter(id=activity_id).delete()
 
     async def save_activity(self, *, user_id: int, payload: dict, activity_id: int | None = None) -> ProjectActivity:
         config = await self._config()
