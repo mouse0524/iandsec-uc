@@ -26,6 +26,8 @@ ASSIGNEE_ROLES = {"技术"}
 ACTIVITY_STATUSES = {"待处理", "处理中", "已完成"}
 PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"]
 IMPORT_POINT_PRODUCTS = ["EDG", "ASG", "TSafe", "TDLP"]
+IMPORT_SINGLE_COUNT_PRODUCTS = {"DAS", "DSES", "NDLP"}
+IMPORT_NO_COUNT_PRODUCTS = {"服务", "其他"}
 IMPORT_AGENT_PARENT_DEPT_NAME = "渠道部门"
 
 
@@ -185,9 +187,32 @@ class ProjectController:
         fixed = [by_lower.get(item.lower()) for item in IMPORT_POINT_PRODUCTS[:size]]
         return fixed if all(fixed) else products[:size]
 
-    def _parse_import_product_points(self, value, products: list[str]) -> list[dict]:
-        parts = [item.strip() for item in str(value or "").replace("－", "-").split("-")]
-        if len(parts) not in {4, 5}:
+    def _parse_import_count(self, value) -> int:
+        count = 0
+        for term in str(value or 0).replace("×", "*").replace("＋", "+").split("+"):
+            subtotal = 1
+            for part in term.split("*"):
+                subtotal *= float(part.strip() or 0)
+            count += subtotal
+        return max(0, int(count))
+
+    def _parse_import_product_points(self, value, products: list[str], import_product: str = "") -> list[dict]:
+        import_product = self._clean(import_product)
+        if import_product in IMPORT_NO_COUNT_PRODUCTS:
+            return [{"product_name": import_product if import_product in products else products[0], "points": 0}]
+        if import_product in IMPORT_SINGLE_COUNT_PRODUCTS:
+            try:
+                return [{"product_name": import_product, "points": self._parse_import_count(value)}]
+            except ValueError:
+                raise HTTPException(status_code=400, detail="终端点数必须是数字")
+        text = str(value or "").strip()
+        if text in {"", "/"}:
+            parts = ["0", "0"]
+        else:
+            parts = [item.strip() for item in text.replace("－", "-").split("-")]
+        if len(parts) == 1:
+            parts.append("0")
+        if len(parts) not in {2, 3, 4, 5}:
             raise HTTPException(status_code=400, detail="终端点数格式应为：服务器端-EDG-ASG-Tsafe[-TDLP]")
         point_products = self._import_point_products(products, len(parts) - 1)
         if len(point_products) < len(parts) - 1:
@@ -195,10 +220,7 @@ class ProjectController:
         counts = []
         for item in parts[1:]:
             try:
-                count = 1
-                for part in str(item or 0).replace("×", "*").split("*"):
-                    count *= float(part.strip() or 0)
-                counts.append(max(0, int(count)))
+                counts.append(self._parse_import_count(item))
             except ValueError:
                 raise HTTPException(status_code=400, detail="终端点数必须是数字")
         rows = [
@@ -207,6 +229,18 @@ class ProjectController:
             if count > 0
         ]
         return rows or [{"product_name": point_products[0], "points": 0}]
+
+    def _merge_product_points(self, current: list[dict] | None, added: list[dict]) -> list[dict]:
+        rows = [dict(item or {}) for item in current or []]
+        positions = {self._clean(item.get("product_name")): index for index, item in enumerate(rows)}
+        for item in added:
+            name = self._clean((item or {}).get("product_name"))
+            if name in positions:
+                rows[positions[name]]["points"] = int(rows[positions[name]].get("points") or 0) + int((item or {}).get("points") or 0)
+            elif name:
+                positions[name] = len(rows)
+                rows.append({"product_name": name, "points": int((item or {}).get("points") or 0)})
+        return rows
 
     @staticmethod
     def _cell_text(value) -> str:
@@ -227,9 +261,13 @@ class ProjectController:
         config = await self._config()
         created = updated = skipped = 0
         errors = []
+        imported_project_keys = set()
         for row_no, row in enumerate(rows, start=2):
             agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
             project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
+            import_product = self._cell_text(row[idx["产品名称"]] if "产品名称" in idx and len(row) > idx["产品名称"] else "")
+            region = self._cell_text(row[idx["区域"]] if "区域" in idx and len(row) > idx["区域"] else "")
+            status = self._cell_text(row[idx["状态"]] if "状态" in idx and len(row) > idx["状态"] else "")
             points = row[idx["终端点数"]] if len(row) > idx["终端点数"] else None
             assignee_id = await self._resolve_import_assignee(row[idx["负责人"]]) if has_assignee and len(row) > idx["负责人"] else None
             if not agent_name and not project_name and not points:
@@ -256,13 +294,24 @@ class ProjectController:
                     {
                         "project_name": project_name,
                         "agent_id": agent.id,
-                        "product_points": self._parse_import_product_points(points, config["products"]),
+                        "product_points": self._parse_import_product_points(points, config["products"], import_product),
+                        **({"region": region} if region else {}),
+                        **({"status": status} if status else {}),
                         **({"assignee_id": assignee_id} if has_assignee else {}),
                     }
                 )
                 project = await Project.filter(project_name=project_name, agent_id=agent.id).first()
+                project_key = (agent.id, project_name)
                 if project:
-                    project.product_points = data["product_points"]
+                    project.product_points = (
+                        self._merge_product_points(project.product_points, data["product_points"])
+                        if project_key in imported_project_keys
+                        else data["product_points"]
+                    )
+                    if region:
+                        project.region = data.get("region")
+                    if status:
+                        project.status = data.get("status")
                     if has_assignee:
                         project.assignee_id = data.get("assignee_id")
                         project.assigned_by = user_id if project.assignee_id else None
@@ -278,6 +327,7 @@ class ProjectController:
                         assigned_at=datetime.now() if assignee_id else None,
                     )
                     created += 1
+                imported_project_keys.add(project_key)
             except HTTPException as exc:
                 error = {"row": row_no, "error": exc.detail}
                 errors.append(error)
@@ -290,6 +340,17 @@ class ProjectController:
                 )
         if created or updated:
             await self.clear_summary_cache()
+        logger.info(
+            "[project.import] completed user_id={} filename={} headers={} created={} updated={} skipped={} failed={} errors={}",
+            user_id,
+            file.filename,
+            headers,
+            created,
+            updated,
+            skipped,
+            len(errors),
+            errors,
+        )
         return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
     async def create_project(self, *, user_id: int, payload: dict) -> Project:

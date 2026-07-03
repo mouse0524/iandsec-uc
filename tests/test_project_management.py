@@ -328,6 +328,43 @@ def test_import_points_support_multiplier_cells():
     assert rows == [{"product_name": "EDG", "points": 5}, {"product_name": "TSafe", "points": 30}]
 
 
+def test_import_points_support_omitted_trailing_zero_and_sum_cells():
+    rows = project_controller._parse_import_product_points("1-100+62-0", ["EDG", "ASG", "TSafe"])
+
+    assert rows == [{"product_name": "EDG", "points": 162}]
+
+
+def test_import_points_support_server_only_cells():
+    rows = project_controller._parse_import_product_points("/", ["EDG", "ASG", "TSafe"])
+
+    assert rows == [{"product_name": "EDG", "points": 0}]
+
+
+def test_import_points_support_single_count_products():
+    rows = project_controller._parse_import_product_points(1, ["EDG", "DAS"], "DAS")
+
+    assert rows == [{"product_name": "DAS", "points": 1}]
+
+
+def test_import_points_skip_count_for_service_products():
+    rows = project_controller._parse_import_product_points(99, ["EDG", "服务"], "服务")
+
+    assert rows == [{"product_name": "服务", "points": 0}]
+
+
+def test_import_points_merge_existing_project_points():
+    rows = project_controller._merge_product_points(
+        [{"product_name": "EDG", "points": 100}, {"product_name": "TSafe", "points": 5}],
+        [{"product_name": "EDG", "points": 62}, {"product_name": "ASG", "points": 1}],
+    )
+
+    assert rows == [
+        {"product_name": "EDG", "points": 162},
+        {"product_name": "TSafe", "points": 5},
+        {"product_name": "ASG", "points": 1},
+    ]
+
+
 def test_import_points_support_tdlp_segment():
     rows = project_controller._parse_import_product_points("1-0-0-0-200", ["EDG", "ASG", "TSafe", "TDLP"])
 
@@ -474,6 +511,78 @@ async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
     assert result["created"] == 1
     assert calls[0] == ("dept", {"name": "渠道部门", "parent_id": 0, "desc": "项目导入自动创建"})
     assert calls[1] == ("dept", {"name": "代理商A", "parent_id": 10, "desc": "项目导入自动创建"})
+
+
+@pytest.mark.anyio
+async def test_import_projects_accumulates_points_and_updates_region_status(monkeypatch):
+    calls = []
+
+    async def fake_clear_summary_cache():
+        return None
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([
+                ("所属代理商", "项目名称", "产品名称", "终端点数", "区域", "状态"),
+                ("代理商A", "北纬三七（苏州）科技有限公司", "EDG", "1-62-0-0", "华东", "实施中"),
+                ("代理商A", "北纬三七（苏州）科技有限公司", "EDG", "1-38-0-0", "华东", "实施中"),
+            ])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+    class ExistingProject:
+        product_points = [{"product_name": "EDG", "points": 5}]
+        region = None
+        status = "售前"
+
+        async def save(self):
+            calls.append(("project_save", self.product_points, self.region, self.status))
+
+    existing_project = ExistingProject()
+
+    class FakeProjectQuery:
+        async def first(self):
+            return existing_project
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("project_filter", kwargs))
+            return FakeProjectQuery()
+
+    class FakeFile:
+        filename = "import.xlsx"
+
+        async def read(self):
+            return b"xlsx"
+
+    async def fake_config():
+        return {"products": ["EDG", "ASG", "TSafe"], "statuses": ["售前", "实施中"], "regions": ["华东"]}
+
+    async def fake_get_or_create(**kwargs):
+        return SimpleNamespace(id=10 if kwargs["parent_id"] == 0 else 11, parent_id=kwargs["parent_id"])
+
+    async def fake_validate_payload(payload):
+        return {
+            "project_name": payload["project_name"],
+            "agent_id": payload["agent_id"],
+            "product_points": payload["product_points"],
+            "region": payload.get("region"),
+            "status": payload.get("status") or "售前",
+        }
+
+    monkeypatch.setattr(project_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_module.dept_controller, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(project_controller, "_config", fake_config)
+    monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+    monkeypatch.setattr(project_controller, "clear_summary_cache", fake_clear_summary_cache)
+
+    result = await project_controller.import_projects(user_id=7, file=FakeFile())
+
+    assert result["updated"] == 2
+    assert ("project_save", [{"product_name": "EDG", "points": 100}], "华东", "实施中") in calls
 
 
 @pytest.mark.anyio
