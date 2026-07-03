@@ -111,6 +111,7 @@ export default {
   projectSetStatus: (data = {}) => request.post('/project/status', data),
   projectAssign: (data = {}) => request.post('/project/assign', data),
   projectBatchUpdate: (data = {}) => request.post('/project/batch-update', data),
+  projectBatchDelete: (data = {}) => request.post('/project/batch-delete', data),
   projectActivityList: (params = {}) => request.get('/project/activity/list', { params }),
   projectActivityCreate: (data = {}) => request.post('/project/activity/create', data),
   projectActivityUpdate: (data = {}) => request.post('/project/activity/update', data),

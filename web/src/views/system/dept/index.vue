@@ -1,6 +1,6 @@
 <script setup>
 import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
-import { NButton, NForm, NFormItem, NInput, NInputNumber, NPopconfirm, NTreeSelect } from 'naive-ui'
+import { NButton, NForm, NFormItem, NInput, NInputNumber, NPopconfirm, NSelect, NTreeSelect } from 'naive-ui'
 
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
@@ -40,6 +40,13 @@ const {
 
 const deptOption = ref([])
 const isDisabled = ref(false)
+const channelLevelOptions = [
+  { label: '区域代理', value: '区域代理' },
+  { label: '钻石', value: '钻石' },
+  { label: '铂金', value: '铂金' },
+  { label: '金牌', value: '金牌' },
+  { label: '未签约', value: '未签约' },
+]
 
 onMounted(() => {
   $table.value?.handleSearch()
@@ -75,6 +82,15 @@ const columns = [
     align: 'center',
     width: 'auto',
     ellipsis: { tooltip: true },
+  },
+  {
+    title: '代理商级别',
+    key: 'channel_level',
+    align: 'center',
+    width: 'auto',
+    render(row) {
+      return row.channel_level || '-'
+    },
   },
   {
     title: '操作',
@@ -206,6 +222,9 @@ const columns = [
         </NFormItem>
         <NFormItem label="备注" path="desc">
           <NInput v-model:value="modalForm.desc" type="textarea" clearable />
+        </NFormItem>
+        <NFormItem label="代理商级别" path="channel_level">
+          <NSelect v-model:value="modalForm.channel_level" :options="channelLevelOptions" clearable />
         </NFormItem>
         <NFormItem label="排序" path="order">
           <NInputNumber v-model:value="modalForm.order" min="0"></NInputNumber>

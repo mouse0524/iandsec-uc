@@ -55,6 +55,14 @@ class RegisterType(StrEnum):
     USER = "user"
 
 
+class PartnerLevel(StrEnum):
+    REGIONAL = "区域代理"
+    DIAMOND = "钻石"
+    PLATINUM = "铂金"
+    GOLD = "金牌"
+    UNSIGNED = "未签约"
+
+
 class SkillKnowDocumentStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"

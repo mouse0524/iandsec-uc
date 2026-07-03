@@ -6,7 +6,8 @@ from tortoise.transactions import atomic
 from app.core.crud import CRUDBase
 from app.core.redis_client import execute_redis
 from app.log import logger
-from app.models.admin import Dept, DeptClosure
+from app.models.admin import Dept, DeptClosure, User
+from app.models.enums import PartnerLevel
 from app.schemas.depts import DeptCreate, DeptUpdate
 
 
@@ -33,6 +34,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                         "id": dept.id,
                         "name": dept.name,
                         "desc": dept.desc,
+                        "channel_level": dept.channel_level,
                         "order": dept.order,
                         "parent_id": dept.parent_id,
                         "children": children,
@@ -53,7 +55,9 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
     async def get_dept_info(self):
         pass
 
-    async def get_or_create(self, *, name: str, parent_id: int = 0, desc: str = "") -> Dept:
+    async def get_or_create(
+        self, *, name: str, parent_id: int = 0, desc: str = "", channel_level: PartnerLevel | None = None
+    ) -> Dept:
         name = str(name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="部门名称不能为空")
@@ -64,12 +68,19 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                 dept_obj.is_deleted = False
                 dept_obj.parent_id = parent_id
                 dept_obj.desc = desc or dept_obj.desc
+                dept_obj.channel_level = channel_level or dept_obj.channel_level
                 await dept_obj.save()
                 await self.clear_dept_dict_cache()
                 logger.info("[dept.get_or_create] revive name={} dept_id={} parent_id={}", name, dept_obj.id, parent_id)
+            elif channel_level and not dept_obj.channel_level:
+                dept_obj.channel_level = channel_level
+                await dept_obj.save()
+                await self.clear_dept_dict_cache()
             return dept_obj
 
-        dept_obj = await Dept.create(name=name, parent_id=parent_id, desc=desc, order=0, is_deleted=False)
+        dept_obj = await Dept.create(
+            name=name, parent_id=parent_id, desc=desc, channel_level=channel_level, order=0, is_deleted=False
+        )
         logger.info("[dept.get_or_create] create name={} dept_id={} parent_id={}", name, dept_obj.id, parent_id)
 
         closure_rows = []
@@ -155,6 +166,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             await dept_obj.save()
         except IntegrityError:
             raise HTTPException(status_code=400, detail="部门名称已存在")
+        await User.filter(dept_id=dept_obj.id).update(channel_level=dept_obj.channel_level)
         logger.info(
             "[dept.update] success dept_id={} name={} parent_id={}",
             dept_obj.id,

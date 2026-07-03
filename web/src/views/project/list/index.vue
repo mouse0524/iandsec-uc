@@ -10,6 +10,7 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
+  NPopconfirm,
   NSelect,
   NTabPane,
   NTabs,
@@ -315,6 +316,18 @@ async function submitBatchUpdate() {
   $table.value?.handleSearch()
 }
 
+async function deleteProjects(projectIds) {
+  const ids = (projectIds || []).map(Number).filter((id) => id > 0)
+  if (!ids.length) {
+    $message.warning('请先选择项目')
+    return
+  }
+  const res = await api.projectBatchDelete({ project_ids: ids })
+  $message.success(`已删除 ${res?.data?.count || 0} 个项目`)
+  checkedProjectIds.value = []
+  $table.value?.handleSearch()
+}
+
 function handleRemove({ file }) {
   const attachmentId = Number(file?.attachmentId || 0)
   if (attachmentId > 0) {
@@ -463,12 +476,20 @@ const columns = [
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 190,
+    width: 230,
     render(row) {
       return [
         h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
         h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
         h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 10px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => deleteProjects([row.id]) },
+          {
+            trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 10px' }, { default: () => '删除' }),
+            default: () => '删除后不可恢复，是否继续？',
+          }
+        ),
       ]
     },
   },
@@ -512,7 +533,7 @@ const columns = [
       v-model:query-items="queryItems"
       :columns="columns"
       :get-data="getProjectList"
-      :scroll-x="2088"
+      :scroll-x="2128"
       @on-checked="handleChecked"
     >
       <template #queryBar>
@@ -542,6 +563,12 @@ const columns = [
               <NButton type="info" :loading="importLoading">批量导入</NButton>
             </NUpload>
             <NButton type="warning" :disabled="!checkedProjectIds.length" @click="openBatchUpdate">批量修改</NButton>
+            <NPopconfirm @positive-click="deleteProjects(checkedProjectIds)">
+              <template #trigger>
+                <NButton type="error" :disabled="!checkedProjectIds.length">批量删除</NButton>
+              </template>
+              删除选中的项目后不可恢复，是否继续？
+            </NPopconfirm>
           </div>
         </QueryBarItem>
       </template>

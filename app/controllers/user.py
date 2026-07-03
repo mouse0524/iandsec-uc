@@ -8,7 +8,7 @@ from app.core.crud import CRUDBase
 from app.core.redis_client import execute_redis
 from app.log import logger
 from app.controllers.mail import mail_controller
-from app.models.admin import User
+from app.models.admin import Dept, User
 from app.schemas.login import CredentialsSchema
 from app.schemas.users import UserCreate, UserUpdate
 from app.utils.password import generate_strong_password, get_password_hash, is_password_strong, verify_password
@@ -94,6 +94,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         await self.validate_password_policy(obj_in.password)
         obj_in.password = get_password_hash(password=obj_in.password)
         obj = await self.create(obj_in)
+        await self.inherit_dept_channel_level(obj)
         if obj_in.role_ids:
             await self.update_roles(obj, obj_in.role_ids)
         logger.info("[user.create] success user_id={} username={}", obj.id, obj.username)
@@ -106,10 +107,22 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
             raise HTTPException(status_code=400, detail="手机号不能为空")
         obj_in.password = password_hash
         obj = await self.create(obj_in)
+        await self.inherit_dept_channel_level(obj)
         if role_ids:
             await self.update_roles(obj, role_ids)
         logger.info("[user.create_with_hash] success user_id={} username={}", obj.id, obj.username)
         return obj
+
+    async def update(self, id: int, obj_in: UserUpdate | dict) -> User:
+        obj = await super().update(id=id, obj_in=obj_in)
+        await self.inherit_dept_channel_level(obj)
+        return obj
+
+    @staticmethod
+    async def inherit_dept_channel_level(user: User) -> None:
+        dept = await Dept.filter(id=user.dept_id).first() if user.dept_id else None
+        user.channel_level = dept.channel_level if dept else None
+        await user.save()
 
     async def update_last_login(self, id: int) -> None:
         user = await self.model.get(id=id)

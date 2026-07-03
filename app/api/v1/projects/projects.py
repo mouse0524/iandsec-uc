@@ -9,6 +9,7 @@ from app.schemas.base import Success, SuccessExtra
 from app.schemas.projects import (
     ProjectActivityCreateIn,
     ProjectActivityUpdateIn,
+    ProjectBatchDeleteIn,
     ProjectAssignIn,
     ProjectBatchUpdateIn,
     ProjectCreateIn,
@@ -161,6 +162,14 @@ async def batch_update_projects(payload: ProjectBatchUpdateIn):
         user_id=user.id,
         payload=payload.model_dump(exclude={"project_ids"}, exclude_unset=True),
     )
+    return Success(data={"count": count})
+
+
+@router.post("/batch-delete", summary="批量删除项目", dependencies=[DependAuth])
+async def batch_delete_projects(payload: ProjectBatchDeleteIn):
+    user = await _require_project_manager()
+    await _ensure_projects_visible(user, payload.project_ids)
+    count = await project_controller.delete_projects(payload.project_ids)
     return Success(data={"count": count})
 
 

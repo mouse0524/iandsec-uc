@@ -2,9 +2,13 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.controllers import project as project_module
 from app.controllers.project import project_controller
+from app.models.enums import PartnerLevel
+from app.schemas.depts import DeptCreate
+from app.schemas.partner import PartnerRegisterIn
 
 
 @pytest.fixture
@@ -163,6 +167,78 @@ def test_project_query_supports_agent_filter():
     q = project_controller._project_q({"agent_id": 11})
 
     assert any(child.filters == {"agent_id": 11} for child in q.children)
+
+
+def test_partner_register_company_name_must_be_full_company_name():
+    payload = {
+        "company_name": "安得",
+        "contact_name": "张三",
+        "email": "test@example.com",
+        "phone": "13800000000",
+        "password": "Password123",
+        "email_code": "123456",
+    }
+
+    with pytest.raises(ValidationError):
+        PartnerRegisterIn(**payload)
+
+    payload["company_name"] = "安得科技有限公司"
+    assert PartnerRegisterIn(**payload).company_name == "安得科技有限公司"
+
+
+def test_dept_accepts_channel_level():
+    payload = DeptCreate(name="安得科技有限公司", channel_level=PartnerLevel.GOLD)
+
+    assert payload.channel_level == PartnerLevel.GOLD
+
+
+@pytest.mark.anyio
+async def test_delete_projects_removes_activities_and_unbinds_attachments(monkeypatch):
+    calls = []
+
+    class DeleteQuery:
+        def __init__(self, label):
+            self.label = label
+
+        async def delete(self):
+            calls.append((self.label, "delete"))
+            return 2 if self.label == "project" else 0
+
+        async def update(self, **kwargs):
+            calls.append((self.label, "update", kwargs))
+            return 0
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("project", kwargs))
+            return DeleteQuery("project")
+
+    class FakeProjectActivity:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("activity", kwargs))
+            return DeleteQuery("activity")
+
+    class FakeProjectAttachment:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("attachment", kwargs))
+            return DeleteQuery("attachment")
+
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_module, "ProjectActivity", FakeProjectActivity)
+    monkeypatch.setattr(project_module, "ProjectAttachment", FakeProjectAttachment)
+
+    assert await project_controller.delete_projects.__wrapped__(project_controller, [1, 2]) == 2
+    assert calls == [
+        ("activity", {"project_id__in": [1, 2]}),
+        ("activity", "delete"),
+        ("attachment", {"project_id__in": [1, 2]}),
+        ("attachment", "update", {"project_id": None}),
+        ("project", {"id__in": [1, 2]}),
+        ("project", "delete"),
+    ]
 
 
 def test_import_points_ignore_server_count_and_map_products():
@@ -412,3 +488,102 @@ async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypat
     assert result["created"] == 1
     assert ("agent_save", 10) in calls
     assert ("clear_cache", None) in calls
+
+
+@pytest.mark.anyio
+async def test_import_projects_leaves_missing_assignee_blank(monkeypatch):
+    calls = []
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([
+                ("所属代理商", "项目名称", "终端点数", "负责人"),
+                ("代理商A", "项目A", "1-0-0-5", "不存在的负责人"),
+            ])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+    class FakeProjectQuery:
+        async def first(self):
+            return None
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            return FakeProjectQuery()
+
+        @staticmethod
+        async def create(**kwargs):
+            calls.append(("project_create", kwargs))
+            return SimpleNamespace(id=1)
+
+    class FakeFile:
+        filename = "import.xlsx"
+
+        async def read(self):
+            return b"xlsx"
+
+    async def fake_config():
+        return {"products": ["EDG", "ASG", "TSafe"], "statuses": ["售前"], "regions": []}
+
+    async def fake_get_or_create(**kwargs):
+        return SimpleNamespace(id=10 if kwargs["parent_id"] == 0 else 11, parent_id=kwargs["parent_id"])
+
+    async def fake_validate_payload(payload):
+        return {"project_name": payload["project_name"], "agent_id": payload["agent_id"], "product_points": payload["product_points"], "assignee_id": payload["assignee_id"], "status": "售前"}
+
+    async def fake_resolve_assignee(value):
+        calls.append(("resolve_assignee", value))
+        return None
+
+    monkeypatch.setattr(project_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_module.dept_controller, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(project_controller, "_config", fake_config)
+    monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+    monkeypatch.setattr(project_controller, "_resolve_import_assignee", fake_resolve_assignee)
+
+    result = await project_controller.import_projects(user_id=7, file=FakeFile())
+
+    assert result["created"] == 1
+    assert ("resolve_assignee", "不存在的负责人") in calls
+    project_create = next(item for item in calls if item[0] == "project_create")[1]
+    assert project_create["assignee_id"] is None
+    assert project_create["assigned_by"] is None
+    assert project_create["assigned_at"] is None
+
+
+@pytest.mark.anyio
+async def test_import_assignee_matches_alias_only(monkeypatch):
+    calls = []
+
+    class UserQuery:
+        def __init__(self, user):
+            self.user = user
+
+        def prefetch_related(self, *args):
+            return self
+
+        async def first(self):
+            return self.user
+
+    class FakeUser:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(kwargs)
+            user = SimpleNamespace(id=9) if kwargs == {"alias": "张三", "is_active": True} else None
+            if user:
+                async def roles():
+                    return [SimpleNamespace(name="技术")]
+                user.roles = roles()
+            return UserQuery(user)
+
+    monkeypatch.setattr(project_module, "User", FakeUser)
+
+    assert await project_controller._resolve_import_assignee("zhangsan") is None
+    assert await project_controller._resolve_import_assignee("张三") == 9
+    assert calls == [
+        {"alias": "zhangsan", "is_active": True},
+        {"alias": "张三", "is_active": True},
+    ]

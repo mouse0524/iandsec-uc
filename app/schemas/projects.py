@@ -48,6 +48,10 @@ class ProjectBatchUpdateIn(BaseModel):
     assignee_id: int | None = Field(default=None, description="负责人ID")
 
 
+class ProjectBatchDeleteIn(BaseModel):
+    project_ids: list[int] = Field(..., description="项目ID列表")
+
+
 class ProjectActivityCreateIn(BaseModel):
     project_id: int = Field(..., description="项目ID")
     activity_type: str = Field(..., description="活动类型")

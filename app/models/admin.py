@@ -6,6 +6,7 @@ from .base import BaseModel, TimestampMixin
 from .enums import (
     MethodType,
     PartnerRegisterStatus,
+    PartnerLevel,
     RegisterType,
     SkillKnowDocumentStatus,
     SkillKnowMessageRole,
@@ -18,6 +19,7 @@ class User(BaseModel, TimestampMixin):
     username = fields.CharField(max_length=255, unique=True, description="用户名称", index=True)
     alias = fields.CharField(max_length=30, null=True, description="用户姓名", index=True)
     company_name = fields.CharField(max_length=120, null=True, description="公司名称", index=True)
+    channel_level = fields.CharEnumField(PartnerLevel, null=True, description="代理商级别", index=True)
     hardware_id = fields.CharField(max_length=80, null=True, unique=True, description="产品硬件ID", index=True)
     email = fields.CharField(max_length=255, unique=True, description="邮箱", index=True)
     phone = fields.CharField(max_length=20, null=True, unique=True, description="电话", index=True)
@@ -73,6 +75,7 @@ class Menu(BaseModel, TimestampMixin):
 class Dept(BaseModel, TimestampMixin):
     name = fields.CharField(max_length=20, unique=True, description="部门名称", index=True)
     desc = fields.CharField(max_length=500, null=True, description="备注")
+    channel_level = fields.CharEnumField(PartnerLevel, null=True, description="代理商级别", index=True)
     is_deleted = fields.BooleanField(default=False, description="软删除标记", index=True)
     order = fields.IntField(default=0, description="排序", index=True)
     parent_id = fields.IntField(default=0, max_length=10, description="父部门ID", index=True)

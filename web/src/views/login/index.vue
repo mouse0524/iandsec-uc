@@ -153,7 +153,7 @@
             </div>
           </n-form-item>
           <n-form-item label="公司名称" path="company_name">
-            <n-input v-model:value="partnerForm.company_name" placeholder="请输入公司名称" />
+            <n-input v-model:value="partnerForm.company_name" placeholder="请输入完整公司名称，需包含“公司”" />
           </n-form-item>
           <n-form-item label="联系人" path="contact_name">
             <n-input v-model:value="partnerForm.contact_name" placeholder="请输入联系人" />
@@ -385,7 +385,15 @@ const partnerForm = ref({
 })
 
 const partnerRules = {
-  company_name: { required: true, message: '请输入公司名称', trigger: ['blur', 'input'] },
+  company_name: {
+    validator: (_, value) => {
+      const name = String(value || '').trim()
+      if (!name) return new Error('请输入公司名称')
+      if (!name.includes('公司')) return new Error('公司名称必须包含“公司”，请填写完整公司名称')
+      return true
+    },
+    trigger: ['blur', 'input'],
+  },
   contact_name: { required: true, message: '请输入联系人', trigger: ['blur', 'input'] },
   email: { required: true, message: '请输入邮箱', trigger: ['blur', 'input'] },
   email_code: { required: true, message: '请输入邮箱验证码', trigger: ['blur', 'input'] },

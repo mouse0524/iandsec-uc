@@ -7,6 +7,7 @@ from mimetypes import guess_type
 from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 from tortoise.expressions import Q
+from tortoise.transactions import atomic
 
 from app.controllers.dept import dept_controller
 from app.controllers.system_setting import system_setting_controller
@@ -89,6 +90,16 @@ class ProjectController:
         role_names = {role.name for role in await user.roles}
         if not ASSIGNEE_ROLES.intersection(role_names):
             raise HTTPException(status_code=400, detail="负责人必须是技术")
+
+    async def _resolve_import_assignee(self, value) -> int | None:
+        name = self._cell_text(value)
+        if not name:
+            return None
+        user = await User.filter(alias=name, is_active=True).prefetch_related("roles").first()
+        if not user:
+            return None
+        role_names = {role.name for role in await user.roles}
+        return user.id if ASSIGNEE_ROLES.intersection(role_names) else None
 
     async def _validate_agent(self, agent_id: int | None) -> None:
         if not agent_id:
@@ -191,6 +202,7 @@ class ProjectController:
         if not required.issubset(headers):
             raise HTTPException(status_code=400, detail="导入模板缺少：所属代理商、项目名称、终端点数")
         idx = {name: headers.index(name) for name in headers if name}
+        has_assignee = "负责人" in idx
         config = await self._config()
         created = updated = skipped = 0
         errors = []
@@ -198,6 +210,7 @@ class ProjectController:
             agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
             project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
             points = row[idx["终端点数"]] if len(row) > idx["终端点数"] else None
+            assignee_id = await self._resolve_import_assignee(row[idx["负责人"]]) if has_assignee and len(row) > idx["负责人"] else None
             if not agent_name and not project_name and not points:
                 skipped += 1
                 continue
@@ -223,15 +236,26 @@ class ProjectController:
                         "project_name": project_name,
                         "agent_id": agent.id,
                         "product_points": self._parse_import_product_points(points, config["products"]),
+                        **({"assignee_id": assignee_id} if has_assignee else {}),
                     }
                 )
                 project = await Project.filter(project_name=project_name, agent_id=agent.id).first()
                 if project:
                     project.product_points = data["product_points"]
+                    if has_assignee:
+                        project.assignee_id = data.get("assignee_id")
+                        project.assigned_by = user_id if project.assignee_id else None
+                        project.assigned_at = datetime.now() if project.assignee_id else None
                     await project.save()
                     updated += 1
                 else:
-                    await Project.create(**data, created_by=user_id)
+                    assignee_id = data.get("assignee_id")
+                    await Project.create(
+                        **data,
+                        created_by=user_id,
+                        assigned_by=user_id if assignee_id else None,
+                        assigned_at=datetime.now() if assignee_id else None,
+                    )
                     created += 1
             except HTTPException as exc:
                 error = {"row": row_no, "error": exc.detail}
@@ -314,6 +338,15 @@ class ProjectController:
             data["assigned_by"] = user_id if data.get("assignee_id") else None
             data["assigned_at"] = datetime.now() if data.get("assignee_id") else None
         return await Project.filter(id__in=ids).update(**data)
+
+    @atomic()
+    async def delete_projects(self, project_ids: list[int]) -> int:
+        ids = [int(item) for item in project_ids or [] if int(item or 0) > 0]
+        if not ids:
+            raise HTTPException(status_code=400, detail="请选择项目")
+        await ProjectActivity.filter(project_id__in=ids).delete()
+        await ProjectAttachment.filter(project_id__in=ids).update(project_id=None)
+        return await Project.filter(id__in=ids).delete()
 
     async def list_projects(self, *, page: int, page_size: int, filters: dict) -> tuple[int, list[dict]]:
         q = self._project_q(filters)

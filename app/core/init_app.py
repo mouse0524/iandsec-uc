@@ -871,6 +871,8 @@ async def ensure_security_columns():
             ("ALTER TABLE `project` ADD COLUMN `start_time` DATETIME NULL", "project.start_time"),
             ("ALTER TABLE `project` ADD COLUMN `end_time` DATETIME NULL", "project.end_time"),
             ("ALTER TABLE `project` ADD COLUMN `maintenance_time` DATETIME NULL", "project.maintenance_time"),
+            ("ALTER TABLE `dept` ADD COLUMN `channel_level` VARCHAR(20) NULL", "dept.channel_level"),
+            ("ALTER TABLE `user` ADD COLUMN `channel_level` VARCHAR(20) NULL", "user.channel_level"),
         ]:
             try:
                 await conn.execute_query(sql)

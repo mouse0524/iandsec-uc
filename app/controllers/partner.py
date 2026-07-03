@@ -6,7 +6,7 @@ from tortoise.transactions import atomic
 
 from app.log import logger
 from app.models.admin import PartnerRegistration, Role, User
-from app.models.enums import PartnerRegisterStatus, RegisterType
+from app.models.enums import PartnerLevel, PartnerRegisterStatus, RegisterType
 from app.controllers.dept import dept_controller
 from app.controllers.mail import mail_controller
 from app.controllers.user import user_controller
@@ -130,7 +130,10 @@ class PartnerController:
         child_name = (register_obj.company_name or "").strip() or register_obj.contact_name
         child_desc = f"{'渠道商' if register_obj.register_type == RegisterType.CHANNEL else '用户'}注册自动创建"
         child_dept = await dept_controller.get_or_create(
-            name=child_name, parent_id=parent_dept.id, desc=child_desc
+            name=child_name,
+            parent_id=parent_dept.id,
+            desc=child_desc,
+            channel_level=PartnerLevel.UNSIGNED if register_obj.register_type == RegisterType.CHANNEL else None,
         )
         logger.info(
             "[partner.review] dept_ready register_id={} dept_id={} dept_name={}",

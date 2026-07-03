@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.enums import RegisterType
 
@@ -14,6 +14,16 @@ class PartnerRegisterIn(BaseModel):
     hardware_id: str | None = Field(default=None, description="产品硬件ID")
     password: str = Field(..., min_length=6, max_length=32, description="密码")
     email_code: str = Field(..., description="邮箱验证码")
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, value: str) -> str:
+        name = str(value or "").strip()
+        if not name:
+            raise ValueError("请输入公司名称")
+        if "公司" not in name:
+            raise ValueError("公司名称必须包含“公司”，请填写完整公司名称")
+        return name
 
 
 class UserRegisterIn(PartnerRegisterIn):
