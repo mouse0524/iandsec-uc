@@ -594,6 +594,9 @@ const columns = [
         <QueryBarItem label="负责人" :label-width="48">
           <NSelect v-model:value="queryItems.assignee_id" :options="userOptions" clearable filterable style="width: 160px" />
         </QueryBarItem>
+        <QueryBarItem label="使用产品" :label-width="64">
+          <NSelect v-model:value="queryItems.product_name" :options="productOptions" clearable filterable style="width: 160px" />
+        </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <div class="toolbar-actions">
             <NButton type="primary" @click="openCreate">新增项目</NButton>

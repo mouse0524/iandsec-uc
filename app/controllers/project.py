@@ -81,6 +81,13 @@ class ProjectController:
             q &= Q(assignee_id=filters["assignee_id"])
         return q
 
+    def _project_matches_product(self, project: Project, product_name: str | None) -> bool:
+        product_name = self._clean(product_name)
+        return not product_name or any(
+            self._clean((item or {}).get("product_name")) == product_name
+            for item in project.product_points or []
+        )
+
     def _activity_q(self, filters: dict) -> Q:
         q = Q()
         if filters.get("project_ids") is not None:
@@ -451,8 +458,18 @@ class ProjectController:
     async def list_projects(self, *, page: int, page_size: int, filters: dict) -> tuple[int, list[dict]]:
         q = self._project_q(filters)
         query = Project.filter(q)
-        total = await query.count()
-        projects = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
+        product_name = filters.get("product_name")
+        if product_name:
+            all_projects = [
+                item for item in await query.order_by("-id").all()
+                if self._project_matches_product(item, product_name)
+            ]
+            total = len(all_projects)
+            start = (page - 1) * page_size
+            projects = all_projects[start:start + page_size]
+        else:
+            total = await query.count()
+            projects = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
         rows = [await self._project_row(item) for item in projects]
         return total, rows
 
@@ -473,21 +490,25 @@ class ProjectController:
 
     async def _project_summary_uncached(self, filters: dict) -> dict:
         q = self._project_q(filters)
-        total = await Project.filter(q).count()
+        product_name = filters.get("product_name")
+        projects = await Project.filter(q).all()
+        if product_name:
+            projects = [item for item in projects if self._project_matches_product(item, product_name)]
+        total = len(projects)
         product_points: dict[str, int] = {}
-        for project in await Project.filter(q).all():
+        for project in projects:
             for item in project.product_points or []:
                 name = self._clean((item or {}).get("product_name"))
                 if name:
                     product_points[name] = product_points.get(name, 0) + int((item or {}).get("points") or 0)
         return {
             "total": total,
-            "presale": await Project.filter(q & Q(status="售前")).count(),
-            "pending": await Project.filter(q & Q(status="待实施")).count(),
-            "implementing": await Project.filter(q & Q(status="实施中")).count(),
-            "pending_acceptance": await Project.filter(q & Q(status="待验收")).count(),
-            "accepted": await Project.filter(q & Q(status="已验收")).count(),
-            "lost": await Project.filter(q & Q(status="关闭")).count(),
+            "presale": sum(1 for item in projects if item.status == "售前"),
+            "pending": sum(1 for item in projects if item.status == "待实施"),
+            "implementing": sum(1 for item in projects if item.status == "实施中"),
+            "pending_acceptance": sum(1 for item in projects if item.status == "待验收"),
+            "accepted": sum(1 for item in projects if item.status == "已验收"),
+            "lost": sum(1 for item in projects if item.status == "关闭"),
             "product_points": [
                 {"product_name": name, "points": points}
                 for name, points in sorted(product_points.items())

@@ -174,6 +174,13 @@ def test_project_query_supports_agent_filter():
     assert any(child.filters == {"agent_id": 11} for child in q.children)
 
 
+def test_project_matches_product():
+    project = SimpleNamespace(product_points=[{"product_name": "EDG", "points": 2}])
+
+    assert project_controller._project_matches_product(project, "EDG")
+    assert not project_controller._project_matches_product(project, "ASG")
+
+
 @pytest.mark.anyio
 async def test_project_summary_aggregates_product_points(monkeypatch):
     async def fake_redis(command, *args, **kwargs):
@@ -185,8 +192,8 @@ async def test_project_summary_aggregates_product_points(monkeypatch):
 
         async def all(self):
             return [
-                SimpleNamespace(product_points=[{"product_name": "EDG", "points": 2}]),
-                SimpleNamespace(product_points=[{"product_name": "EDG", "points": 3}, {"product_name": "ASG", "points": 1}]),
+                SimpleNamespace(status="售前", product_points=[{"product_name": "EDG", "points": 2}]),
+                SimpleNamespace(status="关闭", product_points=[{"product_name": "EDG", "points": 3}, {"product_name": "ASG", "points": 1}]),
             ]
 
     class FakeProject:
@@ -203,6 +210,34 @@ async def test_project_summary_aggregates_product_points(monkeypatch):
         {"product_name": "ASG", "points": 1},
         {"product_name": "EDG", "points": 5},
     ]
+
+
+@pytest.mark.anyio
+async def test_project_summary_filters_by_product(monkeypatch):
+    async def fake_redis(command, *args, **kwargs):
+        return None
+
+    class ProjectQuery:
+        async def all(self):
+            return [
+                SimpleNamespace(status="售前", product_points=[{"product_name": "EDG", "points": 2}]),
+                SimpleNamespace(status="关闭", product_points=[{"product_name": "ASG", "points": 3}]),
+            ]
+
+    class FakeProject:
+        @staticmethod
+        def filter(*args, **kwargs):
+            return ProjectQuery()
+
+    monkeypatch.setattr(project_module, "execute_redis", fake_redis)
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+
+    summary = await project_controller.project_summary({"product_name": "EDG"})
+
+    assert summary["total"] == 1
+    assert summary["presale"] == 1
+    assert summary["lost"] == 0
+    assert summary["product_points"] == [{"product_name": "EDG", "points": 2}]
 
 
 @pytest.mark.anyio
