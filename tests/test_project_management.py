@@ -349,7 +349,7 @@ def test_import_points_support_single_count_products():
 def test_import_points_skip_count_for_service_products():
     rows = project_controller._parse_import_product_points(99, ["EDG", "服务"], "服务")
 
-    assert rows == [{"product_name": "服务", "points": 0}]
+    assert rows == [{"product_name": "服务", "points": 1}]
 
 
 def test_import_points_merge_existing_project_points():

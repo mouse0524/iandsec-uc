@@ -99,6 +99,7 @@ export default {
     formData.append('file', file)
     return request.post('/project/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
     })
   },
   downloadProjectAttachment: (params = {}) =>

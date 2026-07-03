@@ -199,7 +199,7 @@ class ProjectController:
     def _parse_import_product_points(self, value, products: list[str], import_product: str = "") -> list[dict]:
         import_product = self._clean(import_product)
         if import_product in IMPORT_NO_COUNT_PRODUCTS:
-            return [{"product_name": import_product if import_product in products else products[0], "points": 0}]
+            return [{"product_name": import_product if import_product in products else products[0], "points": 1}]
         if import_product in IMPORT_SINGLE_COUNT_PRODUCTS:
             try:
                 return [{"product_name": import_product, "points": self._parse_import_count(value)}]
@@ -262,6 +262,8 @@ class ProjectController:
         created = updated = skipped = 0
         errors = []
         imported_project_keys = set()
+        parent_dept = None
+        agents = {}
         for row_no, row in enumerate(rows, start=2):
             agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
             project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
@@ -276,16 +278,20 @@ class ProjectController:
             try:
                 if not agent_name or not project_name:
                     raise HTTPException(status_code=400, detail="所属代理商和项目名称不能为空")
-                parent_dept = await dept_controller.get_or_create(
-                    name=IMPORT_AGENT_PARENT_DEPT_NAME,
-                    parent_id=0,
-                    desc="项目导入自动创建",
-                )
-                agent = await dept_controller.get_or_create(
-                    name=agent_name,
-                    parent_id=parent_dept.id,
-                    desc="项目导入自动创建",
-                )
+                if parent_dept is None:
+                    parent_dept = await dept_controller.get_or_create(
+                        name=IMPORT_AGENT_PARENT_DEPT_NAME,
+                        parent_id=0,
+                        desc="项目导入自动创建",
+                    )
+                agent = agents.get(agent_name)
+                if not agent:
+                    agent = await dept_controller.get_or_create(
+                        name=agent_name,
+                        parent_id=parent_dept.id,
+                        desc="项目导入自动创建",
+                    )
+                    agents[agent_name] = agent
                 if agent.parent_id != parent_dept.id:
                     agent.parent_id = parent_dept.id
                     await agent.save()
