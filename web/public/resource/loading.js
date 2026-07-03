@@ -1,3 +1,26 @@
+;(function () {
+  var key = 'iandsec:last-reload-for-assets'
+  var reload = function () {
+    var now = Date.now()
+    if (now - Number(sessionStorage.getItem(key) || 0) < 15000) return
+    sessionStorage.setItem(key, String(now))
+    location.reload()
+  }
+  window.addEventListener(
+    'error',
+    function (event) {
+      var target = event.target
+      var tag = target && target.tagName
+      if (tag === 'SCRIPT' || tag === 'LINK') reload()
+    },
+    true
+  )
+  window.addEventListener('unhandledrejection', function (event) {
+    var message = String((event.reason && (event.reason.message || event.reason)) || '')
+    if (/Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk \d+ failed/i.test(message)) reload()
+  })
+})()
+
 /**
  * 初始化加载效果的svg格式logo
  * @param {string} id - 元素id
