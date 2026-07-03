@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "iandsec-uc-clients")
     INITIAL_ADMIN_USERNAME: str = os.getenv("INITIAL_ADMIN_USERNAME", "admin")
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@admin.com")
+    INITIAL_ADMIN_PHONE: str = os.getenv("INITIAL_ADMIN_PHONE", "00000000000")
     INITIAL_ADMIN_PASSWORD: str | None = os.getenv("INITIAL_ADMIN_PASSWORD")
     SKILL_KNOW_SQL_SEARCH_ENABLED: bool = os.getenv("SKILL_KNOW_SQL_SEARCH_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
     EXTERNAL_URL_ALLOWED_HOSTS: typing.List[str] = [

@@ -10,6 +10,7 @@ from app.schemas.projects import (
     ProjectActivityCreateIn,
     ProjectActivityUpdateIn,
     ProjectAssignIn,
+    ProjectBatchUpdateIn,
     ProjectCreateIn,
     ProjectStatusIn,
     ProjectUpdateIn,
@@ -40,6 +41,14 @@ async def _ensure_project_visible(user: User, project_id: int) -> None:
     if await _can_view_all_projects(user):
         return
     if not await project_controller.visible_projects_for_user(user.id, project_id=project_id):
+        raise HTTPException(status_code=403, detail="无权访问该项目")
+
+
+async def _ensure_projects_visible(user: User, project_ids: list[int]) -> None:
+    if await _can_view_all_projects(user):
+        return
+    visible_ids = {item.id for item in await project_controller.visible_projects_for_user(user.id)}
+    if any(project_id not in visible_ids for project_id in project_ids):
         raise HTTPException(status_code=403, detail="无权访问该项目")
 
 
@@ -91,6 +100,12 @@ async def upload_project_attachment(file: UploadFile = File(...)):
     return Success(data=await attachment.to_dict())
 
 
+@router.post("/import", summary="批量导入项目", dependencies=[DependAuth])
+async def import_projects(file: UploadFile = File(...)):
+    user = await _require_project_manager()
+    return Success(data=await project_controller.import_projects(user_id=user.id, file=file))
+
+
 @router.get("/attachment/download", summary="下载项目附件", dependencies=[DependAuth])
 async def download_project_attachment(attachment_id: int = Query(..., description="附件ID")):
     user = await _require_project_manager()
@@ -135,6 +150,18 @@ async def assign_project(payload: ProjectAssignIn):
         assignee_id=payload.assignee_id,
     )
     return Success(data=await project_controller.get_project(project.id))
+
+
+@router.post("/batch-update", summary="批量修改项目", dependencies=[DependAuth])
+async def batch_update_projects(payload: ProjectBatchUpdateIn):
+    user = await _require_project_manager()
+    await _ensure_projects_visible(user, payload.project_ids)
+    count = await project_controller.batch_update_projects(
+        project_ids=payload.project_ids,
+        user_id=user.id,
+        payload=payload.model_dump(exclude={"project_ids"}, exclude_unset=True),
+    )
+    return Success(data={"count": count})
 
 
 @router.get("/activity/list", summary="项目活动列表", dependencies=[DependAuth])

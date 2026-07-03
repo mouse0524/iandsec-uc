@@ -94,6 +94,13 @@ export default {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  importProjects: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/project/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   downloadProjectAttachment: (params = {}) =>
     request.get('/project/attachment/download', {
       params,
@@ -103,6 +110,7 @@ export default {
   projectUpdate: (data = {}) => request.post('/project/update', data),
   projectSetStatus: (data = {}) => request.post('/project/status', data),
   projectAssign: (data = {}) => request.post('/project/assign', data),
+  projectBatchUpdate: (data = {}) => request.post('/project/batch-update', data),
   projectActivityList: (params = {}) => request.get('/project/activity/list', { params }),
   projectActivityCreate: (data = {}) => request.post('/project/activity/create', data),
   projectActivityUpdate: (data = {}) => request.post('/project/activity/update', data),

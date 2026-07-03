@@ -88,6 +88,9 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
 
     async def create_user(self, obj_in: UserCreate) -> User:
         logger.info("[user.create] start username={} email={} dept_id={}", obj_in.username, obj_in.email, obj_in.dept_id)
+        obj_in.phone = str(obj_in.phone or "").strip()
+        if not obj_in.phone:
+            raise HTTPException(status_code=400, detail="手机号不能为空")
         await self.validate_password_policy(obj_in.password)
         obj_in.password = get_password_hash(password=obj_in.password)
         obj = await self.create(obj_in)
@@ -98,6 +101,9 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
 
     async def create_user_with_hash(self, obj_in: UserCreate, password_hash: str, role_ids: list[int] | None = None) -> User:
         logger.info("[user.create_with_hash] start username={} email={} dept_id={}", obj_in.username, obj_in.email, obj_in.dept_id)
+        obj_in.phone = str(obj_in.phone or "").strip()
+        if not obj_in.phone:
+            raise HTTPException(status_code=400, detail="手机号不能为空")
         obj_in.password = password_hash
         obj = await self.create(obj_in)
         if role_ids:

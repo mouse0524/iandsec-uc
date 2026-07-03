@@ -1,4 +1,6 @@
+from fastapi import HTTPException
 from tortoise.expressions import Q
+from tortoise.exceptions import IntegrityError
 from tortoise.transactions import atomic
 
 from app.core.crud import CRUDBase
@@ -14,27 +16,29 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         super().__init__(model=Dept)
 
     async def get_dept_tree(self, name):
-        q = Q()
-        # 获取所有未被软删除的部门
-        q &= Q(is_deleted=False)
-        if name:
-            q &= Q(name__contains=name)
-        all_depts = await self.model.filter(q).order_by("order")
+        search = str(name or "").strip()
+        all_depts = await self.model.filter(is_deleted=False).order_by("order")
 
         # 辅助函数，用于递归构建部门树
         def build_tree(parent_id):
-            return [
-                {
-                    "id": dept.id,
-                    "name": dept.name,
-                    "desc": dept.desc,
-                    "order": dept.order,
-                    "parent_id": dept.parent_id,
-                    "children": build_tree(dept.id),  # 递归构建子部门
-                }
-                for dept in all_depts
-                if dept.parent_id == parent_id
-            ]
+            rows = []
+            for dept in all_depts:
+                if dept.parent_id != parent_id:
+                    continue
+                children = build_tree(dept.id)
+                if search and search not in dept.name and not children:
+                    continue
+                rows.append(
+                    {
+                        "id": dept.id,
+                        "name": dept.name,
+                        "desc": dept.desc,
+                        "order": dept.order,
+                        "parent_id": dept.parent_id,
+                        "children": children,
+                    }
+                )
+            return rows
 
         # 从顶级部门（parent_id=0）开始构建部门树
         dept_tree = build_tree(0)
@@ -50,6 +54,9 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         pass
 
     async def get_or_create(self, *, name: str, parent_id: int = 0, desc: str = "") -> Dept:
+        name = str(name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="部门名称不能为空")
         dept_obj = await Dept.filter(name=name).first()
         if dept_obj:
             logger.info("[dept.get_or_create] reuse name={} dept_id={} parent_id={}", name, dept_obj.id, dept_obj.parent_id)
@@ -58,6 +65,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                 dept_obj.parent_id = parent_id
                 dept_obj.desc = desc or dept_obj.desc
                 await dept_obj.save()
+                await self.clear_dept_dict_cache()
                 logger.info("[dept.get_or_create] revive name={} dept_id={} parent_id={}", name, dept_obj.id, parent_id)
             return dept_obj
 
@@ -71,6 +79,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                 closure_rows.append(DeptClosure(ancestor=item.ancestor, descendant=dept_obj.id, level=item.level + 1))
         closure_rows.append(DeptClosure(ancestor=dept_obj.id, descendant=dept_obj.id, level=0))
         await DeptClosure.bulk_create(closure_rows)
+        await self.clear_dept_dict_cache()
         return dept_obj
 
     async def update_dept_closure(self, obj: Dept):
@@ -86,6 +95,11 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
 
     @atomic()
     async def create_dept(self, obj_in: DeptCreate):
+        obj_in.name = str(obj_in.name or "").strip()
+        if not obj_in.name:
+            raise HTTPException(status_code=400, detail="部门名称不能为空")
+        if await Dept.filter(name=obj_in.name).exists():
+            raise HTTPException(status_code=400, detail="部门名称已存在")
         logger.info(
             "[dept.create] start name={} parent_id={} order={}",
             obj_in.name,
@@ -95,7 +109,10 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         # 创建
         if obj_in.parent_id != 0:
             await self.get(id=obj_in.parent_id)
-        new_obj = await self.create(obj_in=obj_in)
+        try:
+            new_obj = await self.create(obj_in=obj_in)
+        except IntegrityError:
+            raise HTTPException(status_code=400, detail="部门名称已存在")
         await self.update_dept_closure(new_obj)
         logger.info(
             "[dept.create] success dept_id={} name={} parent_id={}",
@@ -107,6 +124,17 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
 
     @atomic()
     async def update_dept(self, obj_in: DeptUpdate):
+        obj_in.name = str(obj_in.name or "").strip()
+        if not obj_in.name:
+            raise HTTPException(status_code=400, detail="部门名称不能为空")
+        if await Dept.filter(name=obj_in.name).exclude(id=obj_in.id).exists():
+            raise HTTPException(status_code=400, detail="部门名称已存在")
+        if obj_in.parent_id == obj_in.id:
+            raise HTTPException(status_code=400, detail="上级部门不能选择自己")
+        if obj_in.parent_id != 0:
+            await self.get(id=obj_in.parent_id)
+            if await DeptClosure.filter(ancestor=obj_in.id, descendant=obj_in.parent_id).exists():
+                raise HTTPException(status_code=400, detail="上级部门不能选择自己的子部门")
         logger.info(
             "[dept.update] start dept_id={} name={} parent_id={}",
             obj_in.id,
@@ -117,12 +145,16 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         dept_obj = await self.get(id=obj_in.id)
         # 更新部门关系
         if dept_obj.parent_id != obj_in.parent_id:
+            dept_obj.parent_id = obj_in.parent_id
             await DeptClosure.filter(ancestor=dept_obj.id).delete()
             await DeptClosure.filter(descendant=dept_obj.id).delete()
             await self.update_dept_closure(dept_obj)
         # 更新部门信息
         dept_obj.update_from_dict(obj_in.model_dump(exclude_unset=True))
-        await dept_obj.save()
+        try:
+            await dept_obj.save()
+        except IntegrityError:
+            raise HTTPException(status_code=400, detail="部门名称已存在")
         logger.info(
             "[dept.update] success dept_id={} name={} parent_id={}",
             dept_obj.id,

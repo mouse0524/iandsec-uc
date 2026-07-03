@@ -1,14 +1,18 @@
 import os
 import uuid
+from io import BytesIO
 from datetime import datetime
 from mimetypes import guess_type
 
 from fastapi import HTTPException, UploadFile
+from openpyxl import load_workbook
 from tortoise.expressions import Q
 
+from app.controllers.dept import dept_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
-from app.models.admin import Project, ProjectActivity, ProjectAttachment, Ticket, User
+from app.log import logger
+from app.models.admin import Dept, Project, ProjectActivity, ProjectAttachment, Ticket, User
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
 from app.utils.http_headers import build_download_content_disposition
@@ -16,9 +20,10 @@ from app.utils.http_headers import build_download_content_disposition
 
 PROJECT_ROLES = {"管理员", "客服", "技术"}
 ASSIGNEE_ROLES = {"技术"}
-AGENT_ROLES = {"代理商", "渠道商"}
 ACTIVITY_STATUSES = {"待处理", "处理中", "已完成"}
 PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"]
+IMPORT_POINT_PRODUCTS = ["EDG", "ASG", "TSafe", "TDLP"]
+IMPORT_AGENT_PARENT_DEPT_NAME = "渠道部门"
 
 
 class ProjectController:
@@ -88,12 +93,9 @@ class ProjectController:
     async def _validate_agent(self, agent_id: int | None) -> None:
         if not agent_id:
             return
-        user = await User.filter(id=agent_id, is_active=True).prefetch_related("roles").first()
-        if not user:
-            raise HTTPException(status_code=400, detail="所属代理商不存在或未启用")
-        role_names = {role.name for role in await user.roles}
-        if not AGENT_ROLES.intersection(role_names):
-            raise HTTPException(status_code=400, detail="所属代理商必须是代理商或渠道商")
+        parent = await Dept.filter(name=IMPORT_AGENT_PARENT_DEPT_NAME, parent_id=0, is_deleted=False).first()
+        if not parent or not await Dept.filter(id=agent_id, parent_id=parent.id, is_deleted=False).exists():
+            raise HTTPException(status_code=400, detail="所属代理商不存在或已删除")
 
     async def _validate_payload(self, payload: dict, *, partial: bool = False) -> dict:
         config = await self._config()
@@ -146,6 +148,103 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="使用产品不能为空")
         return rows
 
+    def _import_point_products(self, products: list[str], size: int) -> list[str]:
+        by_lower = {item.lower(): item for item in products}
+        fixed = [by_lower.get(item.lower()) for item in IMPORT_POINT_PRODUCTS[:size]]
+        return fixed if all(fixed) else products[:size]
+
+    def _parse_import_product_points(self, value, products: list[str]) -> list[dict]:
+        parts = [item.strip() for item in str(value or "").replace("－", "-").split("-")]
+        if len(parts) not in {4, 5}:
+            raise HTTPException(status_code=400, detail="终端点数格式应为：服务器端-EDG-ASG-Tsafe[-TDLP]")
+        point_products = self._import_point_products(products, len(parts) - 1)
+        if len(point_products) < len(parts) - 1:
+            raise HTTPException(status_code=400, detail="项目产品配置不足，无法对应 EDG、ASG、Tsafe、TDLP")
+        counts = []
+        for item in parts[1:]:
+            try:
+                count = 1
+                for part in str(item or 0).replace("×", "*").split("*"):
+                    count *= float(part.strip() or 0)
+                counts.append(max(0, int(count)))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="终端点数必须是数字")
+        rows = [
+            {"product_name": product, "points": count}
+            for product, count in zip(point_products, counts)
+            if count > 0
+        ]
+        return rows or [{"product_name": point_products[0], "points": 0}]
+
+    @staticmethod
+    def _cell_text(value) -> str:
+        return str(value or "").strip()
+
+    async def import_projects(self, *, user_id: int, file: UploadFile) -> dict:
+        if not (file.filename or "").lower().endswith(".xlsx"):
+            raise HTTPException(status_code=400, detail="请上传 xlsx 文件")
+        wb = load_workbook(BytesIO(await file.read()), data_only=True, read_only=True)
+        ws = wb.active
+        rows = ws.iter_rows(values_only=True)
+        headers = [self._cell_text(item) for item in next(rows, [])]
+        required = {"所属代理商", "项目名称", "终端点数"}
+        if not required.issubset(headers):
+            raise HTTPException(status_code=400, detail="导入模板缺少：所属代理商、项目名称、终端点数")
+        idx = {name: headers.index(name) for name in headers if name}
+        config = await self._config()
+        created = updated = skipped = 0
+        errors = []
+        for row_no, row in enumerate(rows, start=2):
+            agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
+            project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
+            points = row[idx["终端点数"]] if len(row) > idx["终端点数"] else None
+            if not agent_name and not project_name and not points:
+                skipped += 1
+                continue
+            try:
+                if not agent_name or not project_name:
+                    raise HTTPException(status_code=400, detail="所属代理商和项目名称不能为空")
+                parent_dept = await dept_controller.get_or_create(
+                    name=IMPORT_AGENT_PARENT_DEPT_NAME,
+                    parent_id=0,
+                    desc="项目导入自动创建",
+                )
+                agent = await dept_controller.get_or_create(
+                    name=agent_name,
+                    parent_id=parent_dept.id,
+                    desc="项目导入自动创建",
+                )
+                if agent.parent_id != parent_dept.id:
+                    agent.parent_id = parent_dept.id
+                    await agent.save()
+                    await dept_controller.clear_dept_dict_cache()
+                data = await self._validate_payload(
+                    {
+                        "project_name": project_name,
+                        "agent_id": agent.id,
+                        "product_points": self._parse_import_product_points(points, config["products"]),
+                    }
+                )
+                project = await Project.filter(project_name=project_name, agent_id=agent.id).first()
+                if project:
+                    project.product_points = data["product_points"]
+                    await project.save()
+                    updated += 1
+                else:
+                    await Project.create(**data, created_by=user_id)
+                    created += 1
+            except HTTPException as exc:
+                error = {"row": row_no, "error": exc.detail}
+                errors.append(error)
+                logger.warning(
+                    "[project.import] row_failed row={} agent={} project={} error={}",
+                    row_no,
+                    agent_name,
+                    project_name,
+                    exc.detail,
+                )
+        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
     async def create_project(self, *, user_id: int, payload: dict) -> Project:
         attachment_ids = payload.pop("attachment_ids", [])
         data = await self._validate_payload(payload)
@@ -194,6 +293,28 @@ class ProjectController:
         await project.save()
         return project
 
+    async def batch_update_projects(self, *, project_ids: list[int], user_id: int, payload: dict) -> int:
+        ids = [int(item) for item in project_ids or [] if int(item or 0) > 0]
+        if not ids:
+            raise HTTPException(status_code=400, detail="请选择项目")
+        data = {key: payload[key] for key in ["region", "status", "assignee_id"] if key in payload}
+        if not data:
+            raise HTTPException(status_code=400, detail="请选择要修改的内容")
+        config = await self._config()
+        if "region" in data:
+            data["region"] = self._clean(data.get("region")) or None
+            if data["region"] and data["region"] not in config["regions"]:
+                raise HTTPException(status_code=400, detail="项目区域不在配置范围内")
+        if "status" in data:
+            data["status"] = self._clean(data.get("status")) or None
+            if data["status"] not in config["statuses"]:
+                raise HTTPException(status_code=400, detail="项目状态不在配置范围内")
+        if "assignee_id" in data:
+            await self._validate_assignee(data.get("assignee_id"))
+            data["assigned_by"] = user_id if data.get("assignee_id") else None
+            data["assigned_at"] = datetime.now() if data.get("assignee_id") else None
+        return await Project.filter(id__in=ids).update(**data)
+
     async def list_projects(self, *, page: int, page_size: int, filters: dict) -> tuple[int, list[dict]]:
         q = self._project_q(filters)
         query = Project.filter(q)
@@ -240,10 +361,10 @@ class ProjectController:
     async def _agent_name(user_id: int | None) -> str:
         if not user_id:
             return ""
-        user = await User.filter(id=user_id).first()
-        if not user:
+        dept = await Dept.filter(id=user_id, is_deleted=False).first()
+        if not dept:
             return ""
-        return str(user.company_name or user.alias or user.username or "")
+        return str(dept.name or "")
 
     async def get_project(self, project_id: int) -> dict:
         return await self._project_row(await Project.get(id=project_id))

@@ -165,6 +165,24 @@ def test_project_query_supports_agent_filter():
     assert any(child.filters == {"agent_id": 11} for child in q.children)
 
 
+def test_import_points_ignore_server_count_and_map_products():
+    rows = project_controller._parse_import_product_points("1-0-0-5", ["EDG", "ASG", "TSafe"])
+
+    assert rows == [{"product_name": "TSafe", "points": 5}]
+
+
+def test_import_points_support_multiplier_cells():
+    rows = project_controller._parse_import_product_points("0-5-0-5*6", ["EDG", "ASG", "TSafe"])
+
+    assert rows == [{"product_name": "EDG", "points": 5}, {"product_name": "TSafe", "points": 30}]
+
+
+def test_import_points_support_tdlp_segment():
+    rows = project_controller._parse_import_product_points("1-0-0-0-200", ["EDG", "ASG", "TSafe", "TDLP"])
+
+    assert rows == [{"product_name": "TDLP", "points": 200}]
+
+
 @pytest.mark.anyio
 async def test_sync_project_attachments_unbinds_removed_ids(monkeypatch):
     calls = []
@@ -193,3 +211,204 @@ async def test_sync_project_attachments_unbinds_removed_ids(monkeypatch):
     assert ("exclude", {"project_id": 9}, {"id__in": [1, 2]}) in calls
     assert ("update", {"project_id": 9}, {"project_id": None}) in calls
     assert ("filter", {"id__in": [1, 2], "project_id": None, "uploader_id__in": [7]}) in calls
+
+
+@pytest.mark.anyio
+async def test_batch_update_projects_only_updates_batch_fields(monkeypatch):
+    calls = {}
+
+    async def fake_config():
+        return {
+            "project_products": ["EDG"],
+            "project_statuses": ["售前", "实施中"],
+            "project_regions": ["华东"],
+            "project_activity_types": [],
+            "project_server_versions": [],
+            "project_client_versions": [],
+        }
+
+    class ProjectQuery:
+        async def update(self, **kwargs):
+            calls["update"] = kwargs
+            return 2
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            calls["filter"] = kwargs
+            return ProjectQuery()
+
+    async def fake_validate_assignee(assignee_id):
+        calls["assignee_id"] = assignee_id
+
+    monkeypatch.setattr(project_module.system_setting_controller, "get_full_dict", fake_config)
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_controller, "_validate_assignee", fake_validate_assignee)
+
+    count = await project_controller.batch_update_projects(
+        project_ids=[1, 2],
+        user_id=7,
+        payload={"region": "华东", "status": "实施中", "assignee_id": 9, "project_name": "ignored"},
+    )
+
+    assert count == 2
+    assert calls["filter"] == {"id__in": [1, 2]}
+    assert calls["assignee_id"] == 9
+    assert calls["update"]["region"] == "华东"
+    assert calls["update"]["status"] == "实施中"
+    assert calls["update"]["assignee_id"] == 9
+    assert "project_name" not in calls["update"]
+
+
+@pytest.mark.anyio
+async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
+    calls = []
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([
+                ("所属代理商", "项目名称", "产品名称", "终端点数"),
+                ("代理商A", "项目A", "TSafe", "1-0-0-5"),
+            ])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+    class FakeProjectQuery:
+        async def first(self):
+            return None
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            return FakeProjectQuery()
+
+        @staticmethod
+        async def create(**kwargs):
+            calls.append(("project_create", kwargs))
+            return SimpleNamespace(id=1)
+
+    class FakeFile:
+        filename = "import.xlsx"
+
+        async def read(self):
+            return b"xlsx"
+
+    async def fake_config():
+        return {"products": ["EDG", "ASG", "TSafe"], "statuses": ["售前"], "regions": []}
+
+    async def fake_get_or_create(**kwargs):
+        calls.append(("dept", kwargs))
+        return SimpleNamespace(id=10 if kwargs["parent_id"] == 0 else 11, parent_id=kwargs["parent_id"])
+
+    async def fake_validate_payload(payload):
+        return {"project_name": payload["project_name"], "agent_id": payload["agent_id"], "product_points": payload["product_points"], "status": "售前"}
+
+    monkeypatch.setattr(project_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_module.dept_controller, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(project_controller, "_config", fake_config)
+    monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+
+    result = await project_controller.import_projects(user_id=7, file=FakeFile())
+
+    assert result["created"] == 1
+    assert calls[0] == ("dept", {"name": "渠道部门", "parent_id": 0, "desc": "项目导入自动创建"})
+    assert calls[1] == ("dept", {"name": "代理商A", "parent_id": 10, "desc": "项目导入自动创建"})
+
+
+@pytest.mark.anyio
+async def test_validate_agent_requires_channel_child(monkeypatch):
+    class DeptQuery:
+        def __init__(self, result):
+            self.result = result
+
+        async def first(self):
+            return self.result
+
+        async def exists(self):
+            return bool(self.result)
+
+    class FakeDept:
+        @staticmethod
+        def filter(**kwargs):
+            if kwargs.get("name") == project_module.IMPORT_AGENT_PARENT_DEPT_NAME:
+                return DeptQuery(SimpleNamespace(id=10))
+            if kwargs.get("id") == 11 and kwargs.get("parent_id") == 10:
+                return DeptQuery(SimpleNamespace(id=11))
+            return DeptQuery(None)
+
+    monkeypatch.setattr(project_module, "Dept", FakeDept)
+
+    await project_controller._validate_agent(11)
+
+    with pytest.raises(HTTPException):
+        await project_controller._validate_agent(12)
+
+
+@pytest.mark.anyio
+async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypatch):
+    calls = []
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([
+                ("所属代理商", "项目名称", "产品名称", "终端点数"),
+                ("代理商A", "项目A", "TSafe", "1-0-0-5"),
+            ])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+    class FakeProjectQuery:
+        async def first(self):
+            return None
+
+    class FakeProject:
+        @staticmethod
+        def filter(**kwargs):
+            return FakeProjectQuery()
+
+        @staticmethod
+        async def create(**kwargs):
+            calls.append(("project_create", kwargs))
+            return SimpleNamespace(id=1)
+
+    class FakeFile:
+        filename = "import.xlsx"
+
+        async def read(self):
+            return b"xlsx"
+
+    class FakeAgent:
+        id = 11
+        parent_id = 99
+
+        async def save(self):
+            calls.append(("agent_save", self.parent_id))
+
+    async def fake_config():
+        return {"products": ["EDG", "ASG", "TSafe"], "statuses": ["售前"], "regions": []}
+
+    async def fake_get_or_create(**kwargs):
+        calls.append(("dept", kwargs))
+        return SimpleNamespace(id=10, parent_id=0) if kwargs["parent_id"] == 0 else FakeAgent()
+
+    async def fake_validate_payload(payload):
+        return {"project_name": payload["project_name"], "agent_id": payload["agent_id"], "product_points": payload["product_points"], "status": "售前"}
+
+    async def fake_clear_cache():
+        calls.append(("clear_cache", None))
+
+    monkeypatch.setattr(project_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+    monkeypatch.setattr(project_module, "Project", FakeProject)
+    monkeypatch.setattr(project_module.dept_controller, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(project_module.dept_controller, "clear_dept_dict_cache", fake_clear_cache)
+    monkeypatch.setattr(project_controller, "_config", fake_config)
+    monkeypatch.setattr(project_controller, "_validate_payload", fake_validate_payload)
+
+    result = await project_controller.import_projects(user_id=7, file=FakeFile())
+
+    assert result["created"] == 1
+    assert ("agent_save", 10) in calls
+    assert ("clear_cache", None) in calls

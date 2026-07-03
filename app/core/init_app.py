@@ -151,6 +151,7 @@ async def init_superuser():
             UserCreate(
                 username=settings.INITIAL_ADMIN_USERNAME,
                 email=settings.INITIAL_ADMIN_EMAIL,
+                phone=settings.INITIAL_ADMIN_PHONE,
                 password=settings.INITIAL_ADMIN_PASSWORD,
                 is_active=True,
                 is_superuser=True,

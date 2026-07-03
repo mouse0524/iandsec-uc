@@ -26,3 +26,4 @@ db.sqlite3-wal
 dist
 .DS_Store
 ._.DS_Store
+*.xlsx

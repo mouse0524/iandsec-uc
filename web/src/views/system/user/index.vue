@@ -354,6 +354,18 @@ const validateAddUser = {
       },
     },
   ],
+  phone: [
+    {
+      trigger: ['input', 'blur'],
+      validator: (rule, value, callback) => {
+        if (modalAction.value === 'add' && !String(value || '').trim()) {
+          callback('请输入手机号')
+          return
+        }
+        callback()
+      },
+    },
+  ],
   password: [
     {
       required: true,

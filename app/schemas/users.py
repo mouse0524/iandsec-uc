@@ -23,7 +23,7 @@ class UserCreate(BaseModel):
     username: str = Field(example="admin")
     alias: Optional[str] = Field(default=None, description="用户姓名")
     company_name: Optional[str] = Field(default=None, description="公司名称")
-    phone: Optional[str] = Field(default=None, description="电话")
+    phone: str = Field(..., description="电话")
     hardware_id: Optional[str] = Field(default=None, description="产品硬件ID")
     password: str = Field(example="123456")
     is_active: Optional[bool] = True

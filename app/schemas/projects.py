@@ -41,6 +41,13 @@ class ProjectAssignIn(BaseModel):
     assignee_id: int | None = Field(default=None, description="负责人ID")
 
 
+class ProjectBatchUpdateIn(BaseModel):
+    project_ids: list[int] = Field(..., description="项目ID列表")
+    region: str | None = Field(default=None, description="区域")
+    status: str | None = Field(default=None, description="项目状态")
+    assignee_id: int | None = Field(default=None, description="负责人ID")
+
+
 class ProjectActivityCreateIn(BaseModel):
     project_id: int = Field(..., description="项目ID")
     activity_type: str = Field(..., description="活动类型")

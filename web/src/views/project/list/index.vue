@@ -39,7 +39,11 @@ const clientVersionOptions = ref([])
 const userOptions = ref([])
 const agentOptions = ref([])
 const uploadLoading = ref(false)
+const importLoading = ref(false)
 const fileList = ref([])
+const checkedProjectIds = ref([])
+const batchModalVisible = ref(false)
+const batchForm = ref(defaultBatchForm())
 const workOrderVisible = ref(false)
 const workOrderProject = ref(null)
 const activeWorkOrderTab = ref('issues')
@@ -69,6 +73,7 @@ onMounted(async () => {
 function defaultForm() {
   return {
     project_name: '',
+    created_at: '',
     product_points: [],
     region: null,
     agent_id: null,
@@ -87,10 +92,19 @@ function defaultForm() {
   }
 }
 
+function defaultBatchForm() {
+  return {
+    region: null,
+    status: null,
+    assignee_id: null,
+  }
+}
+
 async function loadOptions() {
-  const [configRes, userRes] = await Promise.all([
+  const [configRes, userRes, deptRes] = await Promise.all([
     api.getPublicConfig(),
     api.getUserList({ page: 1, page_size: 9999 }),
+    api.getDepts(),
   ])
   const config = configRes?.data || {}
   const products = config.project_products?.length ? config.project_products : ['安得卫士']
@@ -109,10 +123,12 @@ async function loadOptions() {
     .filter((item) => item.is_active !== false)
     .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
     .map((item) => ({ label: item.alias || item.username, value: item.id }))
-  agentOptions.value = (userRes?.data || [])
-    .filter((item) => item.is_active !== false)
-    .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => ['代理商', '渠道商'].includes(role?.name)))
-    .map((item) => ({ label: item.company_name || item.alias || item.username, value: item.id }))
+  agentOptions.value = channelDeptOptions(deptRes?.data || [])
+}
+
+function channelDeptOptions(rows) {
+  const channel = (rows || []).find((item) => item.name === '渠道部门')
+  return (channel?.children || []).map((item) => ({ label: item.name, value: item.id }))
 }
 
 async function getProjectList(params) {
@@ -138,11 +154,22 @@ function formatDate(value) {
   return value ? String(value).slice(0, 10) : '-'
 }
 
+function formatDateTime(value) {
+  if (!value) return '-'
+  if (typeof value === 'number') {
+    const d = new Date(value)
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  }
+  return String(value)
+}
+
 function openCreate() {
   editingId.value = null
   readonly.value = false
   form.value = {
     ...defaultForm(),
+    created_at: Date.now(),
     product_points: productOptions.value[0]?.value ? [{ product_name: productOptions.value[0].value, points: 0 }] : [],
     region: regionOptions.value[0]?.value || null,
     status: statusOptions.value[0]?.value,
@@ -201,6 +228,7 @@ async function submitProject() {
     end_time: form.value.end_time ? new Date(form.value.end_time).toISOString() : null,
     maintenance_time: form.value.maintenance_time ? new Date(form.value.maintenance_time).toISOString() : null,
   }
+  delete payload.created_at
   if (editingId.value) {
     await api.projectUpdate({ ...payload, project_id: editingId.value })
     $message.success('项目已更新')
@@ -228,6 +256,63 @@ async function customUpload({ file, onFinish, onError }) {
   } finally {
     uploadLoading.value = false
   }
+}
+
+async function customImport({ file, onFinish, onError }) {
+  try {
+    importLoading.value = true
+    const res = await api.importProjects(file.file)
+    const data = res?.data || {}
+    const errors = Array.isArray(data.errors) ? data.errors : []
+    const failed = errors.length
+    if (failed) {
+      console.error('[project.import] failed rows', errors)
+      $message.warning(
+        `导入完成：新增 ${data.created || 0}，更新 ${data.updated || 0}，失败 ${failed}。${errors
+          .slice(0, 3)
+          .map((item) => `第${item.row}行：${item.error}`)
+          .join('；')}`,
+      )
+    } else {
+      $message.success(`导入完成：新增 ${data.created || 0}，更新 ${data.updated || 0}，失败 0`)
+    }
+    await loadOptions()
+    $table.value?.handleSearch()
+    onFinish()
+  } catch {
+    onError()
+  } finally {
+    importLoading.value = false
+  }
+}
+
+function handleChecked(rowKeys) {
+  checkedProjectIds.value = rowKeys
+}
+
+function openBatchUpdate() {
+  if (!checkedProjectIds.value.length) {
+    $message.warning('请先选择项目')
+    return
+  }
+  batchForm.value = defaultBatchForm()
+  batchModalVisible.value = true
+}
+
+async function submitBatchUpdate() {
+  const payload = {
+    project_ids: checkedProjectIds.value,
+    ...Object.fromEntries(Object.entries(batchForm.value).filter(([, value]) => value !== null && value !== '')),
+  }
+  if (Object.keys(payload).length <= 1) {
+    $message.warning('请选择要修改的内容')
+    return
+  }
+  const res = await api.projectBatchUpdate(payload)
+  $message.success(`已修改 ${res?.data?.count || 0} 个项目`)
+  batchModalVisible.value = false
+  checkedProjectIds.value = []
+  $table.value?.handleSearch()
 }
 
 function handleRemove({ file }) {
@@ -345,6 +430,7 @@ const activityColumns = [
 ]
 
 const columns = [
+  { type: 'selection', fixed: 'left', width: 48 },
   { title: '区域', key: 'region', align: 'center', width: 90, render: (row) => row.region || '-' },
   { title: '所属代理商', key: 'agent_name', align: 'center', width: 150, render: (row) => row.agent_name || '-' },
   {
@@ -371,6 +457,7 @@ const columns = [
   { title: '维保时间', key: 'maintenance_time', align: 'center', width: 120, render: (row) => formatDate(row.maintenance_time) },
   { title: '状态', key: 'status', align: 'center', width: 110, render: (row) => row.status || '-' },
   { title: '负责人', key: 'assignee_name', align: 'center', width: 120, render: (row) => row.assignee_name || '-' },
+  { title: '创建时间', key: 'created_at', align: 'center', width: 170, render: (row) => row.created_at || '-' },
   {
     title: '操作',
     key: 'actions',
@@ -425,7 +512,8 @@ const columns = [
       v-model:query-items="queryItems"
       :columns="columns"
       :get-data="getProjectList"
-      :scroll-x="1870"
+      :scroll-x="2088"
+      @on-checked="handleChecked"
     >
       <template #queryBar>
         <QueryBarItem label="项目名称" :label-width="64">
@@ -444,7 +532,17 @@ const columns = [
           <NSelect v-model:value="queryItems.assignee_id" :options="userOptions" clearable filterable style="width: 160px" />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
-          <NButton type="primary" @click="openCreate">新增项目</NButton>
+          <div class="toolbar-actions">
+            <NButton type="primary" @click="openCreate">新增项目</NButton>
+            <NUpload
+              accept=".xlsx"
+              :show-file-list="false"
+              :custom-request="customImport"
+            >
+              <NButton type="info" :loading="importLoading">批量导入</NButton>
+            </NUpload>
+            <NButton type="warning" :disabled="!checkedProjectIds.length" @click="openBatchUpdate">批量修改</NButton>
+          </div>
         </QueryBarItem>
       </template>
     </CrudTable>
@@ -471,6 +569,7 @@ const columns = [
           <div class="section-title"><span>基础信息</span></div>
           <div class="form-grid">
             <NFormItem label="项目名称" class="span-2"><NInput v-model:value="form.project_name" :disabled="readonly" /></NFormItem>
+            <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
             <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
             <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" :disabled="readonly" /></NFormItem>
@@ -536,6 +635,19 @@ const columns = [
             </NButton>
           </div>
         </div>
+      </NForm>
+    </CrudModal>
+
+    <CrudModal
+      v-model:visible="batchModalVisible"
+      title="批量修改项目"
+      width="520px"
+      @save="submitBatchUpdate"
+    >
+      <NForm class="project-form" label-placement="top">
+        <NFormItem label="区域"><NSelect v-model:value="batchForm.region" :options="regionOptions" clearable /></NFormItem>
+        <NFormItem label="状态"><NSelect v-model:value="batchForm.status" :options="statusOptions" clearable /></NFormItem>
+        <NFormItem label="负责人"><NSelect v-model:value="batchForm.assignee_id" :options="userOptions" clearable filterable /></NFormItem>
       </NForm>
     </CrudModal>
 
@@ -618,6 +730,13 @@ const columns = [
   display: flex;
   justify-content: center;
   gap: 12px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
 }
 
 .project-modal-head {
