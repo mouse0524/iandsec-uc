@@ -268,7 +268,7 @@ async function submitRemarkTimeline() {
   await api.projectActivityCreate({
     project_id: editingId.value,
     activity_type: remarkActivityType,
-    title: remarkActivityType,
+    title: remarkForm.value.content,
     content: remarkForm.value.content,
     status: '已完成',
     started_at: new Date().toISOString(),

@@ -904,6 +904,12 @@ async def ensure_security_columns():
             ("ALTER TABLE `dept` ADD COLUMN `channel_level` VARCHAR(20) NULL", "dept.channel_level"),
             ("ALTER TABLE `user` ADD COLUMN `channel_level` VARCHAR(20) NULL", "user.channel_level"),
             (
+                "UPDATE `project_activity` SET `title` = LEFT(`content`, 200) "
+                "WHERE `activity_type` = '备注' AND `content` IS NOT NULL AND TRIM(`content`) <> '' "
+                "AND (`title` IS NULL OR `title` = '' OR `title` = '备注')",
+                "project_activity.remark_title_backfill",
+            ),
+            (
                 """
                 CREATE TABLE IF NOT EXISTS `webdav_download_log` (
                     `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
