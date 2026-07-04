@@ -27,6 +27,7 @@ import api from '@/api'
 
 defineOptions({ name: '项目列表' })
 
+const remarkActivityType = '备注'
 const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
@@ -58,6 +59,21 @@ const ticketDetailLoading = ref(false)
 const currentTicket = ref({})
 const activityDetailVisible = ref(false)
 const currentActivity = ref({})
+const remarkTimeline = ref([])
+const remarkForm = ref(defaultRemarkForm())
+const remarkTimelineRows = computed(() => {
+  const rows = []
+  if (form.value.remark?.trim()) {
+    rows.push({
+      id: 'project-remark',
+      activity_type: '原备注',
+      content: form.value.remark,
+      started_at: form.value.created_at,
+      creator_name: form.value.creator_name,
+    })
+  }
+  return rows.concat(remarkTimeline.value)
+})
 const activityForm = computed(() => ({
   ...currentActivity.value,
   started_at: currentActivity.value?.started_at ? Date.parse(currentActivity.value.started_at) : null,
@@ -98,6 +114,12 @@ function defaultBatchForm() {
     region: null,
     status: null,
     assignee_id: null,
+  }
+}
+
+function defaultRemarkForm() {
+  return {
+    content: '',
   }
 }
 
@@ -203,6 +225,8 @@ function openProject(row, isReadonly) {
     status: 'finished',
     attachmentId: Number(item.id),
   }))
+  remarkForm.value = defaultRemarkForm()
+  loadRemarkTimeline(row.id)
   modalVisible.value = true
 }
 
@@ -223,6 +247,35 @@ async function deleteActivity(row) {
   await api.projectActivityDelete({ activity_id: row.id })
   $message.success('运维记录已删除')
   await loadWorkOrders(workOrderProject.value, 'activities')
+  $table.value?.handleSearch()
+}
+
+async function loadRemarkTimeline(projectId = editingId.value) {
+  if (!projectId) {
+    remarkTimeline.value = []
+    return
+  }
+  const res = await api.projectActivityList({ page: 1, page_size: 100, project_id: projectId, activity_type: remarkActivityType })
+  remarkTimeline.value = res?.data || []
+}
+
+async function submitRemarkTimeline() {
+  if (readonly.value) return
+  if (!editingId.value || !remarkForm.value.content?.trim()) {
+    $message.warning('请填写备注')
+    return
+  }
+  await api.projectActivityCreate({
+    project_id: editingId.value,
+    activity_type: remarkActivityType,
+    title: remarkActivityType,
+    content: remarkForm.value.content,
+    status: '已完成',
+    started_at: new Date().toISOString(),
+  })
+  $message.success('备注流水已添加')
+  remarkForm.value.content = ''
+  await loadRemarkTimeline()
   $table.value?.handleSearch()
 }
 
@@ -677,8 +730,31 @@ const columns = [
 
         <div class="form-section">
           <div class="section-title"><span>备注</span></div>
-          <NFormItem label="备注">
-            <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" :disabled="readonly" />
+          <div v-if="editingId" class="remark-timeline">
+            <div v-if="!readonly" class="remark-add">
+              <NInput
+                v-model:value="remarkForm.content"
+                class="remark-input"
+                type="textarea"
+                placeholder="填写本次备注"
+                :autosize="{ minRows: 2, maxRows: 4 }"
+              />
+              <NButton class="remark-submit" type="primary" @click="submitRemarkTimeline">添加备注</NButton>
+            </div>
+            <div v-if="remarkTimelineRows.length" class="remark-list">
+              <div v-for="item in remarkTimelineRows" :key="item.id" class="remark-item">
+                <div class="remark-meta">
+                  <NTag size="small" type="info">{{ item.activity_type || '-' }}</NTag>
+                  <span>{{ item.started_at || item.created_at || '-' }}</span>
+                  <span>{{ item.operator_name || item.creator_name || '-' }}</span>
+                </div>
+                <div class="remark-content">{{ item.content || item.title || '-' }}</div>
+              </div>
+            </div>
+            <div v-else class="remark-empty">暂无备注流水</div>
+          </div>
+          <NFormItem v-else label="备注">
+            <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" />
           </NFormItem>
         </div>
 
@@ -890,6 +966,66 @@ const columns = [
 
 .span-2 {
   grid-column: 1 / -1;
+}
+
+.remark-timeline {
+  margin-top: 4px;
+}
+
+.remark-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid #e6edf7;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.remark-input :deep(.n-input) {
+  background: #fff;
+}
+
+.remark-submit {
+  width: 96px;
+  min-height: 54px;
+  align-self: stretch;
+}
+
+.remark-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.remark-item {
+  padding: 10px 12px;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.remark-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.remark-content {
+  color: #1f2937;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.remark-empty {
+  margin-top: 10px;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 .summary-grid {

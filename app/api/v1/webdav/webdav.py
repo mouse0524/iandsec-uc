@@ -57,11 +57,38 @@ async def clear_webdav_cache():
 
 
 @router.get("/download-url", summary="生成WebDAV直接下载链接")
-async def download_webdav_file(path: str = Query(..., description="文件路径")):
+async def download_webdav_file(request: Request, path: str = Query(..., description="文件路径")):
     logger.info("[api.webdav.download] request path={}", path)
+    user_id = CTX_USER_ID.get()
+    user = await User.filter(id=user_id).first()
     sign_data = await webdav_controller.build_direct_download_signature(path=path)
+    await webdav_controller.record_download_log(
+        download_type="direct",
+        file_path=path,
+        downloader_id=user_id,
+        downloader_name=(user.alias or user.username) if user else "",
+        source_ip=get_client_ip(request),
+        user_agent=request.headers.get("user-agent", ""),
+        referer=request.headers.get("referer", ""),
+    )
     query = urlencode({"path": path, "ts": sign_data["ts"], "sig": sign_data["sig"]})
     return Success(data={"download_url": f"/api/v1/public/webdav/download?{query}"})
+
+
+@router.get("/download-log/list", summary="WebDAV下载日志")
+async def list_webdav_download_logs(
+    page: int = Query(1, description="页码"),
+    page_size: int = Query(10, description="每页数量"),
+    file_name: str | None = Query(None, description="文件名"),
+    download_type: str | None = Query(None, description="下载类型"),
+):
+    total, rows = await webdav_controller.list_download_logs(
+        page=page,
+        page_size=page_size,
+        file_name=file_name,
+        download_type=download_type,
+    )
+    return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
 
 @router.get("/preview-cache", summary="缓存WebDAV文件用于预览")
 async def cache_webdav_preview_file(path: str = Query(..., description="文件路径")):
@@ -244,7 +271,29 @@ async def webdav_share_download(
             logger.warning("[webdav.share.download] fail_counter_error ip={} code={} error={}", client_ip, code, str(counter_exc))
         raise
 
+    hit_key = f"webdav:share:hit:{client_ip}:{code}"
+    try:
+        hit_count = await execute_redis("incr", hit_key)
+        if int(hit_count) == 1:
+            await execute_redis("expire", hit_key, 60)
+        if int(hit_count) > 30:
+            logger.warning("[webdav.share.download] rate_limited ip={} code={} hit_count={}", client_ip, code, hit_count)
+            return Fail(code=429, msg="请求过于频繁，请稍后重试")
+    except Exception as exc:
+        logger.warning("[webdav.share.download] rate_limit_error ip={} code={} error={}", client_ip, code, str(exc))
+
     share = await webdav_controller.get_share(code)
+    creator = await User.filter(id=share.created_by).first()
+    await webdav_controller.record_download_log(
+        download_type="share",
+        file_path=share.file_path,
+        share_code=code,
+        downloader_id=share.created_by,
+        downloader_name=(creator.alias or creator.username) if creator else "",
+        source_ip=client_ip,
+        user_agent=request.headers.get("user-agent", ""),
+        referer=request.headers.get("referer", ""),
+    )
     if _is_apple_device(request):
         iterator, headers = await webdav_controller.download_stream(share.file_path)
         content_type = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"

@@ -16,7 +16,7 @@ from fastapi import HTTPException, UploadFile
 
 from app.core.redis_client import execute_redis
 from app.log import logger
-from app.models.admin import WebDavShareLink
+from app.models.admin import User, WebDavDownloadLog, WebDavShareLink
 from app.controllers.system_setting import normalize_webdav_base_url, system_setting_controller
 from app.settings import settings
 
@@ -554,6 +554,60 @@ class WebDavController:
             raise HTTPException(status_code=404, detail="分享记录不存在")
         await obj.delete()
         logger.info("[webdav.share.delete] share_id={} created_by={}", share_id, created_by)
+
+    async def record_download_log(
+        self,
+        *,
+        download_type: str,
+        file_path: str,
+        downloader_id: int | None = None,
+        downloader_name: str | None = None,
+        share_code: str | None = None,
+        source_ip: str | None = None,
+        user_agent: str | None = None,
+        referer: str | None = None,
+    ) -> None:
+        try:
+            norm_path = self._normalize_path(file_path)
+            await WebDavDownloadLog.create(
+                download_type=str(download_type or "")[:20],
+                file_path=norm_path,
+                file_name=PurePosixPath(norm_path).name,
+                share_code=(str(share_code or "").strip() or None),
+                downloader_id=downloader_id,
+                downloader_name=(str(downloader_name or "").strip() or None),
+                source_ip=(str(source_ip or "").strip() or None),
+                user_agent=(str(user_agent or "")[:500] or None),
+                referer=(str(referer or "")[:500] or None),
+            )
+        except Exception as exc:
+            logger.warning("[webdav.download.log] failed type={} path={} error={}", download_type, file_path, str(exc))
+
+    async def list_download_logs(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        file_name: str | None = None,
+        download_type: str | None = None,
+    ) -> tuple[int, list[dict]]:
+        q = WebDavDownloadLog.all()
+        keyword = str(file_name or "").strip()
+        if keyword:
+            q = q.filter(file_name__icontains=keyword)
+        if download_type:
+            q = q.filter(download_type=download_type)
+        q = q.order_by("-id")
+        total = await q.count()
+        rows = await q.offset((page - 1) * page_size).limit(page_size)
+        data = [await item.to_dict() for item in rows]
+        user_ids = {item.get("downloader_id") for item in data if item.get("downloader_id")}
+        if user_ids:
+            users = await User.filter(id__in=list(user_ids)).values("id", "alias", "username")
+            user_map = {item["id"]: (item.get("alias") or item.get("username") or "") for item in users}
+            for item in data:
+                item["downloader_name"] = item.get("downloader_name") or user_map.get(item.get("downloader_id"), "")
+        return total, data
 
     async def get_share(self, code: str) -> WebDavShareLink:
         obj = await WebDavShareLink.filter(code=code).first()

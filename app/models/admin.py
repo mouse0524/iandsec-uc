@@ -251,6 +251,21 @@ class WebDavShareLink(BaseModel, TimestampMixin):
         table = "webdav_share_link"
 
 
+class WebDavDownloadLog(BaseModel, TimestampMixin):
+    download_type = fields.CharField(max_length=20, description="下载类型", index=True)
+    file_path = fields.CharField(max_length=1000, description="文件路径")
+    file_name = fields.CharField(max_length=255, null=True, description="文件名")
+    share_code = fields.CharField(max_length=32, null=True, description="分享码", index=True)
+    downloader_id = fields.BigIntField(null=True, description="下载者ID", index=True)
+    downloader_name = fields.CharField(max_length=120, null=True, description="下载者")
+    source_ip = fields.CharField(max_length=64, null=True, description="来源IP", index=True)
+    user_agent = fields.CharField(max_length=500, null=True, description="User-Agent")
+    referer = fields.CharField(max_length=500, null=True, description="来源页面")
+
+    class Meta:
+        table = "webdav_download_log"
+
+
 class TerminalAuthReport(BaseModel, TimestampMixin):
     company_name = fields.CharField(max_length=120, description="公司名称", index=True)
     auth_expire_at = fields.DatetimeField(description="授权到期时间", index=True)

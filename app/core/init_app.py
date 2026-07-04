@@ -585,13 +585,42 @@ async def init_menus():
             redirect="",
         )
 
+    download_log_menu = await Menu.filter(
+        Q(component="/system/webdav-download-log") | Q(path="webdav-download-log", parent_id=outbound_parent.id) | Q(name="下载日志")
+    ).first()
+    if download_log_menu:
+        download_log_menu.menu_type = MenuType.MENU
+        download_log_menu.name = "下载日志"
+        download_log_menu.path = "webdav-download-log"
+        download_log_menu.order = 3
+        download_log_menu.parent_id = outbound_parent.id
+        download_log_menu.icon = "material-symbols:download-for-offline-outline-rounded"
+        download_log_menu.is_hidden = False
+        download_log_menu.component = "/system/webdav-download-log"
+        download_log_menu.keepalive = False
+        download_log_menu.redirect = ""
+        await download_log_menu.save()
+    else:
+        await Menu.create(
+            menu_type=MenuType.MENU,
+            name="下载日志",
+            path="webdav-download-log",
+            order=3,
+            parent_id=outbound_parent.id,
+            icon="material-symbols:download-for-offline-outline-rounded",
+            is_hidden=False,
+            component="/system/webdav-download-log",
+            keepalive=False,
+            redirect="",
+        )
+
     password_menu = await Menu.filter(
         Q(component="/system/webdav-password") | Q(path="webdav-password", parent_id=outbound_parent.id) | Q(name="密码获取")
     ).first()
     if password_menu:
         password_menu.name = "密码获取"
         password_menu.path = "webdav-password"
-        password_menu.order = 3
+        password_menu.order = 4
         password_menu.parent_id = outbound_parent.id
         password_menu.icon = "material-symbols:key-outline-rounded"
         password_menu.is_hidden = False
@@ -603,7 +632,7 @@ async def init_menus():
             menu_type=MenuType.MENU,
             name="密码获取",
             path="webdav-password",
-            order=3,
+            order=4,
             parent_id=outbound_parent.id,
             icon="material-symbols:key-outline-rounded",
             is_hidden=False,
@@ -874,6 +903,30 @@ async def ensure_security_columns():
             ("ALTER TABLE `project` ADD COLUMN `maintenance_time` DATETIME NULL", "project.maintenance_time"),
             ("ALTER TABLE `dept` ADD COLUMN `channel_level` VARCHAR(20) NULL", "dept.channel_level"),
             ("ALTER TABLE `user` ADD COLUMN `channel_level` VARCHAR(20) NULL", "user.channel_level"),
+            (
+                """
+                CREATE TABLE IF NOT EXISTS `webdav_download_log` (
+                    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                    `download_type` VARCHAR(20) NOT NULL,
+                    `file_path` VARCHAR(1000) NOT NULL,
+                    `file_name` VARCHAR(255) NULL,
+                    `share_code` VARCHAR(32) NULL,
+                    `downloader_id` BIGINT NULL,
+                    `downloader_name` VARCHAR(120) NULL,
+                    `source_ip` VARCHAR(64) NULL,
+                    `user_agent` VARCHAR(500) NULL,
+                    `referer` VARCHAR(500) NULL,
+                    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                    KEY `idx_webdav_dl_type` (`download_type`),
+                    KEY `idx_webdav_dl_share` (`share_code`),
+                    KEY `idx_webdav_dl_user` (`downloader_id`),
+                    KEY `idx_webdav_dl_ip` (`source_ip`),
+                    KEY `idx_webdav_dl_created` (`created_at`)
+                )
+                """,
+                "webdav_download_log.table",
+            ),
         ]:
             try:
                 await conn.execute_query(sql)
@@ -936,6 +989,12 @@ async def init_roles():
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/webdav-password")))
                 await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
+                await _backfill_existing_role_permissions(
+                    role_name="管理员",
+                    api_paths=["/api/v1/webdav/download-log/list"],
+                    component_paths=["/outbound", "/system/webdav-download-log"],
+                )
+                await user_controller.clear_all_permission_cache()
             await _backfill_existing_role_permissions(
                 role_name="技术",
                 api_paths=_ticket_redmine_api_paths(),
@@ -1001,6 +1060,7 @@ async def init_roles():
             "/api/v1/webdav/list",
             "/api/v1/webdav/cache/clear",
             "/api/v1/webdav/download-url",
+            "/api/v1/webdav/download-log/list",
             "/api/v1/webdav/preview-cache",
             "/api/v1/webdav/share/create",
             "/api/v1/webdav/share/list",
@@ -1046,6 +1106,7 @@ async def init_roles():
         Q(path="/outbound")
         | Q(component="/system/webdav")
         | Q(component="/system/webdav-share")
+        | Q(component="/system/webdav-download-log")
     )
     webdav_password_menus = await Menu.filter(Q(component="/system/webdav-password"))
 

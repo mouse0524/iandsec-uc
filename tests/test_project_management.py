@@ -74,6 +74,26 @@ async def test_project_payload_uses_configured_products_and_statuses(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_project_config_keeps_remark_activity_type(monkeypatch):
+    async def fake_config():
+        return {
+            "project_products": [],
+            "project_statuses": [],
+            "project_regions": [],
+            "project_activity_types": ["迁移库"],
+            "project_server_versions": [],
+            "project_client_versions": [],
+        }
+
+    monkeypatch.setattr(project_module.system_setting_controller, "get_full_dict", fake_config)
+
+    config = await project_controller._config()
+
+    assert "迁移库" in config["activity_types"]
+    assert "备注" in config["activity_types"]
+
+
+@pytest.mark.anyio
 async def test_project_row_counts_linked_tickets_and_activities(monkeypatch):
     class CountQuery:
         def __init__(self, count):

@@ -24,6 +24,7 @@ from app.utils.http_headers import build_download_content_disposition
 PROJECT_ROLES = {"管理员", "客服", "技术"}
 ASSIGNEE_ROLES = {"技术"}
 ACTIVITY_STATUSES = {"待处理", "处理中", "已完成"}
+PROJECT_REMARK_ACTIVITY_TYPE = "备注"
 PROJECT_STATUSES = ["售前", "待实施", "实施中", "待验收", "已验收", "关闭"]
 IMPORT_POINT_PRODUCTS = ["EDG", "ASG", "TSafe", "TDLP"]
 IMPORT_SINGLE_COUNT_PRODUCTS = {"DAS", "DSES", "NDLP"}
@@ -106,7 +107,7 @@ class ProjectController:
             "products": config.get("project_products") or ["安得卫士"],
             "statuses": config.get("project_statuses") or PROJECT_STATUSES,
             "regions": config.get("project_regions") or ["华东", "华南", "华北", "华中", "西南", "西北"],
-            "activity_types": config.get("project_activity_types") or ["迁移库", "重做系统", "运维", "其他"],
+            "activity_types": list(dict.fromkeys((config.get("project_activity_types") or ["迁移库", "重做系统", "运维", "其他"]) + [PROJECT_REMARK_ACTIVITY_TYPE])),
             "server_versions": config.get("project_server_versions") or [],
             "client_versions": config.get("project_client_versions") or [],
         }
