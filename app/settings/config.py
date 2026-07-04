@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = False
     CORS_ALLOW_METHODS: typing.List = ["GET", "POST", "PUT", "DELETE"]
     CORS_ALLOW_HEADERS: typing.List = ["Content-Type", "Authorization", "token"]
-    TRUST_PROXY_HEADERS: bool = os.getenv("TRUST_PROXY_HEADERS", "0").lower() in {"1", "true", "yes", "on"}
+    TRUST_PROXY_HEADERS: bool = os.getenv("TRUST_PROXY_HEADERS", "1").lower() in {"1", "true", "yes", "on"}
 
     DEBUG: bool = False
     OPENAPI_ENABLED: bool = False
