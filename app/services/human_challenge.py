@@ -39,7 +39,9 @@ class HumanChallengeService:
         config = config or await system_setting_controller.get_full_dict()
         if not config.get("login_challenge_enabled", True):
             return True, ""
+        challenge_type = self._challenge_type(config)
 
+        captcha_valid = False
         if self.requires_captcha(config):
             valid = await captcha_controller.verify_captcha(
                 captcha_id or "",
@@ -49,10 +51,23 @@ class HumanChallengeService:
             if not valid:
                 logger.warning("[{}] captcha_invalid captcha_id={}", log_context, captcha_id)
                 return False, f"图形验证码错误或已失效，请重试（最多{settings.CAPTCHA_MAX_RETRY}次）"
+            captcha_valid = True
 
         if self.requires_turnstile(config):
             token = (turnstile_token or "").strip()
             secret = (config.get("turnstile_secret_key") or "").strip()
+            if not token and challenge_type == "turnstile":
+                if not captcha_valid:
+                    captcha_valid = await captcha_controller.verify_captcha(
+                        captcha_id or "",
+                        captcha_code or "",
+                        consume=consume_captcha,
+                    )
+                if captcha_valid:
+                    logger.info("[{}] turnstile_fallback_captcha captcha_id={}", log_context, captcha_id)
+                    return True, ""
+                logger.warning("[{}] turnstile_missing_and_captcha_invalid captcha_id={}", log_context, captcha_id)
+                return False, f"请先完成 Cloudflare Turnstile 安全校验或图形验证码（最多{settings.CAPTCHA_MAX_RETRY}次）"
             if not token:
                 return False, "请先完成 Cloudflare Turnstile 安全校验"
             if not secret:

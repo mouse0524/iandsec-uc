@@ -13,7 +13,6 @@ export const router = createRouter({
 })
 
 export async function setupRouter(app) {
-  await addDynamicRoutes(window.location.pathname)
   setupRouterGuard(router)
   app.use(router)
 }
@@ -48,7 +47,7 @@ export async function addDynamicRoutes(currentPath = window.location.pathname) {
       !router.hasRoute(route.name) && router.addRoute(route)
     })
     router.hasRoute(EMPTY_ROUTE.name) && router.removeRoute(EMPTY_ROUTE.name)
-    router.addRoute(NOT_FOUND_ROUTE)
+    !router.hasRoute(NOT_FOUND_ROUTE.name) && router.addRoute(NOT_FOUND_ROUTE)
   } catch (error) {
     console.error('error', error)
     const userStore = useUserStore()

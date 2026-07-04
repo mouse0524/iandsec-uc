@@ -185,10 +185,11 @@ async function submit() {
 
 function validateChallenge() {
   if (!challengeEnabled.value) return true
-  if (requiresCaptcha.value && (!form.value.captcha_id || !form.value.captcha_code?.trim())) {
+  const hasCaptcha = !!form.value.captcha_id && !!form.value.captcha_code?.trim()
+  if (requiresCaptcha.value && !hasCaptcha) {
     return new Error('请先完成图形验证码')
   }
-  if (requiresTurnstile.value && !form.value.turnstile_token) {
+  if (requiresTurnstile.value && !form.value.turnstile_token && !hasCaptcha) {
     return new Error('请先完成 Cloudflare Turnstile 安全校验')
   }
   return true

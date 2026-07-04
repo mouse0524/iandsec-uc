@@ -839,10 +839,11 @@ watch(showForgotPasswordModal, (v) => {
 
 function validateChallenge(target) {
   if (!challengeEnabled.value) return true
-  if (requiresCaptcha.value && (!target.captcha_id || !target.captcha_code?.trim())) {
+  const hasCaptcha = !!target.captcha_id && !!target.captcha_code?.trim()
+  if (requiresCaptcha.value && !hasCaptcha) {
     return new Error('请先完成图形验证码')
   }
-  if (requiresTurnstile.value && !target.turnstile_token) {
+  if (requiresTurnstile.value && !target.turnstile_token && !hasCaptcha) {
     return new Error('请先完成 Cloudflare Turnstile 安全校验')
   }
   return true

@@ -87,6 +87,7 @@ export const usePermissionStore = defineStore('permission', {
       accessRoutes: [],
       accessApis: [],
       accessPaths: [],
+      routesLoaded: false,
     }
   },
   getters: {
@@ -119,6 +120,9 @@ export const usePermissionStore = defineStore('permission', {
     },
     resetPermission() {
       this.$reset()
+    },
+    setRoutesLoaded() {
+      this.routesLoaded = true
     },
     canAccessPath(path) {
       const normalized = String(path || '').replace(/\/$/, '') || '/'

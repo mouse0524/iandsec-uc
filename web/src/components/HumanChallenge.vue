@@ -1,6 +1,6 @@
 <template>
   <div v-if="challengeEnabled" class="human-challenge">
-    <div v-if="requiresCaptcha" class="captcha-row">
+    <div v-if="effectiveRequiresCaptcha" class="captcha-row">
       <NInput
         :value="captchaCode"
         :placeholder="captchaPlaceholder"
@@ -11,8 +11,8 @@
       <NButton text type="primary" @click="refreshCaptcha">换一张</NButton>
     </div>
     <div v-if="requiresTurnstile" class="turnstile-wrap">
-      <div v-if="siteKey" ref="turnstileRef" class="cf-turnstile"></div>
-      <NAlert v-else type="warning" :show-icon="false">Cloudflare Turnstile Site Key 未配置</NAlert>
+      <div v-if="siteKey && !forceCaptchaFallback" ref="turnstileRef" class="cf-turnstile"></div>
+      <NAlert v-else-if="!forceCaptchaFallback" type="warning" :show-icon="false">Cloudflare Turnstile Site Key 未配置</NAlert>
       <NAlert v-if="turnstileError" type="error" :show-icon="false" class="turnstile-error">
         {{ turnstileError }}
         <NButton text type="primary" @click="retryTurnstile">重试</NButton>
@@ -45,22 +45,25 @@ const appStore = useAppStore()
 const captchaImage = ref('')
 const turnstileRef = ref(null)
 const turnstileError = ref('')
+const forceCaptchaFallback = ref(false)
 let turnstileWidgetId = null
 
 let scriptPromise = window.__turnstileScriptPromise || null
+const TURNSTILE_LOAD_TIMEOUT = 8000
 
 const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
 const challengeType = computed(() => appStore.loginChallengeType || 'captcha')
 const siteKey = computed(() => appStore.turnstileSiteKey || '')
 const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(challengeType.value))
 const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(challengeType.value))
+const effectiveRequiresCaptcha = computed(() => requiresCaptcha.value || (requiresTurnstile.value && forceCaptchaFallback.value))
 
 function updateCaptchaCode(value) {
   emit('update:captchaCode', value)
 }
 
 async function refreshCaptcha() {
-  if (!requiresCaptcha.value) return
+  if (!effectiveRequiresCaptcha.value) return
   const res = await api.getCaptcha()
   emit('update:captchaId', res.data.captcha_id)
   emit('update:captchaCode', '')
@@ -74,12 +77,22 @@ function loadTurnstileScript() {
   document.querySelector('script[data-turnstile-api="true"]')?.remove()
   scriptPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script')
+    const timer = window.setTimeout(() => {
+      scriptPromise = null
+      window.__turnstileScriptPromise = null
+      script.remove()
+      reject(new Error('turnstile script load timeout'))
+    }, TURNSTILE_LOAD_TIMEOUT)
     script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
     script.async = true
     script.defer = true
     script.dataset.turnstileApi = 'true'
-    script.onload = resolve
+    script.onload = () => {
+      window.clearTimeout(timer)
+      resolve()
+    }
     script.onerror = () => {
+      window.clearTimeout(timer)
       scriptPromise = null
       window.__turnstileScriptPromise = null
       script.remove()
@@ -91,8 +104,20 @@ function loadTurnstileScript() {
   return scriptPromise
 }
 
+async function enableCaptchaFallback(message) {
+  emit('update:turnstileToken', '')
+  turnstileError.value = message
+  forceCaptchaFallback.value = true
+  await refreshCaptcha()
+}
+
 async function renderTurnstile() {
-  if (!requiresTurnstile.value || !siteKey.value) return
+  if (!requiresTurnstile.value) return
+  if (forceCaptchaFallback.value) return
+  if (!siteKey.value) {
+    await enableCaptchaFallback('Cloudflare Turnstile Site Key 未配置，已切换为图形验证码')
+    return
+  }
   await nextTick()
   if (!turnstileRef.value) return
   try {
@@ -110,17 +135,14 @@ async function renderTurnstile() {
       },
       'expired-callback': () => emit('update:turnstileToken', ''),
       'error-callback': () => {
-        emit('update:turnstileToken', '')
-        turnstileError.value = 'Cloudflare Turnstile 加载失败，请点击重试'
+        enableCaptchaFallback('Cloudflare Turnstile 加载失败，已切换为图形验证码')
       },
       'unsupported-callback': () => {
-        emit('update:turnstileToken', '')
-        turnstileError.value = '当前浏览器不支持 Cloudflare Turnstile，请更换浏览器或关闭跟踪拦截后重试'
+        enableCaptchaFallback('当前浏览器不支持 Cloudflare Turnstile，已切换为图形验证码')
       },
     })
   } catch {
-    emit('update:turnstileToken', '')
-    turnstileError.value = 'Cloudflare Turnstile 加载失败，请点击重试'
+    await enableCaptchaFallback('Cloudflare Turnstile 加载失败，已切换为图形验证码')
   }
 }
 
@@ -132,18 +154,20 @@ function resetTurnstile() {
 }
 
 function retryTurnstile() {
+  forceCaptchaFallback.value = false
   resetTurnstile()
   renderTurnstile()
 }
 
 defineExpose({ refreshCaptcha, resetTurnstile })
 
-watch(requiresCaptcha, (enabled) => {
+watch(effectiveRequiresCaptcha, (enabled) => {
   if (enabled) refreshCaptcha()
 }, { immediate: true })
 
 watch([requiresTurnstile, siteKey], () => {
   emit('update:turnstileToken', '')
+  forceCaptchaFallback.value = false
   renderTurnstile()
 }, { immediate: true })
 

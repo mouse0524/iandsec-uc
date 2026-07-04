@@ -38,4 +38,13 @@ if __name__ == "__main__":
     LOGGING_CONFIG["loggers"]["uvicorn.access"]["handlers"] = ["access", "access_file"]
 
     reload_flag = os.getenv("UVICORN_RELOAD", "0").lower() in {"1", "true", "yes", "on"}
-    uvicorn.run("app:app", host="0.0.0.0", port=9999, reload=reload_flag, log_config=LOGGING_CONFIG)
+    trust_proxy_headers = os.getenv("TRUST_PROXY_HEADERS", "0").lower() in {"1", "true", "yes", "on"}
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=9999,
+        reload=reload_flag,
+        log_config=LOGGING_CONFIG,
+        proxy_headers=trust_proxy_headers,
+        forwarded_allow_ips="*" if trust_proxy_headers else None,
+    )
