@@ -52,12 +52,16 @@ const deliveryChannelTypeMap = {
 
 const plainTextLen = computed(() => String(form.value.content_html || '').replace(/<[^>]*>/g, '').trim().length)
 
-loadOptions()
+async function loadRoleOptions(keyword = '') {
+  const res = await api.getRoleList({ page: 1, page_size: 10, role_name: keyword || undefined })
+  roleOptions.value = (res?.data || []).map((item) => ({ label: item.name, value: item.id }))
+}
 
-async function loadOptions() {
-  const [roleRes, userRes] = await Promise.all([api.getRoleList({ page: 1, page_size: 9999 }), api.getUserList({ page: 1, page_size: 9999 })])
-  roleOptions.value = (roleRes?.data || []).map((item) => ({ label: item.name, value: item.id }))
-  userOptions.value = (userRes?.data || []).map((item) => ({ label: item.alias || item.username, value: item.id }))
+async function loadUserOptions(keyword = '') {
+  const res = await api.getUserList({ page: 1, page_size: 10, alias: keyword || undefined })
+  userOptions.value = (res?.data || [])
+    .filter((item) => item.is_active !== false)
+    .map((item) => ({ label: item.alias || item.username, value: item.id }))
 }
 
 async function sendNotice() {
@@ -212,8 +216,28 @@ const columns = [
             <span>HTML格式</span>
             <NSwitch v-model:value="form.is_html" />
           </div>
-          <NSelect v-if="form.target_type === 'roles'" v-model:value="form.target_role_ids" :options="roleOptions" multiple placeholder="选择角色" />
-          <NSelect v-if="form.target_type === 'users'" v-model:value="form.target_user_ids" :options="userOptions" multiple placeholder="选择用户" />
+          <NSelect
+            v-if="form.target_type === 'roles'"
+            v-model:value="form.target_role_ids"
+            :options="roleOptions"
+            multiple
+            filterable
+            remote
+            placeholder="搜索角色"
+            @focus="loadRoleOptions"
+            @search="loadRoleOptions"
+          />
+          <NSelect
+            v-if="form.target_type === 'users'"
+            v-model:value="form.target_user_ids"
+            :options="userOptions"
+            multiple
+            filterable
+            remote
+            placeholder="搜索用户姓名"
+            @focus="loadUserOptions"
+            @search="loadUserOptions"
+          />
         </div>
         <div class="mt-12">
           <NInput v-model:value="form.content_html" type="textarea" :autosize="{ minRows: 6, maxRows: 10 }" placeholder="支持HTML，纯文本长度不超过2000" />

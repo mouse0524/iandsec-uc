@@ -39,6 +39,7 @@ const issueTypeOptions = ref([])
 const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const techOptions = ref([])
+let ticketMetaPromise = null
 const quickFilters = [
   { label: '待审核', value: 'pending_review' },
   { label: '已驳回', value: 'cs_rejected' },
@@ -55,20 +56,24 @@ const summaryCards = computed(() => {
 
 onMounted(() => {
   $table.value?.handleSearch()
-  loadTicketMetaOptions()
-  loadTechOptions()
-  refreshSummaryStats()
 })
 
-async function loadTechOptions() {
+async function loadTechOptions(keyword = '') {
   try {
-    const res = await api.getUserList({ page: 1, page_size: 9999 })
+    const res = await api.getUserList({ page: 1, page_size: 10, alias: keyword || undefined })
     const rows = Array.isArray(res?.data) ? res.data : []
     techOptions.value = rows
+      .filter((item) => item.is_active !== false)
       .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
       .map((item) => ({ label: item.alias || item.username, value: item.id }))
   } catch (error) {
     techOptions.value = []
+  }
+}
+
+function seedTechOption(row) {
+  if (row.tech_id && row.tech_name && !techOptions.value.some((item) => item.value === row.tech_id)) {
+    techOptions.value = [...techOptions.value, { label: row.tech_name, value: row.tech_id }]
   }
 }
 
@@ -94,8 +99,10 @@ async function refreshSummaryStats() {
 }
 
 async function loadTicketMetaOptions() {
+  if (ticketMetaPromise) return ticketMetaPromise
+  ticketMetaPromise = (async () => {
   try {
-    const res = await api.getPublicConfig()
+    const res = await api.getAppConfig()
     const config = res?.data || {}
     projectPhaseOptions.value = (config.ticket_project_phases || []).map((item) => ({ label: item, value: item }))
     issueTypeOptions.value = (config.ticket_issue_types || []).map((item) => ({ label: item, value: item }))
@@ -109,6 +116,19 @@ async function loadTicketMetaOptions() {
     impactScopeOptions.value = []
     projectPhaseOptions.value = []
   }
+  })()
+  return ticketMetaPromise
+}
+
+async function getReviewTicketList(params) {
+  const res = await api.getTicketList(params)
+  const stats = res?.status_summary || {}
+  summaryStats.value = {
+    pending_review: Number(stats.pending_review || 0),
+    cs_rejected: Number(stats.cs_rejected || 0),
+    tech_processing: Number(stats.tech_processing || 0),
+  }
+  return res
 }
 
 async function review(row, approved) {
@@ -128,7 +148,6 @@ async function review(row, approved) {
   reviewComment.value = ''
   selectedTechId.value = null
   $table.value?.handleSearch()
-  refreshSummaryStats()
 }
 
 async function openDetail(row) {
@@ -150,6 +169,7 @@ async function openDetail(row) {
 }
 
 async function openEdit(row) {
+  await loadTicketMetaOptions()
   const res = await api.getTicketById({ ticket_id: row.id })
   editingTicket.value = res?.data || row
   editVisible.value = true
@@ -157,7 +177,6 @@ async function openEdit(row) {
 
 function handleEditSaved() {
   $table.value?.handleSearch()
-  refreshSummaryStats()
 }
 
 function applyQuickFilter(status) {
@@ -165,7 +184,8 @@ function applyQuickFilter(status) {
   $table.value?.handleSearch()
 }
 
-function openReviewAction(row, approved) {
+async function openReviewAction(row, approved) {
+  if (approved) await loadTechOptions()
   pendingReviewRow.value = row
   reviewAction.value = approved
   reviewComment.value = approved ? '审核通过' : '客服驳回'
@@ -178,7 +198,9 @@ async function submitReviewAction() {
   await review(pendingReviewRow.value, reviewAction.value)
 }
 
-function openAssignAction(row) {
+async function openAssignAction(row) {
+  await loadTechOptions()
+  seedTechOption(row)
   pendingAssignRow.value = row
   assignTechId.value = row.tech_id || null
   assignComment.value = ''
@@ -202,7 +224,6 @@ async function submitAssignAction() {
   assignTechId.value = null
   assignComment.value = ''
   $table.value?.handleSearch()
-  refreshSummaryStats()
 }
 
 const columns = [
@@ -347,7 +368,7 @@ const columns = [
           ref="$table"
           v-model:query-items="queryItems"
           :columns="columns"
-          :get-data="api.getTicketList"
+          :get-data="getReviewTicketList"
           @on-data-change="handleTableDataChange"
         >
           <template #queryBar>
@@ -358,7 +379,7 @@ const columns = [
               <NInput v-model:value="queryItems.title" clearable placeholder="输入标题" @keypress.enter="$table?.handleSearch()" />
             </QueryBarItem>
             <QueryBarItem label="分类" :label-width="40">
-              <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" />
+              <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" @focus="loadTicketMetaOptions" />
             </QueryBarItem>
             <QueryBarItem label="跟踪" :label-width="40">
               <NSelect
@@ -367,6 +388,7 @@ const columns = [
                 clearable
                 placeholder="选择跟踪"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="影响" :label-width="40">
@@ -376,6 +398,7 @@ const columns = [
                 clearable
                 placeholder="选择影响范围"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="阶段" :label-width="40">
@@ -385,6 +408,7 @@ const columns = [
                 clearable
                 placeholder="选择阶段"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="状态" :label-width="40">
@@ -397,6 +421,7 @@ const columns = [
                 clearable
                 placeholder="选择问题根因"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
           </template>
@@ -423,7 +448,11 @@ const columns = [
           class="mb-12"
           :options="techOptions"
           clearable
+          filterable
+          remote
           placeholder="请选择技术处理人（必填）"
+          @focus="loadTechOptions"
+          @search="loadTechOptions"
         />
         <NInput
           v-model:value="reviewComment"
@@ -443,7 +472,11 @@ const columns = [
           class="mb-12"
           :options="techOptions"
           clearable
+          filterable
+          remote
           placeholder="请选择新的技术处理人"
+          @focus="loadTechOptions"
+          @search="loadTechOptions"
         />
         <NInput
           v-model:value="assignComment"
@@ -541,3 +574,4 @@ const columns = [
 }
 
 </style>
+

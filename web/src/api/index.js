@@ -4,6 +4,7 @@ export default {
   login: (data) => request.post('/base/access_token', data, { noNeedToken: true }),
   getCaptcha: () => request.get('/base/captcha', { noNeedToken: true }),
   getPublicConfig: () => request.get('/base/public_config', { noNeedToken: true }),
+  getAppConfig: () => request.get('/base/app_config'),
   getWorkbenchStats: () => request.get('/base/workbench_stats'),
   sendEmailCode: (data = {}) => request.post('/base/send_email_code', data, { noNeedToken: true }),
   sendResetPasswordCode: (data = {}) => request.post('/base/send_reset_password_code', data, { noNeedToken: true }),

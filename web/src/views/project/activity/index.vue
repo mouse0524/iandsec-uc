@@ -18,8 +18,9 @@ const modalVisible = ref(false)
 const editingId = ref(null)
 const readonly = ref(false)
 const projectOptions = ref([])
-const activityTypeOptions = ref([])
+const activityTypeOptions = ref(['迁移库', '重做系统', '运维', '其他'].map((item) => ({ label: item, value: item })))
 const userOptions = ref([])
+let activityTypesPromise = null
 const queryItems = ref({
   project_id: route.query.project_id ? Number(route.query.project_id) : undefined,
 })
@@ -34,7 +35,6 @@ watch(
 )
 
 onMounted(async () => {
-  await loadOptions()
   $table.value?.handleSearch()
 })
 
@@ -50,21 +50,44 @@ function defaultForm() {
   }
 }
 
-async function loadOptions() {
-  const [configRes, projectRes, userRes] = await Promise.all([
-    api.getPublicConfig(),
-    api.projectList({ page: 1, page_size: 9999 }),
-    api.getUserList({ page: 1, page_size: 9999 }),
-  ])
-  const types = configRes?.data?.project_activity_types?.length
-    ? configRes.data.project_activity_types
-    : ['迁移库', '重做系统', '运维', '其他']
-  activityTypeOptions.value = types.map((item) => ({ label: item, value: item }))
-  projectOptions.value = (projectRes?.data || []).map((item) => ({ label: item.project_name, value: item.id }))
-  userOptions.value = (userRes?.data || [])
-    .filter((item) => item.is_active !== false)
-    .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
-    .map((item) => ({ label: item.alias || item.username, value: item.id, username: item.username }))
+function loadActivityTypes() {
+  if (!activityTypesPromise) {
+    activityTypesPromise = api.getAppConfig().then((res) => {
+      const types = res?.data?.project_activity_types?.length
+        ? res.data.project_activity_types
+        : activityTypeOptions.value.map((item) => item.value)
+      activityTypeOptions.value = types.map((item) => ({ label: item, value: item }))
+    })
+  }
+  return activityTypesPromise
+}
+
+function loadProjectOptions(keyword = '') {
+  return api.projectList({ page: 1, page_size: 10, project_name: keyword || undefined }).then((res) => {
+    projectOptions.value = (res?.data || []).map((item) => ({ label: item.project_name, value: item.id }))
+  })
+}
+
+function loadUserOptions(keyword = '') {
+  return api.getUserList({ page: 1, page_size: 10, alias: keyword || undefined }).then((res) => {
+    userOptions.value = (res?.data || [])
+      .filter((item) => item.is_active !== false)
+      .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
+      .map((item) => ({ label: item.alias || item.username, value: item.id, username: item.username }))
+  })
+}
+
+function ensureFormOptions() {
+  return Promise.all([loadActivityTypes(), loadProjectOptions(), loadUserOptions()])
+}
+
+function seedRowOptions(row) {
+  if (row.project_id && row.project_name && !projectOptions.value.some((item) => item.value === row.project_id)) {
+    projectOptions.value = [...projectOptions.value, { label: row.project_name, value: row.project_id }]
+  }
+  if (row.operator_id && row.operator_name && !userOptions.value.some((item) => item.value === row.operator_id)) {
+    userOptions.value = [...userOptions.value, { label: row.operator_name, value: row.operator_id }]
+  }
 }
 
 async function getActivityList(params) {
@@ -73,19 +96,20 @@ async function getActivityList(params) {
 }
 
 function openCreate() {
-  const currentUser = userOptions.value.find((item) => item.value === userStore.userId)
   editingId.value = null
   readonly.value = false
   form.value = {
     ...defaultForm(),
     activity_type: activityTypeOptions.value[0]?.value,
-    operator_id: currentUser?.value || null,
+    operator_id: userStore.userId || null,
     started_at: Date.now(),
   }
   modalVisible.value = true
+  ensureFormOptions()
 }
 
 function openDetail(row) {
+  seedRowOptions(row)
   editingId.value = row.id
   readonly.value = true
   form.value = { ...defaultForm(), ...row, started_at: row.started_at ? Date.parse(row.started_at) : null }
@@ -93,10 +117,12 @@ function openDetail(row) {
 }
 
 function openEdit(row) {
+  seedRowOptions(row)
   editingId.value = row.id
   readonly.value = false
   form.value = { ...defaultForm(), ...row, started_at: row.started_at ? Date.parse(row.started_at) : null }
   modalVisible.value = true
+  ensureFormOptions()
 }
 
 async function submitActivity() {
@@ -173,10 +199,31 @@ const columns = [
     >
       <template #queryBar>
         <QueryBarItem label="项目" :label-width="40">
-          <NSelect v-model:value="queryItems.project_id" :options="projectOptions" clearable filterable style="width: 220px" />
+          <NSelect
+            v-model:value="queryItems.project_id"
+            :options="projectOptions"
+            clearable
+            filterable
+            remote
+            style="width: 220px"
+            @focus="loadProjectOptions"
+            @search="loadProjectOptions"
+          />
         </QueryBarItem>
         <QueryBarItem label="类型" :label-width="40">
-          <NSelect v-model:value="queryItems.activity_type" :options="activityTypeOptions" clearable style="width: 160px" />
+          <NSelect v-model:value="queryItems.activity_type" :options="activityTypeOptions" clearable style="width: 160px" @focus="loadActivityTypes" />
+        </QueryBarItem>
+        <QueryBarItem label="处理人" :label-width="52">
+          <NSelect
+            v-model:value="queryItems.operator_id"
+            :options="userOptions"
+            clearable
+            filterable
+            remote
+            style="width: 160px"
+            @focus="loadUserOptions"
+            @search="loadUserOptions"
+          />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <NButton type="primary" @click="openCreate">新增运维</NButton>
@@ -204,7 +251,7 @@ const columns = [
         <div class="form-section">
           <div class="section-title"><span>基础信息</span></div>
           <div class="form-grid">
-            <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" :disabled="readonly" filterable /></NFormItem>
+            <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" :disabled="readonly" filterable remote @focus="loadProjectOptions" @search="loadProjectOptions" /></NFormItem>
             <NFormItem label="运维类型"><NSelect v-model:value="form.activity_type" :options="activityTypeOptions" :disabled="readonly" /></NFormItem>
             <NFormItem label="标题" class="span-2"><NInput v-model:value="form.title" :disabled="readonly" /></NFormItem>
           </div>
@@ -212,7 +259,7 @@ const columns = [
         <div class="form-section">
           <div class="section-title"><span>处理信息</span></div>
           <div class="form-grid">
-            <NFormItem label="处理人"><NSelect v-model:value="form.operator_id" :options="userOptions" :disabled="readonly" clearable filterable /></NFormItem>
+            <NFormItem label="处理人"><NSelect v-model:value="form.operator_id" :options="userOptions" :disabled="readonly" clearable filterable remote @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
             <NFormItem label="处理时间"><NDatePicker v-model:value="form.started_at" type="datetime" :disabled="readonly" clearable style="width: 100%" /></NFormItem>
           </div>
         </div>
@@ -307,3 +354,4 @@ const columns = [
 }
 
 </style>
+

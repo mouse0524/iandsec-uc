@@ -23,11 +23,13 @@ import CrudModal from '@/components/table/CrudModal.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import { ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
+import { useUserStore } from '@/store'
 import api from '@/api'
 
 defineOptions({ name: '项目列表' })
 
 const remarkActivityType = '备注'
+const userStore = useUserStore()
 const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
@@ -81,9 +83,9 @@ const activityForm = computed(() => ({
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0, product_points: [] }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
+let optionsPromise = null
 
 onMounted(async () => {
-  await loadOptions()
   $table.value?.handleSearch()
 })
 
@@ -124,29 +126,54 @@ function defaultRemarkForm() {
 }
 
 async function loadOptions() {
-  const [configRes, userRes, deptRes] = await Promise.all([
-    api.getPublicConfig(),
-    api.getUserList({ page: 1, page_size: 9999 }),
-    api.getDepts(),
-  ])
-  const config = configRes?.data || {}
-  const products = config.project_products?.length ? config.project_products : ['安得卫士']
-  const statuses = config.project_statuses?.length
-    ? config.project_statuses
-    : ['售前', '待实施', '实施中', '待验收', '已验收', '关闭']
-  const regions = config.project_regions?.length ? config.project_regions : ['华东', '华南', '华北', '华中', '西南', '西北']
-  const serverVersions = config.project_server_versions?.length ? config.project_server_versions : ['5.6.1']
-  const clientVersions = config.project_client_versions?.length ? config.project_client_versions : ['2.25']
-  productOptions.value = products.map((item) => ({ label: item, value: item }))
-  statusOptions.value = statuses.map((item) => ({ label: item, value: item }))
-  regionOptions.value = regions.map((item) => ({ label: item, value: item }))
-  serverVersionOptions.value = serverVersions.map((item) => ({ label: item, value: item }))
-  clientVersionOptions.value = clientVersions.map((item) => ({ label: item, value: item }))
-  userOptions.value = (userRes?.data || [])
-    .filter((item) => item.is_active !== false)
-    .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
-    .map((item) => ({ label: item.alias || item.username, value: item.id }))
-  agentOptions.value = channelDeptOptions(deptRes?.data || [])
+  if (optionsPromise) return optionsPromise
+  optionsPromise = (async () => {
+    const configRes = await api.getAppConfig()
+    const config = configRes?.data || {}
+    const products = config.project_products?.length ? config.project_products : ['安得卫士']
+    const statuses = config.project_statuses?.length
+      ? config.project_statuses
+      : ['售前', '待实施', '实施中', '待验收', '已验收', '关闭']
+    const regions = config.project_regions?.length ? config.project_regions : ['华东', '华南', '华北', '华中', '西南', '西北']
+    const serverVersions = config.project_server_versions?.length ? config.project_server_versions : ['5.6.1']
+    const clientVersions = config.project_client_versions?.length ? config.project_client_versions : ['2.25']
+    productOptions.value = products.map((item) => ({ label: item, value: item }))
+    statusOptions.value = statuses.map((item) => ({ label: item, value: item }))
+    regionOptions.value = regions.map((item) => ({ label: item, value: item }))
+    serverVersionOptions.value = serverVersions.map((item) => ({ label: item, value: item }))
+    clientVersionOptions.value = clientVersions.map((item) => ({ label: item, value: item }))
+  })()
+  return optionsPromise
+}
+
+async function loadAgentOptions(keyword = '') {
+  if (!keyword) return
+  const res = await api.getDepts({ name: keyword })
+  agentOptions.value = channelDeptOptions(res?.data || [])
+}
+
+async function loadUserOptions(keyword = '') {
+  try {
+    const res = await api.getUserList({ page: 1, page_size: 10, alias: keyword || undefined })
+    userOptions.value = (res?.data || [])
+      .filter((item) => item.is_active !== false)
+      .filter((item) => Array.isArray(item.roles) && item.roles.some((role) => role?.name === '技术'))
+      .map((item) => ({ label: item.alias || item.username, value: item.id }))
+  } catch (error) {
+    userOptions.value = []
+  }
+}
+
+function seedAssigneeOption(row) {
+  if (row.assignee_id && row.assignee_name && !userOptions.value.some((item) => item.value === row.assignee_id)) {
+    userOptions.value = [...userOptions.value, { label: row.assignee_name, value: row.assignee_id }]
+  }
+}
+
+function seedAgentOption(row) {
+  if (row.agent_id && row.agent_name && !agentOptions.value.some((item) => item.value === row.agent_id)) {
+    agentOptions.value = [...agentOptions.value, { label: row.agent_name, value: row.agent_id }]
+  }
 }
 
 function channelDeptOptions(rows) {
@@ -193,7 +220,8 @@ function formatDateTime(value) {
   return String(value)
 }
 
-function openCreate() {
+async function openCreate() {
+  await Promise.all([loadOptions(), loadUserOptions()])
   editingId.value = null
   readonly.value = false
   form.value = {
@@ -208,6 +236,9 @@ function openCreate() {
 }
 
 function openProject(row, isReadonly) {
+  loadOptions()
+  seedAgentOption(row)
+  seedAssigneeOption(row)
   const attachments = Array.isArray(row.attachments) ? row.attachments : []
   editingId.value = row.id
   readonly.value = isReadonly
@@ -271,11 +302,15 @@ async function submitRemarkTimeline() {
     title: remarkForm.value.content,
     content: remarkForm.value.content,
     status: '已完成',
+    operator_id: userStore.userId || null,
     started_at: new Date().toISOString(),
   })
   $message.success('备注流水已添加')
   remarkForm.value.content = ''
   await loadRemarkTimeline()
+  if (workOrderVisible.value && workOrderProject.value?.id === editingId.value) {
+    await loadWorkOrders(workOrderProject.value, 'activities')
+  }
   $table.value?.handleSearch()
 }
 
@@ -357,11 +392,12 @@ function handleChecked(rowKeys) {
   checkedProjectIds.value = rowKeys
 }
 
-function openBatchUpdate() {
+async function openBatchUpdate() {
   if (!checkedProjectIds.value.length) {
     $message.warning('请先选择项目')
     return
   }
+  await Promise.all([loadOptions(), loadUserOptions()])
   batchForm.value = defaultBatchForm()
   batchModalVisible.value = true
 }
@@ -636,19 +672,36 @@ const columns = [
           <NInput v-model:value="queryItems.project_name" clearable placeholder="输入项目名称" />
         </QueryBarItem>
         <QueryBarItem label="状态" :label-width="40">
-          <NSelect v-model:value="queryItems.status" :options="statusOptions" clearable style="width: 160px" />
+          <NSelect v-model:value="queryItems.status" :options="statusOptions" clearable style="width: 160px" @focus="loadOptions" />
         </QueryBarItem>
         <QueryBarItem label="区域" :label-width="40">
-          <NSelect v-model:value="queryItems.region" :options="regionOptions" clearable style="width: 140px" />
+          <NSelect v-model:value="queryItems.region" :options="regionOptions" clearable style="width: 140px" @focus="loadOptions" />
         </QueryBarItem>
         <QueryBarItem label="所属代理商" :label-width="72">
-          <NSelect v-model:value="queryItems.agent_id" :options="agentOptions" clearable filterable style="width: 180px" />
+          <NSelect
+            v-model:value="queryItems.agent_id"
+            :options="agentOptions"
+            clearable
+            filterable
+            remote
+            style="width: 180px"
+            @search="loadAgentOptions"
+          />
         </QueryBarItem>
         <QueryBarItem label="负责人" :label-width="48">
-          <NSelect v-model:value="queryItems.assignee_id" :options="userOptions" clearable filterable style="width: 160px" />
+          <NSelect
+            v-model:value="queryItems.assignee_id"
+            :options="userOptions"
+            clearable
+            filterable
+            remote
+            style="width: 160px"
+            @focus="loadUserOptions"
+            @search="loadUserOptions"
+          />
         </QueryBarItem>
         <QueryBarItem label="使用产品" :label-width="64">
-          <NSelect v-model:value="queryItems.product_name" :options="productOptions" clearable filterable style="width: 160px" />
+          <NSelect v-model:value="queryItems.product_name" :options="productOptions" clearable filterable style="width: 160px" @focus="loadOptions" />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <div class="toolbar-actions">
@@ -696,7 +749,7 @@ const columns = [
             <NFormItem label="项目名称" class="span-2"><NInput v-model:value="form.project_name" :disabled="readonly" /></NFormItem>
             <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
             <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
-            <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable :disabled="readonly" /></NFormItem>
+            <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote :disabled="readonly" @search="loadAgentOptions" /></NFormItem>
             <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" :disabled="readonly" /></NFormItem>
             <NFormItem label="服务器版本"><NSelect v-model:value="form.server_version" :options="serverVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
             <NFormItem label="客户端版本"><NSelect v-model:value="form.client_version" :options="clientVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
@@ -721,7 +774,7 @@ const columns = [
         <div class="form-section">
           <div class="section-title"><span>对接信息</span></div>
           <div class="form-grid">
-            <NFormItem label="负责人"><NSelect v-model:value="form.assignee_id" :options="userOptions" clearable filterable :disabled="readonly" /></NFormItem>
+            <NFormItem label="负责人"><NSelect v-model:value="form.assignee_id" :options="userOptions" clearable filterable remote :disabled="readonly" @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
             <NFormItem label="客户对接人"><NInput v-model:value="form.customer_contact" :disabled="readonly" /></NFormItem>
             <NFormItem label="联系电话"><NInput v-model:value="form.customer_phone" :disabled="readonly" /></NFormItem>
             <NFormItem label="联系邮箱"><NInput v-model:value="form.customer_email" :disabled="readonly" /></NFormItem>
@@ -795,7 +848,7 @@ const columns = [
       <NForm class="project-form" label-placement="top">
         <NFormItem label="区域"><NSelect v-model:value="batchForm.region" :options="regionOptions" clearable /></NFormItem>
         <NFormItem label="状态"><NSelect v-model:value="batchForm.status" :options="statusOptions" clearable /></NFormItem>
-        <NFormItem label="负责人"><NSelect v-model:value="batchForm.assignee_id" :options="userOptions" clearable filterable /></NFormItem>
+        <NFormItem label="负责人"><NSelect v-model:value="batchForm.assignee_id" :options="userOptions" clearable filterable remote @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
       </NForm>
     </CrudModal>
 
@@ -1141,3 +1194,4 @@ const columns = [
   }
 }
 </style>
+

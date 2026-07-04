@@ -99,6 +99,8 @@ class ProjectController:
             q &= Q(activity_type=filters["activity_type"])
         if filters.get("status"):
             q &= Q(status=filters["status"])
+        if filters.get("operator_id"):
+            q &= Q(operator_id=filters["operator_id"])
         return q
 
     async def _config(self) -> dict:
@@ -600,7 +602,8 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="活动标题不能为空")
         if data.get("status") not in ACTIVITY_STATUSES:
             raise HTTPException(status_code=400, detail="活动状态不正确")
-        await self._validate_assignee(data.get("operator_id"))
+        if data.get("activity_type") != PROJECT_REMARK_ACTIVITY_TYPE:
+            await self._validate_assignee(data.get("operator_id"))
         if activity_id:
             activity = await ProjectActivity.get(id=activity_id)
             for key, value in data.items():

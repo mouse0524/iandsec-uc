@@ -62,6 +62,7 @@ const categoryOptions = ref([])
 const issueTypeOptions = ref([])
 const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
+let ticketMetaPromise = null
 const fallbackProjectPhases = ['售前', '实施', '售后']
 const fallbackIssueTypes = ['现网问题', '现网需求', '产品建议']
 const fallbackImpactScopes = ['全部', '偶现', '单台必现', '单台偶现']
@@ -88,7 +89,6 @@ const summaryCards = computed(() => {
 
 onMounted(() => {
   $table.value?.handleSearch()
-  loadTicketMetaOptions()
 })
 
 function handleTableDataChange(rows) {
@@ -144,8 +144,10 @@ async function exportTicketList() {
 }
 
 async function loadTicketMetaOptions() {
+  if (ticketMetaPromise) return ticketMetaPromise
+  ticketMetaPromise = (async () => {
   try {
-    const res = await api.getPublicConfig()
+    const res = await api.getAppConfig()
     const config = res?.data || {}
     const projectPhases = config.ticket_project_phases?.length ? config.ticket_project_phases : fallbackProjectPhases
     const issueTypes = config.ticket_issue_types?.length ? config.ticket_issue_types : fallbackIssueTypes
@@ -164,6 +166,8 @@ async function loadTicketMetaOptions() {
     impactScopeOptions.value = fallbackImpactScopes.map((item) => ({ label: item, value: item }))
     projectPhaseOptions.value = fallbackProjectPhases.map((item) => ({ label: item, value: item }))
   }
+  })()
+  return ticketMetaPromise
 }
 
 async function openDetail(row) {
@@ -185,6 +189,7 @@ async function openDetail(row) {
 }
 
 async function openEdit(row) {
+  await loadTicketMetaOptions()
   const detail = await api.getTicketById({ ticket_id: row.id })
   editingTicket.value = detail?.data || row
   editVisible.value = true
@@ -380,7 +385,7 @@ const columns = [
               <n-input v-model:value="queryItems.title" clearable placeholder="输入标题" @keypress.enter="$table?.handleSearch()" />
             </QueryBarItem>
             <QueryBarItem label="分类" :label-width="40">
-              <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" />
+              <NSelect v-model:value="queryItems.category" :options="categoryOptions" clearable placeholder="选择分类" style="width: 180px" @focus="loadTicketMetaOptions" />
             </QueryBarItem>
             <QueryBarItem label="跟踪" :label-width="40">
               <NSelect
@@ -389,6 +394,7 @@ const columns = [
                 clearable
                 placeholder="选择跟踪"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="影响" :label-width="40">
@@ -398,6 +404,7 @@ const columns = [
                 clearable
                 placeholder="选择影响范围"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="阶段" :label-width="40">
@@ -407,6 +414,7 @@ const columns = [
                 clearable
                 placeholder="选择阶段"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="状态" :label-width="40">
@@ -419,6 +427,7 @@ const columns = [
                 clearable
                 placeholder="选择问题根因"
                 style="width: 180px"
+                @focus="loadTicketMetaOptions"
               />
             </QueryBarItem>
             <QueryBarItem label="" :label-width="0">
@@ -645,3 +654,4 @@ const columns = [
   }
 }
 </style>
+

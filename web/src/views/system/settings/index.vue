@@ -602,7 +602,7 @@ async function loadData() {
     await loadCachedRedmineMetadata()
     ensureRedmineSelectedOptions()
     await loadDatabaseBackupStatus()
-    const publicRes = await api.getPublicConfig()
+    const publicRes = await api.getAppConfig()
     appStore.setSiteConfig(publicRes.data || {})
   } finally {
     loading.value = false
@@ -627,7 +627,7 @@ function save() {
       }
       await api.updateSystemSettings(payload)
       $message.success('设置已保存并生效')
-      const publicRes = await api.getPublicConfig()
+      const publicRes = await api.getAppConfig()
       appStore.setSiteConfig(publicRes.data || {})
       await loadData()
     } finally {
@@ -919,7 +919,7 @@ async function uploadLogo({ file, onFinish, onError }) {
   try {
     logoUploading.value = true
     await api.uploadSiteLogo(file.file)
-    const publicRes = await api.getPublicConfig()
+    const publicRes = await api.getAppConfig()
     appStore.setSiteConfig(publicRes.data || {})
     const res = await api.getSystemSettings()
     form.value.site_logo = res.data?.site_logo || ''
@@ -1950,3 +1950,4 @@ function applyPresetHtmlTemplates() {
   }
 }
 </style>
+

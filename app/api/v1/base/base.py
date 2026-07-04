@@ -44,6 +44,26 @@ from app.utils.password import get_password_hash, verify_password
 from app.utils.request import get_client_ip
 
 router = APIRouter()
+PUBLIC_CONFIG_KEYS = {
+    "site_title",
+    "site_logo",
+    "allow_partner_register",
+    "allow_channel_register",
+    "allow_user_register",
+    "login_security_enabled",
+    "login_challenge_enabled",
+    "login_challenge_type",
+    "turnstile_site_key",
+    "login_account_ip_fail_limit",
+    "login_account_ip_lock_minutes",
+    "login_ip_fail_limit",
+    "login_ip_lock_minutes",
+    "login_fail_window_minutes",
+    "login_generic_error_enabled",
+    "password_min_length",
+    "password_required_categories",
+    "password_min_category_count",
+}
 
 
 def _format_lock_message(ttl_seconds: int) -> str:
@@ -178,6 +198,13 @@ async def get_captcha():
 
 @router.get("/public_config", summary="获取公共站点配置")
 async def get_public_config():
+    data = await system_setting_controller.get_public_config()
+    data = {key: data.get(key) for key in PUBLIC_CONFIG_KEYS if key in data}
+    return Success(data=data)
+
+
+@router.get("/app_config", summary="获取应用配置", dependencies=[DependAuth])
+async def get_app_config():
     data = await system_setting_controller.get_public_config()
     return Success(data=data)
 

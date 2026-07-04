@@ -2,19 +2,17 @@
 import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
 import {
   NButton,
-  NCheckbox,
-  NCheckboxGroup,
   NForm,
   NFormItem,
   NImage,
   NInput,
-  NSpace,
   NSwitch,
   NTag,
   NPopconfirm,
   NLayout,
   NLayoutSider,
   NLayoutContent,
+  NSelect,
   NTreeSelect,
 } from 'naive-ui'
 
@@ -75,9 +73,24 @@ function getRoleTagType(roleName) {
 
 onMounted(() => {
   $table.value?.handleSearch()
-  api.getRoleList({ page: 1, page_size: 9999 }).then((res) => (roleOption.value = res.data))
+  loadRoleOptions()
   api.getDepts().then((res) => (deptOption.value = res.data))
 })
+
+async function loadRoleOptions(keyword = '') {
+  const res = await api.getRoleList({ page: 1, page_size: 10, role_name: keyword || undefined })
+  roleOption.value = (res?.data || []).map((item) => ({ label: item.name, value: item.id, ...item }))
+}
+
+function seedRoleOptions(roles = []) {
+  const next = [...roleOption.value]
+  roles.forEach((role) => {
+    if (role?.id && !next.some((item) => item.value === role.id)) {
+      next.push({ label: role.name, value: role.id, ...role })
+    }
+  })
+  roleOption.value = next
+}
 
 const columns = [
   {
@@ -204,6 +217,7 @@ const columns = [
               style: 'margin-right: 8px;',
               onClick: () => {
                 handleEdit(row)
+                seedRoleOptions(row.roles)
                 modalForm.value.dept_id = row.dept?.id
                 modalForm.value.role_ids = row.roles.map((e) => (e = e.id))
                 delete modalForm.value.dept
@@ -522,16 +536,17 @@ const validateAddUser = {
               />
             </NFormItem>
             <NFormItem label="角色" path="role_ids">
-              <NCheckboxGroup v-model:value="modalForm.role_ids">
-                <NSpace item-style="display: flex;">
-                  <NCheckbox
-                    v-for="item in roleOption"
-                    :key="item.id"
-                    :value="item.id"
-                    :label="item.name"
-                  />
-                </NSpace>
-              </NCheckboxGroup>
+              <NSelect
+                v-model:value="modalForm.role_ids"
+                :options="roleOption"
+                multiple
+                filterable
+                remote
+                clearable
+                placeholder="搜索并选择角色"
+                @focus="loadRoleOptions"
+                @search="loadRoleOptions"
+              />
             </NFormItem>
             <NFormItem label="超级用户" path="is_superuser">
               <NSwitch

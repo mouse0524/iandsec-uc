@@ -183,9 +183,10 @@ async def list_project_activities(
     project_id: int | None = Query(None, description="项目ID"),
     activity_type: str | None = Query(None, description="活动类型"),
     status: str | None = Query(None, description="活动状态"),
+    operator_id: int | None = Query(None, description="处理人ID"),
 ):
     user = await _require_project_manager()
-    filters = {"project_id": project_id, "activity_type": activity_type, "status": status}
+    filters = {"project_id": project_id, "activity_type": activity_type, "status": status, "operator_id": operator_id}
     if not await _can_view_all_projects(user):
         filters["project_ids"] = [
             item.id for item in await project_controller.visible_projects_for_user(user.id, project_id=project_id)

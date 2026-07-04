@@ -104,7 +104,8 @@ onMounted(async () => {
 
 async function fetchPublicConfig() {
   try {
-    const res = await api.getPublicConfig()
+    const res = await api.getAppConfig()
+    appStore.setSiteConfig(res.data || {})
     const projectPhases = res.data?.ticket_project_phases || []
     const issueTypes = res.data?.ticket_issue_types || []
     const impactScopes = res.data?.ticket_impact_scopes || []
@@ -739,3 +740,4 @@ async function refreshChallenge() {
   }
 }
 </style>
+
