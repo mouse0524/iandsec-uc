@@ -17,6 +17,7 @@ from app.core.ctx import CTX_USER_ID, CTX_USER_NAME
 from app.log import logger
 from app.models.admin import AuditLog, User
 from app.settings import settings
+from app.utils.request import get_client_ip
 
 from .bgtask import BgTasks
 
@@ -333,7 +334,15 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         req_id = uuid.uuid4().hex[:8]
         request.state.req_id = req_id
-        logger.info("[http.request] start req_id={} method={} path={}", req_id, request.method, request.url.path)
+        client_ip = get_client_ip(request)
+        logger.info(
+            "[http.request] start req_id={} method={} path={} client_ip={} xff={}",
+            req_id,
+            request.method,
+            request.url.path,
+            client_ip,
+            request.headers.get("x-forwarded-for", ""),
+        )
         start_time: datetime = datetime.now()
         await self.before_request(request)
         response = await call_next(request)
@@ -341,11 +350,12 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         process_time = int((end_time.timestamp() - start_time.timestamp()) * 1000)
         await self.after_request(request, response, process_time)
         logger.info(
-            "[http.request] end req_id={} method={} path={} status={} cost_ms={}",
+            "[http.request] end req_id={} method={} path={} status={} cost_ms={} client_ip={}",
             req_id,
             request.method,
             request.url.path,
             response.status_code,
             process_time,
+            client_ip,
         )
         return response

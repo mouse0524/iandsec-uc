@@ -88,6 +88,11 @@ async def list_webdav_download_logs(
         file_name=file_name,
         download_type=download_type,
     )
+    logger.info(
+        "[webdav.download.log.list] page={} source_ips={}",
+        page,
+        [item.get("source_ip") for item in rows[:5]],
+    )
     return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
 
 @router.get("/preview-cache", summary="缓存WebDAV文件用于预览")
@@ -241,6 +246,12 @@ async def webdav_share_download(
         return Fail(code=400, msg="分享链接缺少签名参数，请重新复制最新下载链接")
 
     client_ip = get_client_ip(request)
+    logger.info(
+        "[webdav.share.download] client_ip={} xff={} real_ip={}",
+        client_ip,
+        request.headers.get("x-forwarded-for", ""),
+        request.headers.get("x-real-ip", ""),
+    )
     fail_key = f"webdav:share:fail:{client_ip}:{code}"
     blocked_key = f"webdav:share:blocked:{client_ip}:{code}"
     try:

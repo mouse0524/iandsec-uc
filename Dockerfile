@@ -53,6 +53,7 @@ RUN rm -f /etc/nginx/sites-enabled/default \
     && chown -R app:app /opt/iandsec-uc /var/cache/nginx /var/log/nginx /var/lib/nginx /tmp/nginx.pid
 
 ENV LANG=zh_CN.UTF-8
+ENV TRUST_PROXY_HEADERS=1
 EXPOSE 8080
 
 ENTRYPOINT [ "sh", "entrypoint.sh" ]
