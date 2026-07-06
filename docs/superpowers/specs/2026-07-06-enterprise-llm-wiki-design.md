@@ -26,12 +26,15 @@ First release:
 - Administrators, customer service, and technical roles can import documents and rebuild wiki pages.
 - Supported imports: `.md`, `.txt`, `.pdf`, `.docx`, `.xlsx`, `.csv`, `.html`.
 - LLM compiles imported Markdown into wiki-style pages.
+- Incremental learning: new imports update existing wiki pages instead of rebuilding everything.
+- Self-learning: low-confidence answers and repeated misses create reviewable learning candidates.
 - Keyword search over source titles and wiki page content.
 - Question answering uses top matching wiki pages as context.
 
 Out of scope for first release:
 
 - Vector database.
+- RAG vector retrieval.
 - Graph visualization.
 - Multi-agent orchestration.
 - Auto self-evolution/evaluation reports.
@@ -49,6 +52,9 @@ flowchart LR
   Builder --> Pages["WikiPage"]
   Builder --> Links["WikiLink"]
   Search["Search / Ask"] --> Pages
+  Answer --> Learn["Learning Candidates"]
+  Learn --> Review["Human Review"]
+  Review --> Builder
   Pages --> LLM["app.services.llm.openai_client"]
   LLM --> Answer["Answer with citations"]
 ```
@@ -67,6 +73,7 @@ Add `app/services/wiki/`:
 - `markdown_converter.py`: convert supported document types to Markdown.
 - `wiki_builder.py`: call the existing LLM client to generate wiki pages.
 - `search_service.py`: retrieve relevant pages with simple database search.
+- `learning_service.py`: record unanswered questions, repeated misses, and proposed page updates.
 
 Reuse:
 
@@ -94,6 +101,11 @@ Add Tortoise models:
 - `WikiIngestJob`
   - `id`, `source_id`, `status`, `stage`, `error_message`, timestamps
 
+- `WikiLearningCandidate`
+  - `id`, `question`, `answer`, `evidence_page_ids`, `reason`
+  - `proposed_page_path`, `proposed_content`, `status`, `reviewed_by`
+  - `created_at`, `updated_at`
+
 Keep this in MySQL. Do not add a vector database in the first release.
 
 ## File Layout
@@ -116,14 +128,34 @@ Database remains the source of truth for UI queries. Files are retained for audi
    - concepts
    - entities
    - wikilinks
-6. Backend writes `WikiPage` and `WikiLink`.
+6. Backend merges pages by stable `path` and `content_hash`.
+   - New source pages are inserted.
+   - Existing concept/entity pages are updated when the LLM returns a materially changed summary.
+   - Existing links are replaced for pages affected by the current source only.
 7. Source status becomes `completed` or `failed`.
 
 Known simplification:
 
 ```python
-# ponytail: keyword search first; add vector retrieval only if real queries miss relevant pages.
+# ponytail: database keyword search only; do not add a vector store unless explicitly requested.
 ```
+
+## Incremental Learning
+
+Each import is processed independently. The builder only updates wiki pages touched by the new source. It uses deterministic paths such as `sources/<slug>`, `concepts/<slug>`, and `entities/<slug>` so later imports can merge into existing pages.
+
+Duplicate source files are detected by `content_hash`. Reimporting unchanged content is skipped. Reimporting changed content creates a new source version and refreshes only the derived pages for that source.
+
+## Self-Learning
+
+Question answering records learning candidates when:
+
+- no relevant keyword match is found;
+- the LLM says the wiki does not contain enough evidence;
+- users mark an answer as unhelpful;
+- the same or similar question appears repeatedly.
+
+Self-learning is review-gated. The system may propose a new page or an update to an existing page, but it does not publish generated knowledge without a human approving it. This avoids poisoning the shared enterprise wiki with hallucinated content.
 
 ## Markdown Conversion
 
@@ -173,6 +205,10 @@ Pages:
   - ask question
   - answer with cited wiki pages
 
+- `web/src/views/wiki/learning/index.vue`
+  - list proposed learning candidates
+  - approve, reject, or edit proposed wiki updates
+
 Use the existing API wrapper style in `web/src/api/index.js`. Avoid a new frontend state library.
 
 ## Permissions
@@ -192,6 +228,7 @@ Role backfill follows existing `init_roles()` style.
 - LLM failure: mark job `failed`, allow retry.
 - JSON parse failure: create a basic source page from Markdown and record a warning.
 - Duplicate content hash: reuse existing completed source unless user explicitly reimports.
+- Learning candidate approval failure: keep the candidate pending and show the validation error.
 
 ## Testing
 
@@ -199,6 +236,8 @@ Small checks only:
 
 - Unit test Markdown conversion for `.txt`, `.csv`, and one fake `.xlsx`.
 - Unit test LLM JSON normalization/fallback.
+- Unit test incremental merge by stable wiki page path.
+- Unit test learning candidate creation for no-match answers.
 - Compile check: `python -m compileall app`.
 - Frontend build: `cd web && pnpm.cmd run build`.
 
@@ -208,12 +247,15 @@ No browser automation for first release unless UI bugs appear.
 
 1. Add backend models, schemas, services, and routes.
 2. Add menu and role permissions.
-3. Add minimal frontend pages.
-4. Add focused tests.
-5. Verify compile and frontend build.
+3. Add incremental merge and learning-candidate flow.
+4. Add minimal frontend pages.
+5. Add focused tests.
+6. Verify compile and frontend build.
 
 ## Fixed Decisions
 
 - PDF import uses the existing `pdfminer-six` dependency.
 - Deletion policy: first release deletes DB rows and leaves raw files.
 - Search ranking: first release uses simple keyword scoring, not embeddings.
+- No vector database or vector RAG is used.
+- Self-learning proposals require human approval before changing published wiki pages.

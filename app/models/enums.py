@@ -62,15 +62,3 @@ class PartnerLevel(StrEnum):
     GOLD = "金牌"
     UNSIGNED = "未签约"
 
-
-class SkillKnowDocumentStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class SkillKnowMessageRole(StrEnum):
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"

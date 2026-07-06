@@ -8,8 +8,6 @@ from .enums import (
     PartnerRegisterStatus,
     PartnerLevel,
     RegisterType,
-    SkillKnowDocumentStatus,
-    SkillKnowMessageRole,
     TicketActionType,
     TicketStatus,
 )
@@ -213,6 +211,88 @@ class ProjectActivity(BaseModel, TimestampMixin):
         table = "project_activity"
 
 
+class WikiSource(BaseModel, TimestampMixin):
+    title = fields.CharField(max_length=200, description="Wiki source title", index=True)
+    filename = fields.CharField(max_length=255, description="Original filename")
+    file_path = fields.CharField(max_length=500, description="Raw file path")
+    file_type = fields.CharField(max_length=20, description="File extension", index=True)
+    file_size = fields.BigIntField(default=0, description="File size")
+    content_hash = fields.CharField(max_length=64, description="SHA256 content hash", index=True)
+    markdown_path = fields.CharField(max_length=500, null=True, description="Markdown file path")
+    status = fields.CharField(max_length=20, default="pending", description="Import status", index=True)
+    error_message = fields.TextField(null=True, description="Import error")
+    created_by = fields.BigIntField(description="Uploader user id", index=True)
+
+    class Meta:
+        table = "wiki_source"
+
+
+class WikiPage(BaseModel, TimestampMixin):
+    path = fields.CharField(max_length=255, unique=True, description="Stable wiki path", index=True)
+    title = fields.CharField(max_length=200, description="Wiki page title", index=True)
+    page_type = fields.CharField(max_length=30, default="source", description="Page type", index=True)
+    content = fields.TextField(description="Markdown content")
+    source_id = fields.BigIntField(null=True, description="Source id", index=True)
+    summary = fields.TextField(null=True, description="Page summary")
+    content_hash = fields.CharField(max_length=64, description="Content hash", index=True)
+
+    class Meta:
+        table = "wiki_page"
+
+
+class WikiLink(BaseModel, TimestampMixin):
+    from_page_id = fields.BigIntField(description="From page id", index=True)
+    to_page_id = fields.BigIntField(description="To page id", index=True)
+    link_text = fields.CharField(max_length=200, description="Link text")
+
+    class Meta:
+        table = "wiki_link"
+
+
+class WikiIngestJob(BaseModel, TimestampMixin):
+    source_id = fields.BigIntField(description="Source id", index=True)
+    status = fields.CharField(max_length=20, default="pending", description="Job status", index=True)
+    stage = fields.CharField(max_length=40, default="created", description="Current stage", index=True)
+    error_message = fields.TextField(null=True, description="Job error")
+
+    class Meta:
+        table = "wiki_ingest_job"
+
+
+class WikiLearningCandidate(BaseModel, TimestampMixin):
+    question = fields.TextField(description="User question")
+    answer = fields.TextField(null=True, description="Answer text")
+    evidence_page_ids = fields.JSONField(default=list, description="Evidence wiki page ids")
+    reason = fields.CharField(max_length=80, description="Candidate reason", index=True)
+    proposed_page_path = fields.CharField(max_length=255, null=True, description="Proposed page path", index=True)
+    proposed_content = fields.TextField(null=True, description="Proposed markdown")
+    status = fields.CharField(max_length=20, default="pending", description="Review status", index=True)
+    reviewed_by = fields.BigIntField(null=True, description="Reviewer user id", index=True)
+
+    class Meta:
+        table = "wiki_learning_candidate"
+
+
+class WikiConversation(BaseModel, TimestampMixin):
+    title = fields.CharField(max_length=200, description="Wiki conversation title", index=True)
+    owner_id = fields.BigIntField(description="Owner user id", index=True)
+
+    class Meta:
+        table = "wiki_conversation"
+
+
+class WikiMessage(BaseModel, TimestampMixin):
+    conversation_id = fields.BigIntField(description="Wiki conversation id", index=True)
+    owner_id = fields.BigIntField(description="Owner user id", index=True)
+    role = fields.CharField(max_length=20, description="Message role", index=True)
+    content = fields.TextField(description="Message content")
+    citations = fields.JSONField(default=list, description="Wiki citations")
+    archive_path = fields.CharField(max_length=255, null=True, description="Archived query path")
+
+    class Meta:
+        table = "wiki_message"
+
+
 class PartnerRegistration(BaseModel, TimestampMixin):
     register_type = fields.CharEnumField(RegisterType, default=RegisterType.CHANNEL, description="注册类型", index=True)
     company_name = fields.CharField(max_length=120, description="公司名称")
@@ -318,141 +398,5 @@ class GlobalNoticeUser(BaseModel, TimestampMixin):
     class Meta:
         table = "global_notice_user"
         unique_together = ("notice_id", "user_id")
-
-
-class SkillKnowFolder(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="文件夹UUID", index=True)
-    name = fields.CharField(max_length=100, description="文件夹名称", index=True)
-    description = fields.TextField(null=True, description="文件夹描述")
-    parent_id = fields.BigIntField(null=True, description="父文件夹ID", index=True)
-    sort_order = fields.IntField(default=0, description="排序", index=True)
-    is_system = fields.BooleanField(default=False, description="是否系统文件夹", index=True)
-
-    class Meta:
-        table = "sk_folder"
-
-
-class SkillKnowDocument(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="文档UUID", index=True)
-    uri = fields.CharField(max_length=500, null=True, unique=True, description="Document URI", index=True)
-    title = fields.CharField(max_length=200, description="文档标题", index=True)
-    description = fields.TextField(null=True, description="文档描述")
-    filename = fields.CharField(max_length=255, description="文件名")
-    file_path = fields.CharField(max_length=500, description="文件路径")
-    file_size = fields.BigIntField(default=0, description="文件大小")
-    file_type = fields.CharField(max_length=50, description="文件类型", index=True)
-    abstract = fields.TextField(null=True, description="L0摘要")
-    overview = fields.TextField(null=True, description="L1概览")
-    content = fields.TextField(null=True, description="L2完整内容")
-    content_hash = fields.CharField(max_length=64, null=True, description="内容哈希", index=True)
-    status = fields.CharEnumField(
-        SkillKnowDocumentStatus,
-        default=SkillKnowDocumentStatus.PENDING,
-        description="处理状态",
-        index=True,
-    )
-    error_message = fields.TextField(null=True, description="错误信息")
-    category = fields.CharField(max_length=100, null=True, description="分类", index=True)
-    tags = fields.JSONField(default=list, description="标签")
-    folder_id = fields.BigIntField(null=True, description="所属文件夹ID", index=True)
-    owner_id = fields.BigIntField(null=True, description="所有者ID", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-    class Meta:
-        table = "sk_document"
-
-
-class SkillKnowDocumentChunk(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="Chunk UUID", index=True)
-    document_id = fields.BigIntField(description="文档ID", index=True)
-    uri = fields.CharField(max_length=500, unique=True, description="Chunk URI", index=True)
-    chunk_index = fields.IntField(description="分块序号", index=True)
-    heading = fields.CharField(max_length=300, null=True, description="标题路径")
-    content = fields.TextField(description="Markdown分块内容")
-    content_hash = fields.CharField(max_length=64, description="内容哈希", index=True)
-    token_count = fields.IntField(default=0, description="粗略Token数")
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_document_chunk"
-        unique_together = ("document_id", "chunk_index")
-
-
-class SkillKnowDocumentSection(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="??UUID", index=True)
-    document_id = fields.BigIntField(description="??ID", index=True)
-    section_key = fields.CharField(max_length=100, description="??Key", index=True)
-    heading = fields.CharField(max_length=300, null=True, description="????", index=True)
-    heading_path = fields.CharField(max_length=1000, null=True, description="????")
-    level = fields.IntField(default=0, description="????", index=True)
-    start_line = fields.IntField(description="????", index=True)
-    end_line = fields.IntField(description="????", index=True)
-    text = fields.TextField(description="????")
-    text_preview = fields.TextField(null=True, description="????")
-    keywords = fields.JSONField(default=list, description="???")
-    token_count = fields.IntField(default=0, description="??Token?")
-    extra_metadata = fields.JSONField(default=dict, description="???")
-
-    class Meta:
-        table = "sk_document_section"
-        unique_together = ("document_id", "section_key")
-
-
-class SkillKnowDocumentLine(BaseModel, TimestampMixin):
-    document_id = fields.BigIntField(description="??ID", index=True)
-    line_no = fields.IntField(description="??", index=True)
-    content = fields.TextField(description="???")
-
-    class Meta:
-        table = "sk_document_line"
-        unique_together = ("document_id", "line_no")
-
-
-class SkillKnowConversation(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="会话UUID", index=True)
-    title = fields.CharField(max_length=200, null=True, description="会话标题", index=True)
-    owner_id = fields.BigIntField(null=True, description="所有者ID", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_conversation"
-
-
-class SkillKnowMessage(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="消息UUID", index=True)
-    conversation_id = fields.BigIntField(description="会话ID", index=True)
-    role = fields.CharEnumField(SkillKnowMessageRole, description="消息角色", index=True)
-    content = fields.TextField(description="消息内容")
-    tool_calls = fields.JSONField(null=True, description="工具调用")
-    timeline = fields.JSONField(default=list, description="时间线事件")
-    latency_ms = fields.IntField(null=True, description="响应耗时")
-    is_archived = fields.BooleanField(default=False, description="是否归档", index=True)
-    extra_metadata = fields.JSONField(default=dict, description="元数据")
-
-    class Meta:
-        table = "sk_message"
-
-
-class SkillKnowSystemConfig(BaseModel, TimestampMixin):
-    key = fields.CharField(max_length=100, unique=True, description="配置Key", index=True)
-    value = fields.JSONField(null=True, description="配置值")
-    description = fields.TextField(null=True, description="描述")
-    is_sensitive = fields.BooleanField(default=False, description="是否敏感")
-    group = fields.CharField(max_length=50, default="general", description="分组", index=True)
-
-    class Meta:
-        table = "sk_system_config"
-
-
-class SkillKnowUploadTask(BaseModel, TimestampMixin):
-    uuid = fields.CharField(max_length=36, unique=True, description="任务UUID", index=True)
-    status = fields.CharField(max_length=30, default="pending", description="任务状态", index=True)
-    total = fields.IntField(default=0, description="总数")
-    success_count = fields.IntField(default=0, description="成功数")
-    failed_count = fields.IntField(default=0, description="失败数")
-    result = fields.JSONField(default=dict, description="任务结果")
-    error_message = fields.TextField(null=True, description="错误信息")
-
-    class Meta:
-        table = "sk_upload_task"
 
 

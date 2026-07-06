@@ -14,7 +14,7 @@
 
         <div class="hero-copy">
           <h2>AI驱动数据安全 · 让数据更安全</h2>
-          <p>面向客户、渠道商、客服与技术团队，集中完成工单受理、知识检索、外发共享和权限审计。</p>
+          <p>面向客户、渠道商、客服与技术团队，集中完成工单受理、外发共享和权限审计。</p>
         </div>
 
         <div class="operations-board">
@@ -27,9 +27,9 @@
               </div>
             </div>
             <div class="capability-item">
-              <icon-carbon:machine-learning-model text-22 />
+              <icon-material-symbols:folder-managed-outline text-22 />
               <div>
-                <h4>AI 知识库</h4>
+                <h4>项目管理</h4>
                 <p>Markdown 文档检索、引用溯源、智能问答辅助排障</p>
               </div>
             </div>

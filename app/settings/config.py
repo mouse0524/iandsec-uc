@@ -31,7 +31,12 @@ class Settings(BaseSettings):
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@admin.com")
     INITIAL_ADMIN_PHONE: str = os.getenv("INITIAL_ADMIN_PHONE", "00000000000")
     INITIAL_ADMIN_PASSWORD: str | None = os.getenv("INITIAL_ADMIN_PASSWORD")
-    SKILL_KNOW_SQL_SEARCH_ENABLED: bool = os.getenv("SKILL_KNOW_SQL_SEARCH_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
+    LLM_CHAT_PROVIDER: str = os.getenv("LLM_CHAT_PROVIDER", "openai")
+    LLM_CHAT_BASE_URL: str = os.getenv("LLM_CHAT_BASE_URL", "https://api.openai.com/v1")
+    LLM_CHAT_API_KEY: str | None = os.getenv("LLM_CHAT_API_KEY") or os.getenv("OPENAI_API_KEY")
+    LLM_CHAT_MODEL: str = os.getenv("LLM_CHAT_MODEL", "gpt-4o-mini")
+    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "60"))
     EXTERNAL_URL_ALLOWED_HOSTS: typing.List[str] = [
         item.strip().lower()
         for item in os.getenv("EXTERNAL_URL_ALLOWED_HOSTS", "").split(",")
@@ -51,7 +56,6 @@ class Settings(BaseSettings):
     EMAIL_VERIFY_TTL_SECONDS: int = 600
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "storage")
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024
-    SKILL_KNOW_MAX_UPLOAD_SIZE: int = int(os.getenv("SKILL_KNOW_MAX_UPLOAD_SIZE", str(1024 * 1024 * 1024)))
     ALLOWED_EXTENSIONS: typing.List[str] = [
         ".jpg",
         ".jpeg",

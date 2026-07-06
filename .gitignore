@@ -19,6 +19,7 @@ tests/*
 !tests/test_webdav_public_download.py
 !tests/test_project_management.py
 !tests/test_human_challenge.py
+!tests/test_wiki_services.py
 
 db.sqlite3
 db.sqlite3-journal
@@ -28,3 +29,5 @@ dist
 .DS_Store
 ._.DS_Store
 *.xlsx
+.pytest-tmp/
+docs/

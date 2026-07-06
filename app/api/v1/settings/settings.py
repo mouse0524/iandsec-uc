@@ -73,6 +73,12 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
         "login_challenge_type",
         "turnstile_site_key",
         "turnstile_secret_key",
+        "llm_chat_provider",
+        "llm_chat_base_url",
+        "llm_chat_api_key",
+        "llm_chat_model",
+        "llm_temperature",
+        "llm_timeout",
     )
     for key in optional_preserve_keys:
         if key not in payload.model_fields_set:

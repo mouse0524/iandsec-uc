@@ -7,13 +7,11 @@ defineOptions({ name: '系统监控' })
 
 const loading = ref(false)
 const clearing = ref(false)
-const reindexing = ref(false)
 const monitor = ref({})
 
 const system = computed(() => monitor.value.system || {})
 const mysql = computed(() => monitor.value.mysql || {})
 const redis = computed(() => monitor.value.redis || {})
-const skillKnowIndex = computed(() => monitor.value.skill_know_index || {})
 
 onMounted(loadOverview)
 
@@ -74,24 +72,6 @@ async function clearRedis() {
   })
 }
 
-async function rebuildWhIndex() {
-  window.$dialog.warning({
-    title: '重建本地 WH 索引',
-    content: '将重新调度当前账号可见文档的本地阅读索引任务，期间检索结果可能短暂波动。确认继续？',
-    positiveText: '重建',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      reindexing.value = true
-      try {
-        const res = await api.skillKnowReindexAllDocuments()
-        $message.success(`已调度 ${res.data?.scheduled || 0} 个文档，跳过 ${res.data?.skipped || 0} 个`)
-        await loadOverview()
-      } finally {
-        reindexing.value = false
-      }
-    },
-  })
-}
 </script>
 
 <template>
@@ -187,30 +167,6 @@ async function rebuildWhIndex() {
             </div>
           </div>
 
-          <div class="monitor-panel">
-            <div class="panel-head">
-              <div>
-                <h3>本地 WH 索引</h3>
-                <p>{{ skillKnowIndex.index_dir || '-' }}</p>
-              </div>
-              <NSpace align="center">
-                <NButton size="small" secondary :loading="reindexing" @click="rebuildWhIndex">一键重建索引</NButton>
-                <NTag :type="statusType(skillKnowIndex.status)" round>{{ skillKnowIndex.status || 'unknown' }}</NTag>
-              </NSpace>
-            </div>
-            <div class="info-list">
-              <div><span>后端</span><b>{{ skillKnowIndex.backend || 'whoosh' }}</b></div>
-              <div><span>可用</span><b>{{ skillKnowIndex.available ? '是' : '否' }}</b></div>
-              <div><span>索引存在</span><b>{{ skillKnowIndex.exists ? '是' : '否' }}</b></div>
-              <div><span>文档数</span><b>{{ skillKnowIndex.document_count ?? '-' }}</b></div>
-              <div><span>分段数</span><b>{{ skillKnowIndex.section_count ?? '-' }}</b></div>
-              <div><span>有效索引条目</span><b>{{ skillKnowIndex.doc_count ?? 0 }}</b></div>
-              <div><span>索引内部总记录</span><b>{{ skillKnowIndex.doc_count_all ?? 0 }}</b></div>
-              <div><span>已删除残留</span><b>{{ skillKnowIndex.deleted_doc_count ?? 0 }}</b></div>
-              <div><span>领域词版本</span><b>{{ skillKnowIndex.domain_terms_version || '-' }}</b></div>
-              <div v-if="skillKnowIndex.error"><span>错误</span><b>{{ skillKnowIndex.error }}</b></div>
-            </div>
-          </div>
         </section>
       </div>
     </NSpin>

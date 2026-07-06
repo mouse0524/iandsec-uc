@@ -51,6 +51,7 @@ class SystemSettingController:
         "webdav",
         "database_backup",
         "redmine",
+        "llm",
     }
 
     _DEFAULTS = {
@@ -187,6 +188,14 @@ class SystemSettingController:
             "redmine_auto_pull_interval_minutes": _int_env("REDMINE_AUTO_PULL_INTERVAL_MINUTES", 120),
             "redmine_auto_pull_ticket_statuses": ["tech_processing", "field_verification", "pending_close"],
         },
+        "llm": {
+            "llm_chat_provider": os.getenv("LLM_CHAT_PROVIDER", "openai"),
+            "llm_chat_base_url": os.getenv("LLM_CHAT_BASE_URL", "https://api.openai.com/v1"),
+            "llm_chat_api_key": os.getenv("LLM_CHAT_API_KEY") or os.getenv("OPENAI_API_KEY") or None,
+            "llm_chat_model": os.getenv("LLM_CHAT_MODEL", "gpt-4o-mini"),
+            "llm_temperature": float(os.getenv("LLM_TEMPERATURE", "0.2")),
+            "llm_timeout": float(os.getenv("LLM_TIMEOUT", "60")),
+        },
     }
 
     @staticmethod
@@ -234,6 +243,7 @@ class SystemSettingController:
         data["webdav_password"] = self._mask_secret(data.get("webdav_password"))
         data["db_backup_webdav_password"] = self._mask_secret(data.get("db_backup_webdav_password"))
         data["redmine_api_key"] = self._mask_secret(data.get("redmine_api_key"))
+        data["llm_chat_api_key"] = self._mask_secret(data.get("llm_chat_api_key"))
         data["turnstile_secret_key"] = self._mask_secret(data.get("turnstile_secret_key"))
         return data
 
@@ -374,6 +384,8 @@ class SystemSettingController:
             payload["db_backup_webdav_password"] = sections["database_backup"].get("db_backup_webdav_password")
         if payload.get("redmine_api_key") == "******":
             payload["redmine_api_key"] = sections["redmine"].get("redmine_api_key")
+        if payload.get("llm_chat_api_key") == "******":
+            payload["llm_chat_api_key"] = sections["llm"].get("llm_chat_api_key")
         if payload.get("turnstile_secret_key") == "******":
             payload["turnstile_secret_key"] = sections["login_security"].get("turnstile_secret_key")
         if payload.get("webdav_base_url"):
@@ -464,6 +476,14 @@ class SystemSettingController:
             "smtp_use_tls",
             "smtp_use_ssl",
         }
+        llm_keys = {
+            "llm_chat_provider",
+            "llm_chat_base_url",
+            "llm_chat_api_key",
+            "llm_chat_model",
+            "llm_temperature",
+            "llm_timeout",
+        }
         mail_template_keys = {
             "email_verify_subject",
             "email_verify_is_html",
@@ -534,6 +554,7 @@ class SystemSettingController:
             "webdav": webdav_keys,
             "database_backup": database_backup_keys,
             "redmine": redmine_keys,
+            "llm": llm_keys,
         }
 
         for section, keys in mapping.items():

@@ -2,7 +2,6 @@
 
 安得和众用户服务中心。
 
-`iandsec-uc` 是基于 FastAPI + Vue 3 + Naive UI 的用户服务中心系统，包含用户与权限管理、工单流转、代理商/注册审核、WebDAV 外发管理、全局通知、系统配置，以及 Skill-Know 知识库与智能问答能力。
 
 ## 技术栈
 
@@ -10,7 +9,6 @@
 - 前端：Vue 3、Vite、Naive UI、Pinia、pnpm
 - 数据库：MySQL 8
 - 缓存：Redis 7
-- 知识库：Markdown、MarkItDown、ChromaDB、OpenAI-compatible LLM API
 - 部署：Docker、docker-compose
 
 ## 核心功能
@@ -50,16 +48,9 @@
 - 管理员可查看所有分享记录，普通用户仅查看自己的分享。
 - WebDAV 列表结果缓存到 Redis，上传/创建目录/删除后自动失效。
 
-### Skill-Know 知识库
 
 - 支持上传 PDF、PowerPoint、Word、Excel、HTML、CSV、JSON、XML、TXT、MD。
 - 不支持旧版 Office 格式：`.doc`、`.ppt`、`.xls`。
-- 上传文件统一转换为 Markdown，不保留原始文件。
-- Markdown 文档自动分块并写入向量库。
-- 使用 ChromaDB 进行语义检索，文本搜索作为兜底。
-- LLM 基于 Markdown 文档片段和 Skill 结果回答问题。
-- 文档可一键转换为结构化 Skill。
-- 支持知识搜索、知识图谱、提示词管理、智能对话和快速配置。
 
 ## 目录结构
 
@@ -269,5 +260,3 @@ pnpm run lint
 - 开发环境推荐使用 `docker-compose.dev.yml`，它会把当前代码目录挂载到容器中，适合快速调试。
 - 如果修改了 Python 或 Node 依赖文件，建议重新构建开发镜像：`docker-compose -f docker-compose.dev.yml up -d --build`。
 - 如果只是修改业务代码，不需要重建镜像。
-- 知识库使用 MarkItDown 转 Markdown，转换质量取决于源文件格式和 MarkItDown 支持能力。
-- 知识库向量检索依赖 LLM embedding 配置；未配置或失败时会降级为文本检索。

@@ -184,77 +184,40 @@ export default {
   webdavShareList: (params = {}) => request.get('/webdav/share/list', { params }),
   webdavShareDelete: (data = {}) => request.post('/webdav/share/delete', data),
   webdavDownloadLogList: (params = {}) => request.get('/webdav/download-log/list', { params }),
-  // skill know - folders
-  skillKnowFolders: (params = {}) => request.get('/skill-know/folders/list', { params }),
-  skillKnowCreateFolder: (data = {}) => request.post('/skill-know/folders/create', data),
-  skillKnowUpdateFolder: (data = {}) => request.post('/skill-know/folders/update', data),
-  skillKnowDeleteFolder: (params = {}) => request.delete('/skill-know/folders/delete', { params }),
-  // skill know - documents
-  skillKnowInitChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/init', data, { timeout: 300000 }),
-  skillKnowUploadChunk: (formData) => request.post('/skill-know/documents/upload/chunk', formData, {
-    timeout: 90000,
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }),
-  skillKnowChunkUploadStatus: (params = {}) => request.get('/skill-know/documents/upload/status', { params, timeout: 300000 }),
-  skillKnowCompleteChunkUpload: (data = {}) => request.post('/skill-know/documents/upload/complete', data, { timeout: 300000 }),
-  skillKnowUploadDocument: (file, data = {}) => {
+  // wiki
+  wikiUploadSource: (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    Object.keys(data).forEach((key) => {
-      if (data[key] !== undefined && data[key] !== null && data[key] !== '') formData.append(key, data[key])
-    })
-    return request.post('/skill-know/documents/upload', formData, {
-      timeout: 300000,
+    return request.post('/wiki/source/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
     })
   },
-  skillKnowDocuments: (params = {}) => request.get('/skill-know/documents/list', { params }),
-  skillKnowGetDocument: (params = {}) => request.get('/skill-know/documents/get', { params }),
-  skillKnowUpdateDocument: (data = {}) => request.post('/skill-know/documents/update', data),
-  skillKnowDeleteDocument: (params = {}) => request.delete('/skill-know/documents/delete', { params }),
-  skillKnowMoveDocument: (data = {}) => request.post('/skill-know/documents/move', data),
-  skillKnowReindexDocument: (params = {}) => request.post('/skill-know/documents/reindex', null, { params }),
-  skillKnowReindexAllDocuments: () => request.post('/skill-know/documents/reindex-all'),
-  skillKnowRetryDocument: (params = {}) => request.post('/skill-know/documents/retry', null, { params }),
-  skillKnowRecoverStuckDocuments: (params = {}) => request.post('/skill-know/documents/recover-stuck', null, { params }),
-  // skill know - chat/settings
-  skillKnowConversations: (params = {}) => request.get('/skill-know/chat/conversations', { params }),
-  skillKnowGetConversation: (params = {}) => request.get('/skill-know/chat/conversations/get', { params }),
-  skillKnowDeleteConversation: (params = {}) => request.delete('/skill-know/chat/conversations/delete', { params }),
-  skillKnowMessageFeedback: (data = {}) => request.post('/skill-know/chat/messages/feedback', data),
-  skillKnowSetupState: () => request.get('/skill-know/llm-settings/state'),
-  skillKnowSetupChecklist: () => request.get('/skill-know/llm-settings/checklist'),
-  skillKnowProviders: () => request.get('/skill-know/llm-settings/providers'),
-  skillKnowProviderModels: (providerId) => request.get(`/skill-know/llm-settings/providers/${providerId}/models`),
-  skillKnowCompleteSetup: (data = {}) => request.post('/skill-know/llm-settings/essential', data),
-  skillKnowTestConnection: (data = {}) => request.post('/skill-know/llm-settings/test-connection', data),
-  skillKnowChatModels: (data = {}) => request.post('/skill-know/llm-settings/models', data),
-  skillKnowResetSetup: () => request.post('/skill-know/llm-settings/reset'),
-  skillKnowHealth: () => request.get('/skill-know/health'),
-  skillKnowHealthDetail: () => request.get('/skill-know/health/detail'),
-  skillKnowRetrievalDebug: (params = {}) => request.get('/skill-know/eval/debug', { params }),
-  skillKnowGoldenEval: (params = {}) => request.post('/skill-know/eval/golden', null, { params }),
-  skillKnowGoldenCases: () => request.get('/skill-know/eval/golden/cases'),
-  skillKnowSaveGoldenCase: (data = {}) => request.post('/skill-know/eval/golden/cases', data),
-  skillKnowDeleteGoldenCase: (params = {}) => request.delete('/skill-know/eval/golden/cases', { params }),
-  skillKnowEvolutionReports: (params = {}) => request.get('/skill-know/evolution/reports', { params }),
-  skillKnowEvolutionReport: (reportId) => request.get(`/skill-know/evolution/reports/${reportId}`),
-  skillKnowRunEvolutionReport: (params = {}) =>
-    request.post('/skill-know/evolution/reports/run', null, { params, timeout: 300000 }),
-  skillKnowEvolutionSettings: () => request.get('/skill-know/evolution/settings'),
-  skillKnowSaveEvolutionSettings: (data = {}) => request.post('/skill-know/evolution/settings', data),
-  skillKnowKnowledgeGaps: (params = {}) => request.get('/skill-know/evolution/gaps', { params }),
-  skillKnowUpdateKnowledgeGapStatus: (gapId, data = {}) =>
-    request.post(`/skill-know/evolution/gaps/${gapId}/status`, data),
-  skillKnowConvertGapToGoldenCase: (gapId, data = {}) =>
-    request.post(`/skill-know/evolution/gaps/${gapId}/golden-case`, data),
-  skillKnowLearningCandidates: (params = {}) => request.get('/skill-know/evolution/candidates', { params }),
-  skillKnowCreateLearningCandidate: (gapId, data = {}) =>
-    request.post(`/skill-know/evolution/gaps/${gapId}/candidate`, data),
-  skillKnowUpdateLearningCandidateStatus: (candidateId, data = {}) =>
-    request.post(`/skill-know/evolution/candidates/${candidateId}/status`, data),
-  skillKnowGenerateLearningCandidateDraft: (candidateId) =>
-    request.post(`/skill-know/evolution/candidates/${candidateId}/draft`),
-  skillKnowImportLearningCandidate: (candidateId, data = {}) =>
-    request.post(`/skill-know/evolution/candidates/${candidateId}/import`, data),
+  wikiInitChunkUpload: (data = {}) => request.post('/wiki/source/upload/init', data, { timeout: 300000 }),
+  wikiUploadChunk: (params = {}, file) => {
+    const formData = new FormData()
+    formData.append('chunk', file)
+    return request.post('/wiki/source/upload/chunk', formData, {
+      params,
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    })
+  },
+  wikiCompleteChunkUpload: (data = {}) => request.post('/wiki/source/upload/complete', data, { timeout: 300000 }),
+  wikiRetrySource: (params = {}) => request.post('/wiki/source/retry', null, { params }),
+  wikiDeleteSource: (params = {}) => request.delete('/wiki/source/delete', { params }),
+  wikiSourceList: (params = {}) => request.get('/wiki/source/list', { params }),
+  wikiSourceMarkdown: (params = {}) => request.get('/wiki/source/markdown', { params }),
+  wikiFileTree: () => request.get('/wiki/file/tree'),
+  wikiFileGet: (params = {}) => request.get('/wiki/file/get', { params }),
+  wikiAsset: (params = {}) => request.get('/wiki/asset', { params, responseType: 'blob' }),
+  wikiConversations: (params = {}) => request.get('/wiki/conversations', { params }),
+  wikiConversationGet: (params = {}) => request.get('/wiki/conversations/get', { params }),
+  wikiHealth: () => request.get('/wiki/health'),
+  wikiAsk: (data = {}) => request.post('/wiki/ask', data, { timeout: 300000 }),
+  wikiMarkUnhelpful: (data = {}) => request.post('/wiki/feedback/unhelpful', data),
+  wikiAdminMessages: (params = {}) => request.get('/wiki/admin/messages', { params }),
+  wikiLearningList: (params = {}) => request.get('/wiki/learning/list', { params }),
+  wikiLearningApprove: (data = {}) => request.post('/wiki/learning/approve', data),
+  wikiLearningReject: (data = {}) => request.post('/wiki/learning/reject', data),
 }

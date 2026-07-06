@@ -119,6 +119,12 @@ class SystemSettingUpdateIn(BaseModel):
             TicketStatus.PENDING_CLOSE.value,
         ]
     )
+    llm_chat_provider: str = "openai"
+    llm_chat_base_url: str = "https://api.openai.com/v1"
+    llm_chat_api_key: str | None = None
+    llm_chat_model: str = "gpt-4o-mini"
+    llm_temperature: float = 0.2
+    llm_timeout: float = 60
 
     @field_validator("ticket_attachment_extensions")
     @classmethod
@@ -335,7 +341,16 @@ class SystemSettingUpdateIn(BaseModel):
         return value
 
 
-    @field_validator("turnstile_site_key", "turnstile_secret_key", "redmine_base_url", "redmine_api_key", "redmine_project_id")
+    @field_validator(
+        "turnstile_site_key",
+        "turnstile_secret_key",
+        "redmine_base_url",
+        "redmine_api_key",
+        "redmine_project_id",
+        "llm_chat_base_url",
+        "llm_chat_api_key",
+        "llm_chat_model",
+    )
     @classmethod
     def validate_redmine_text(cls, value: str | None, info):
         if value is None:
@@ -346,6 +361,28 @@ class SystemSettingUpdateIn(BaseModel):
         if len(text) > 500:
             raise ValueError(f"{info.field_name} 不能超过500个字符")
         return text
+
+    @field_validator("llm_chat_provider")
+    @classmethod
+    def validate_llm_chat_provider(cls, value: str):
+        text = str(value or "openai").strip().lower()
+        if text not in {"openai", "ollama"}:
+            raise ValueError("LLM provider must be openai or ollama")
+        return text
+
+    @field_validator("llm_temperature")
+    @classmethod
+    def validate_llm_temperature(cls, value: float):
+        if value < 0 or value > 2:
+            raise ValueError("LLM temperature must be between 0 and 2")
+        return value
+
+    @field_validator("llm_timeout")
+    @classmethod
+    def validate_llm_timeout(cls, value: float):
+        if value < 1 or value > 600:
+            raise ValueError("LLM timeout must be between 1 and 600 seconds")
+        return value
 
     @field_validator("login_challenge_type")
     @classmethod

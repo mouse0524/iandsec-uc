@@ -21,7 +21,7 @@ from app.core.exceptions import (
     ResponseValidationHandle,
 )
 from app.log import logger
-from app.models.admin import Api, Menu, Role, SkillKnowSystemConfig
+from app.models.admin import Api, Menu, Role
 from app.schemas.menus import MenuType
 from app.settings.config import settings
 
@@ -105,6 +105,44 @@ def _project_api_paths() -> list[str]:
         "/api/v1/project/activity/create",
         "/api/v1/project/activity/update",
         "/api/v1/project/activity/delete",
+    ]
+
+
+def _wiki_read_api_paths() -> list[str]:
+    return [
+        "/api/v1/wiki/source/list",
+        "/api/v1/wiki/source/markdown",
+        "/api/v1/wiki/file/tree",
+        "/api/v1/wiki/file/get",
+        "/api/v1/wiki/asset",
+        "/api/v1/wiki/page/list",
+        "/api/v1/wiki/page/get",
+        "/api/v1/wiki/conversations",
+        "/api/v1/wiki/conversations/get",
+        "/api/v1/wiki/health",
+        "/api/v1/wiki/ask",
+        "/api/v1/wiki/ask/stream",
+        "/api/v1/wiki/feedback/unhelpful",
+    ]
+
+
+def _wiki_edit_api_paths() -> list[str]:
+    return [
+        "/api/v1/wiki/source/upload",
+        "/api/v1/wiki/source/upload/init",
+        "/api/v1/wiki/source/upload/chunk",
+        "/api/v1/wiki/source/upload/complete",
+        "/api/v1/wiki/source/retry",
+        "/api/v1/wiki/source/delete",
+    ]
+
+
+def _wiki_admin_api_paths() -> list[str]:
+    return [
+        "/api/v1/wiki/admin/messages",
+        "/api/v1/wiki/learning/list",
+        "/api/v1/wiki/learning/approve",
+        "/api/v1/wiki/learning/reject",
     ]
 
 
@@ -641,105 +679,6 @@ async def init_menus():
             redirect="",
         )
 
-    skill_know_parent = await Menu.filter(path="/skill-know").first()
-    if not skill_know_parent:
-        skill_know_parent = await Menu.create(
-            menu_type=MenuType.CATALOG,
-            name="AI知识库",
-            path="/skill-know",
-            order=7,
-            parent_id=0,
-            icon="carbon:machine-learning-model",
-            is_hidden=False,
-            component="Layout",
-            keepalive=False,
-            redirect="/skill-know/chat",
-        )
-    else:
-        skill_know_parent.menu_type = MenuType.CATALOG
-        skill_know_parent.name = "AI知识库"
-        skill_know_parent.order = 7
-        skill_know_parent.parent_id = 0
-        skill_know_parent.icon = "carbon:machine-learning-model"
-        skill_know_parent.is_hidden = False
-        skill_know_parent.component = "Layout"
-        skill_know_parent.keepalive = False
-        skill_know_parent.redirect = "/skill-know/chat"
-        await skill_know_parent.save()
-
-    skill_know_children = [
-        {
-            "name": "智能对话",
-            "path": "chat",
-            "order": 1,
-            "icon": "material-symbols:chat-outline-rounded",
-            "component": "/skill-know/chat",
-        },
-        {
-            "name": "文档管理",
-            "path": "documents",
-            "order": 2,
-            "icon": "material-symbols:docs-outline-rounded",
-            "component": "/skill-know/documents",
-        },
-        {
-            "name": "LLM设置",
-            "path": "llm-settings",
-            "order": 3,
-            "icon": "material-symbols:tune-rounded",
-            "component": "/skill-know/llm-settings",
-        },
-        {
-            "name": "对话历史",
-            "path": "conversations",
-            "order": 4,
-            "icon": "material-symbols:rate-review-outline-rounded",
-            "component": "/skill-know/conversations",
-        },
-        {
-            "name": "自进化报告",
-            "path": "evolution",
-            "order": 5,
-            "icon": "material-symbols:model-training-outline-rounded",
-            "component": "/skill-know/evolution",
-        },
-    ]
-    legacy_skill_know_components = [
-        "/skill-know/search",
-        "/skill-know/skills",
-        "/skill-know/graph",
-        "/skill-know/quick-setup",
-        "/skill-know/upload-tasks",
-        "/skill-know/packs",
-        "/skill-know/prompts",
-    ]
-    await Menu.filter(parent_id=skill_know_parent.id, component__in=legacy_skill_know_components).delete()
-    for child in skill_know_children:
-        skill_know_menu = await Menu.filter(
-            Q(component=child["component"]) | Q(path=child["path"], parent_id=skill_know_parent.id)
-        ).first()
-        if skill_know_menu:
-            skill_know_menu.menu_type = MenuType.MENU
-            skill_know_menu.name = child["name"]
-            skill_know_menu.path = child["path"]
-            skill_know_menu.order = child["order"]
-            skill_know_menu.parent_id = skill_know_parent.id
-            skill_know_menu.icon = child["icon"]
-            skill_know_menu.is_hidden = False
-            skill_know_menu.component = child["component"]
-            skill_know_menu.keepalive = False
-            skill_know_menu.redirect = ""
-            await skill_know_menu.save()
-        else:
-            await Menu.create(
-                menu_type=MenuType.MENU,
-                parent_id=skill_know_parent.id,
-                is_hidden=False,
-                keepalive=False,
-                redirect="",
-                **child,
-            )
-
     terminal_parent = await Menu.filter(path="/terminal").first()
     if not terminal_parent:
         terminal_parent = await Menu.create(
@@ -808,6 +747,83 @@ async def init_menus():
                 **child,
             )
 
+
+
+    wiki_parent = await Menu.filter(path="/wiki").first()
+    if not wiki_parent:
+        wiki_parent = await Menu.create(
+            menu_type=MenuType.CATALOG,
+            name="企业知识库",
+            path="/wiki",
+            order=7,
+            parent_id=0,
+            icon="material-symbols:menu-book-outline-rounded",
+            is_hidden=False,
+            component="Layout",
+            keepalive=False,
+            redirect="/wiki/search",
+        )
+    elif wiki_parent.name != "企业知识库":
+        wiki_parent.name = "企业知识库"
+        await wiki_parent.save()
+    await Menu.filter(
+        Q(component__in=["/wiki/pages", "/wiki/learning"]) | Q(path__in=["pages", "learning"], parent_id=wiki_parent.id)
+    ).delete()
+    wiki_children = [
+        {
+            "name": "知识检索",
+            "path": "search",
+            "order": 1,
+            "icon": "material-symbols:search-rounded",
+            "component": "/wiki/search",
+        },
+        {
+            "name": "知识查看",
+            "path": "view",
+            "order": 2,
+            "icon": "material-symbols:article-outline-rounded",
+            "component": "/wiki/view",
+        },
+        {
+            "name": "知识来源",
+            "path": "sources",
+            "order": 3,
+            "icon": "material-symbols:upload-file-outline-rounded",
+            "component": "/wiki/sources",
+        },
+        {
+            "name": "问答反馈",
+            "path": "records",
+            "order": 4,
+            "icon": "material-symbols:reviews-outline-rounded",
+            "component": "/wiki/records",
+        },
+    ]
+    for child in wiki_children:
+        wiki_menu = await Menu.filter(
+            Q(component=child["component"]) | Q(path=child["path"], parent_id=wiki_parent.id)
+        ).first()
+        if wiki_menu:
+            wiki_menu.menu_type = MenuType.MENU
+            wiki_menu.name = child["name"]
+            wiki_menu.path = child["path"]
+            wiki_menu.order = child["order"]
+            wiki_menu.parent_id = wiki_parent.id
+            wiki_menu.icon = child["icon"]
+            wiki_menu.is_hidden = False
+            wiki_menu.component = child["component"]
+            wiki_menu.keepalive = False
+            wiki_menu.redirect = ""
+            await wiki_menu.save()
+        else:
+            await Menu.create(
+                menu_type=MenuType.MENU,
+                parent_id=wiki_parent.id,
+                is_hidden=False,
+                keepalive=False,
+                redirect="",
+                **child,
+            )
 
 
 async def init_apis():
@@ -879,8 +895,6 @@ async def ensure_security_columns():
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_id` BIGINT NULL", "ticket.redmine_status_id"),
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_name` VARCHAR(120) NULL", "ticket.redmine_status_name"),
             ("ALTER TABLE `ticket` ADD COLUMN `redmine_closed` BOOL NOT NULL DEFAULT 0", "ticket.redmine_closed"),
-            ("ALTER TABLE `sk_document` ADD COLUMN `owner_id` BIGINT NULL", "sk_document.owner_id"),
-            ("ALTER TABLE `sk_conversation` ADD COLUMN `owner_id` BIGINT NULL", "sk_conversation.owner_id"),
             (
                 "ALTER TABLE `global_notice` ADD COLUMN `delivery_channels` JSON NULL",
                 "global_notice.delivery_channels",
@@ -1020,6 +1034,23 @@ async def init_roles():
                     api_paths=_project_api_paths(),
                     component_paths=["/project", "/project/list", "/project/activity"],
                 )
+            for role_name in ["用户", "渠道商", "客服", "技术", "管理员"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_wiki_read_api_paths(),
+                    component_paths=["/wiki", "/wiki/search", "/wiki/view"],
+                )
+            for role_name in ["客服", "技术", "管理员"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_wiki_edit_api_paths(),
+                    component_paths=["/wiki/sources"],
+                )
+            await _backfill_existing_role_permissions(
+                role_name="管理员",
+                api_paths=_wiki_admin_api_paths(),
+                component_paths=["/wiki/records"],
+            )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -1089,6 +1120,9 @@ async def init_roles():
     monitor_apis = await Api.filter(path__in=_monitor_api_paths())
     terminal_apis = await Api.filter(path__in=_terminal_api_paths())
     project_apis = await Api.filter(path__in=_project_api_paths())
+    wiki_read_apis = await Api.filter(path__in=_wiki_read_api_paths())
+    wiki_edit_apis = await Api.filter(path__in=_wiki_edit_api_paths())
+    wiki_admin_apis = await Api.filter(path__in=_wiki_admin_api_paths())
     notice_user_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/inbox",
@@ -1108,6 +1142,9 @@ async def init_roles():
     monitor_menus = await Menu.filter(Q(component="/system/monitor"))
     terminal_menus = await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
     project_menus = await Menu.filter(Q(path="/project") | Q(component__in=["/project/list", "/project/activity"]))
+    wiki_read_menus = await Menu.filter(Q(path="/wiki") | Q(component__in=["/wiki/search", "/wiki/view"]))
+    wiki_edit_menus = await Menu.filter(Q(component="/wiki/sources"))
+    wiki_admin_menus = await Menu.filter(Q(component="/wiki/records"))
     webdav_menus = await Menu.filter(
         Q(path="/outbound")
         | Q(component="/system/webdav")
@@ -1120,6 +1157,8 @@ async def init_roles():
         role_obj = role_map[role_name]
         await role_obj.apis.add(*basic_apis)
         await role_obj.apis.add(*notice_user_apis)
+        await role_obj.apis.add(*wiki_read_apis)
+        await role_obj.menus.add(*wiki_read_menus)
 
     await role_map["用户"].apis.add(*ticket_submit_apis)
     await role_map["用户"].menus.add(*submit_menus)
@@ -1130,8 +1169,10 @@ async def init_roles():
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)
     await role_map["技术"].apis.add(*project_apis)
+    await role_map["技术"].apis.add(*wiki_edit_apis)
     await role_map["技术"].menus.add(*tech_menus)
     await role_map["技术"].menus.add(*project_menus)
+    await role_map["技术"].menus.add(*wiki_edit_menus)
 
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
@@ -1139,14 +1180,18 @@ async def init_roles():
         *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/export", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
     )
     await role_map["客服"].apis.add(*project_apis)
+    await role_map["客服"].apis.add(*wiki_edit_apis)
     await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)
     await role_map["客服"].menus.add(*project_menus)
+    await role_map["客服"].menus.add(*wiki_edit_menus)
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)
     await role_map["管理员"].apis.add(*terminal_apis)
     await role_map["管理员"].apis.add(*project_apis)
+    await role_map["管理员"].apis.add(*wiki_edit_apis)
+    await role_map["管理员"].apis.add(*wiki_admin_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*webdav_password_apis)
     await role_map["管理员"].apis.add(*notice_apis)
@@ -1154,68 +1199,11 @@ async def init_roles():
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*project_menus)
+    await role_map["管理员"].menus.add(*wiki_edit_menus)
+    await role_map["管理员"].menus.add(*wiki_admin_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
     await role_map["管理员"].menus.add(*webdav_password_menus)
-
-
-async def init_skill_know_config_defaults():
-    defaults = [
-        {
-            "key": "evolution_daily_eval_enabled",
-            "value": True,
-            "group": "evolution",
-            "description": "是否启用 Skill-Know 自进化每日评测",
-        },
-        {
-            "key": "evolution_daily_eval_time",
-            "value": {"__raw": "02:10"},
-            "group": "evolution",
-            "description": "Skill-Know 自进化每日评测时间(HH:MM)",
-        },
-        {
-            "key": "evolution_daily_eval_top_k",
-            "value": 8,
-            "group": "evolution",
-            "description": "Skill-Know 自进化每日评测 TopK",
-        },
-    ]
-    for default in defaults:
-        exists = await SkillKnowSystemConfig.filter(key=default["key"]).exists()
-        if not exists:
-            await SkillKnowSystemConfig.create(
-                key=default["key"],
-                value=default["value"],
-                group=default["group"],
-                description=default["description"],
-                is_sensitive=False,
-            )
-
-    item = await SkillKnowSystemConfig.filter(key="retrieval_max_context_chars").first()
-    if not item:
-        await SkillKnowSystemConfig.create(
-            key="retrieval_max_context_chars",
-            value=128000,
-            group="retrieval",
-            description="最大上下文字符数",
-            is_sensitive=False,
-        )
-        return
-
-    current_value = item.value
-    if isinstance(current_value, dict) and "__raw" in current_value:
-        current_value = current_value.get("__raw")
-    try:
-        normalized = int(current_value)
-    except Exception:
-        normalized = None
-
-    if normalized in {None, 12000}:
-        item.value = 128000
-        item.group = "retrieval"
-        item.description = item.description or "最大上下文字符数"
-        item.is_sensitive = False
-        await item.save()
 
 
 async def init_data():
@@ -1224,4 +1212,3 @@ async def init_data():
     await init_menus()
     await init_apis()
     await init_roles()
-    await init_skill_know_config_defaults()

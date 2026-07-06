@@ -22,16 +22,12 @@ from app.models.admin import (
     Menu,
     PartnerRegistration,
     Role,
-    SkillKnowConversation,
-    SkillKnowDocument,
-    SkillKnowDocumentChunk,
-    SkillKnowMessage,
     TerminalAuthReport,
     Ticket,
     User,
     WebDavShareLink,
 )
-from app.models.enums import PartnerRegisterStatus, RegisterType, SkillKnowDocumentStatus, TicketStatus
+from app.models.enums import PartnerRegisterStatus, RegisterType, TicketStatus
 from app.schemas.captcha import CaptchaOut
 from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, SendVerifyCodeIn
 from app.schemas.base import Fail, Success
@@ -346,25 +342,6 @@ async def get_workbench_stats():
     )
     auditlog_archived = await AuditLog.filter(is_archived=True).count() if is_global else 0
 
-    document_query = SkillKnowDocument.all() if is_global else SkillKnowDocument.filter(owner_id=user_id)
-    document_total = await document_query.count()
-    document_completed = await document_query.filter(status=SkillKnowDocumentStatus.COMPLETED).count()
-    document_processing = await document_query.filter(
-        status__in=[SkillKnowDocumentStatus.PENDING, SkillKnowDocumentStatus.PROCESSING]
-    ).count()
-    document_failed = await document_query.filter(status=SkillKnowDocumentStatus.FAILED).count()
-    document_today = await document_query.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
-    document_health_rate = round(document_completed * 100 / document_total, 1) if document_total else 100
-    chunk_total = await SkillKnowDocumentChunk.all().count() if is_global else 0
-    conversation_today = (
-        await SkillKnowConversation.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count()
-        if is_global
-        else await SkillKnowConversation.filter(
-            owner_id=user_id, created_at__gte=today_start, created_at__lt=tomorrow_start
-        ).count()
-    )
-    message_today = await SkillKnowMessage.filter(created_at__gte=today_start, created_at__lt=tomorrow_start).count() if is_global else 0
-
     share_active = (
         await WebDavShareLink.filter(is_active=True, expire_time__gte=now).count()
         if is_global
@@ -443,15 +420,6 @@ async def get_workbench_stats():
         "auditlog_today": auditlog_today,
         "auditlog_failed_today": auditlog_failed_today,
         "auditlog_archived": auditlog_archived,
-        "document_total": document_total,
-        "document_completed": document_completed,
-        "document_processing": document_processing,
-        "document_failed": document_failed,
-        "document_today": document_today,
-        "document_health_rate": document_health_rate,
-        "chunk_total": chunk_total,
-        "conversation_today": conversation_today,
-        "message_today": message_today,
         "share_active": share_active,
         "share_expired": share_expired,
         "terminal_company_count": terminal_company_count,

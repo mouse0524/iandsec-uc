@@ -81,28 +81,6 @@
         <div class="panel">
           <div class="panel-head compact">
             <div>
-              <h2>AI知识库</h2>
-              <p>文档解析、阅读索引与对话使用情况</p>
-            </div>
-          </div>
-          <div class="knowledge-score">
-            <div>
-              <span>文档健康度</span>
-              <strong>{{ stats.document_health_rate }}%</strong>
-            </div>
-            <div class="ring" :style="{ '--value': stats.document_health_rate }"></div>
-          </div>
-          <div class="info-list">
-            <button v-for="item in knowledgeItems" :key="item.key" type="button" @click="goByMetric(item.metric)">
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
-            </button>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head compact">
-            <div>
               <h2>终端授权</h2>
               <p>客户上报、授权与维保覆盖</p>
             </div>
@@ -186,15 +164,6 @@ const stats = ref({
   auditlog_today: 0,
   auditlog_failed_today: 0,
   auditlog_archived: 0,
-  document_total: 0,
-  document_completed: 0,
-  document_processing: 0,
-  document_failed: 0,
-  document_today: 0,
-  document_health_rate: 100,
-  chunk_total: 0,
-  conversation_today: 0,
-  message_today: 0,
   share_active: 0,
   share_expired: 0,
   terminal_company_count: 0,
@@ -211,7 +180,6 @@ const latestReportText = computed(() => {
 
 const keyMetrics = computed(() => [
   { key: 'active', label: '待处理工单', value: stats.value.ticket_active, hint: '审核与技术处理中', metric: 'ticket_active' },
-  { key: 'documents', label: '知识库文档', value: stats.value.document_total, hint: `${stats.value.document_failed} 个失败`, metric: 'document_total' },
   { key: 'terminal', label: '受管终端', value: stats.value.terminal_total, hint: `${stats.value.terminal_company_count} 家公司`, metric: 'terminal_total' },
   { key: 'audit', label: '今日审计', value: stats.value.auditlog_today, hint: `${stats.value.auditlog_failed_today} 个失败请求`, metric: 'auditlog_today' },
 ])
@@ -228,16 +196,9 @@ const ticketBars = computed(() => {
 
 const alertItems = computed(() => [
   { key: 'register', label: '注册待审核', value: stats.value.register_pending, metric: 'register_pending' },
-  { key: 'document', label: '文档处理失败', value: stats.value.document_failed, metric: 'document_failed' },
   { key: 'auth', label: '授权30天内到期', value: stats.value.terminal_auth_expiring, metric: 'terminal_total' },
   { key: 'maintain', label: '维保30天内到期', value: stats.value.terminal_maintain_expiring, metric: 'terminal_total' },
   { key: 'audit', label: '今日失败请求', value: stats.value.auditlog_failed_today, metric: 'auditlog_today' },
-])
-
-const knowledgeItems = computed(() => [
-  { key: 'processing', label: '处理中', value: stats.value.document_processing, metric: 'document_total' },
-  { key: 'chunks', label: '文档分片', value: stats.value.chunk_total, metric: 'document_total' },
-  { key: 'conversation', label: '今日会话', value: stats.value.conversation_today, metric: 'conversation_today' },
 ])
 
 const terminalItems = computed(() => [
@@ -248,7 +209,6 @@ const terminalItems = computed(() => [
 
 const riskItems = computed(() => [
   { key: 'register', label: '注册待审', value: stats.value.register_pending, metric: 'register_pending' },
-  { key: 'documents', label: '文档失败', value: stats.value.document_failed, metric: 'document_failed' },
   { key: 'terminal', label: '授权/维保临期', value: stats.value.terminal_auth_expiring + stats.value.terminal_maintain_expiring, metric: 'terminal_total' },
   { key: 'audit', label: '失败请求', value: stats.value.auditlog_failed_today, metric: 'auditlog_today' },
 ])
@@ -297,14 +257,6 @@ function goByMetric(metric) {
   }
   if (metric === 'auditlog_today') {
     router.push({ path: '/system/auditlog' })
-    return
-  }
-  if (metric === 'document_total' || metric === 'document_failed') {
-    router.push({ path: '/skill-know/documents', query: metric === 'document_failed' ? { status: 'failed' } : {} })
-    return
-  }
-  if (metric === 'conversation_today') {
-    router.push({ path: '/skill-know/chat' })
     return
   }
   if (metric === 'terminal_total') {
@@ -544,24 +496,6 @@ function goByMetric(metric) {
 .info-list strong,
 .risk-list strong {
   font-size: 18px;
-}
-
-.knowledge-score {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-  padding: 14px;
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.ring {
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  background: conic-gradient(#0f766e calc(var(--value) * 1%), #dce8ef 0);
-  box-shadow: inset 0 0 0 10px #fff;
 }
 
 .terminal-total {

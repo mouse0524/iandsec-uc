@@ -161,6 +161,12 @@ const form = ref({
   redmine_auto_pull_enabled: false,
   redmine_auto_pull_interval_minutes: 120,
   redmine_auto_pull_ticket_statuses: ['tech_processing', 'field_verification', 'pending_close'],
+  llm_chat_provider: 'openai',
+  llm_chat_base_url: 'https://api.openai.com/v1',
+  llm_chat_api_key: '',
+  llm_chat_model: 'gpt-4o-mini',
+  llm_temperature: 0.2,
+  llm_timeout: 60,
 })
 
 const previewParams = ref({
@@ -243,6 +249,11 @@ const loginChallengeTypeOptions = [
   { label: '图形验证码', value: 'captcha' },
   { label: 'Cloudflare Turnstile', value: 'turnstile' },
   { label: '图形验证码 + Turnstile', value: 'both' },
+]
+
+const llmProviderOptions = [
+  { label: 'OpenAI兼容接口', value: 'openai' },
+  { label: 'Ollama本地模型', value: 'ollama' },
 ]
 
 const ticketNotifyRoles = ['用户', '代理商', '客服', '技术']
@@ -453,6 +464,24 @@ const rules = {
     message: '请输入系统时区',
     trigger: ['input', 'blur'],
   },
+  llm_chat_base_url: {
+    required: true,
+    message: '请输入模型接口地址',
+    trigger: ['input', 'blur'],
+  },
+  llm_chat_model: {
+    required: true,
+    message: '请输入模型名称',
+    trigger: ['input', 'blur'],
+  },
+  llm_timeout: {
+    required: true,
+    type: 'number',
+    min: 1,
+    max: 600,
+    message: '请输入 1-600 秒',
+    trigger: ['blur', 'change'],
+  },
   db_backup_directory: {
     required: true,
     message: '请输入NAS远端目录',
@@ -624,6 +653,9 @@ function save() {
       }
       if (payload.turnstile_secret_key === MASKED_SECRET) {
         delete payload.turnstile_secret_key
+      }
+      if (payload.llm_chat_api_key === MASKED_SECRET) {
+        delete payload.llm_chat_api_key
       }
       await api.updateSystemSettings(payload)
       $message.success('设置已保存并生效')
@@ -1281,6 +1313,44 @@ function applyPresetHtmlTemplates() {
               </NFormItem>
               <NFormItem label="启用SSL">
                 <NSwitch v-model:value="form.smtp_use_ssl" />
+              </NFormItem>
+            </NCard>
+          </NTabPane>
+
+          <NTabPane name="llm" tab="大模型配置">
+            <NCard size="small" title="LLM接口配置">
+              <NAlert type="info" class="mb-12">
+                企业知识库会读取这里的大模型配置；API Key 保存后显示为掩码，保持不变可直接保存。
+              </NAlert>
+              <NFormItem label="服务类型" path="llm_chat_provider">
+                <NSelect v-model:value="form.llm_chat_provider" :options="llmProviderOptions" />
+              </NFormItem>
+              <NFormItem label="接口地址" path="llm_chat_base_url">
+                <NInput
+                  v-model:value="form.llm_chat_base_url"
+                  placeholder="例如 https://api.openai.com/v1 或 http://127.0.0.1:11434"
+                />
+              </NFormItem>
+              <NFormItem label="API Key">
+                <NInput
+                  v-model:value="form.llm_chat_api_key"
+                  type="password"
+                  show-password-on="click"
+                  :disabled="form.llm_chat_provider === 'ollama'"
+                  placeholder="OpenAI兼容接口必填，Ollama可留空"
+                />
+              </NFormItem>
+              <NFormItem label="模型名称" path="llm_chat_model">
+                <NInput
+                  v-model:value="form.llm_chat_model"
+                  placeholder="例如 gpt-4o-mini；多个模型可用逗号分隔作为降级"
+                />
+              </NFormItem>
+              <NFormItem label="温度">
+                <NInputNumber v-model:value="form.llm_temperature" :min="0" :max="2" :step="0.1" />
+              </NFormItem>
+              <NFormItem label="超时时间(秒)" path="llm_timeout">
+                <NInputNumber v-model:value="form.llm_timeout" :min="1" :max="600" />
               </NFormItem>
             </NCard>
           </NTabPane>
