@@ -21,7 +21,7 @@ export const useAppStore = defineStore('app', {
       allowPartnerRegister: true,
       allowChannelRegister: true,
       allowUserRegister: true,
-      ticketAttachmentExtensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
+      ticketAttachmentExtensions: ['zip', 'rar', 'png', 'jpg', 'jpeg', 'gif', 'docx', 'pptx', 'xlsx'],
       ticketProjectPhases: ['售前', '实施', '售后'],
       ticketCsReviewProjectPhases: ['实施', '售后'],
       ticketIssueTypes: ['现网问题', '现网需求', '产品建议'],

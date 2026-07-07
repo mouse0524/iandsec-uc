@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     CAPTCHA_MAX_RETRY: int = 3
     EMAIL_VERIFY_TTL_SECONDS: int = 600
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "storage")
-    MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024
+    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024
     ALLOWED_EXTENSIONS: typing.List[str] = [
         ".jpg",
         ".jpeg",
@@ -63,6 +63,7 @@ class Settings(BaseSettings):
         ".pdf",
         ".doc",
         ".docx",
+        ".pptx",
         ".xls",
         ".xlsx",
         ".txt",

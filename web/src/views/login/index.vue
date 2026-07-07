@@ -161,6 +161,9 @@
           <n-form-item label="邮箱" path="email">
             <n-input v-model:value="partnerForm.email" placeholder="请输入邮箱" />
           </n-form-item>
+          <n-form-item label="邀请码" path="invite_code">
+            <n-input v-model:value="partnerForm.invite_code" :readonly="inviteCodeReadonly" placeholder="请输入技术提供的邀请码" />
+          </n-form-item>
           <n-form-item label="邮箱验证码" path="email_code">
             <div class="email-code-row">
               <n-input v-model:value="partnerForm.email_code" placeholder="请输入邮箱验证码" />
@@ -377,6 +380,7 @@ const partnerForm = ref({
   phone: '',
   hardware_id: '',
   password: '',
+  invite_code: '',
   email_code: '',
   captcha_id: '',
   captcha_code: '',
@@ -396,6 +400,7 @@ const partnerRules = {
   },
   contact_name: { required: true, message: '请输入联系人', trigger: ['blur', 'input'] },
   email: { required: true, message: '请输入邮箱', trigger: ['blur', 'input'] },
+  invite_code: { required: true, message: '请输入邀请码', trigger: ['blur', 'input'] },
   email_code: { required: true, message: '请输入邮箱验证码', trigger: ['blur', 'input'] },
   phone: { required: true, message: '请输入手机号', trigger: ['blur', 'input'] },
   hardware_id: {
@@ -440,17 +445,35 @@ const loginTipText = computed(() => {
 })
 
 const canSendEmailCode = computed(() => {
-  return !!partnerForm.value.email?.trim() && !emailCodeSending.value && emailCodeCooldown.value === 0
+  return (
+    !!partnerForm.value.email?.trim()
+    && !!partnerForm.value.invite_code?.trim()
+    && !emailCodeSending.value
+    && emailCodeCooldown.value === 0
+  )
 })
 
 const emailCodeButtonText = computed(() => {
   return emailCodeCooldown.value > 0 ? `${emailCodeCooldown.value}s后重试` : '发送验证码'
 })
+const inviteCodeReadonly = computed(() => !!getInviteCodeFromQuery())
 
 function getDefaultRegisterType() {
   if (appStore.allowChannelRegister) return 'channel'
   if (appStore.allowUserRegister) return 'user'
   return ''
+}
+
+function getInviteCodeFromQuery() {
+  const value = query.invite_code
+  return Array.isArray(value) ? value[0] || '' : value || ''
+}
+
+function applyInviteCodeFromQuery() {
+  const inviteCode = getInviteCodeFromQuery()
+  if (inviteCode) {
+    partnerForm.value.invite_code = inviteCode
+  }
 }
 
 initLoginInfo()
@@ -585,6 +608,9 @@ async function fetchPublicConfig() {
     if (!isSelectedRegisterTypeEnabled()) {
       partnerForm.value.register_type = getDefaultRegisterType()
     }
+    if (getInviteCodeFromQuery() && !showPartnerModal.value) {
+      openPartnerRegisterModal()
+    }
   } catch (error) {
     // ignore public config fetch errors
   }
@@ -603,6 +629,7 @@ function openPartnerRegisterModal() {
     return
   }
   partnerForm.value.register_type = registerType
+  applyInviteCodeFromQuery()
   showPartnerModal.value = true
 }
 
@@ -651,16 +678,25 @@ async function openCaptchaModal() {
     $message.warning('请先填写邮箱地址，再发送验证码')
     return
   }
+  if (!partnerForm.value.invite_code?.trim()) {
+    $message.warning('请先填写邀请码，再发送验证码')
+    return
+  }
   partnerForm.value.captcha_code = ''
   showCaptchaModal.value = true
 }
 
 async function sendEmailCode() {
   const email = partnerForm.value.email?.trim()
+  const inviteCode = partnerForm.value.invite_code?.trim()
   const challengeError = validateChallenge(partnerForm.value)
 
   if (!email) {
     $message.warning('请先填写邮箱地址')
+    return
+  }
+  if (!inviteCode) {
+    $message.warning('请先填写邀请码')
     return
   }
   if (challengeError !== true) {
@@ -675,6 +711,7 @@ async function sendEmailCode() {
       captcha_code: partnerForm.value.captcha_code?.trim(),
       turnstile_token: partnerForm.value.turnstile_token,
       register_type: partnerForm.value.register_type,
+      invite_code: inviteCode,
     })
     $message.success('验证码已发送，请注意查收邮箱')
     showCaptchaModal.value = false
@@ -727,6 +764,7 @@ function resetPartnerRegisterState() {
     phone: '',
     hardware_id: '',
     password: '',
+    invite_code: getInviteCodeFromQuery(),
     email_code: '',
     captcha_id: '',
     captcha_code: '',

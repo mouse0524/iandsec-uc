@@ -74,6 +74,7 @@ class Dept(BaseModel, TimestampMixin):
     name = fields.CharField(max_length=20, unique=True, description="部门名称", index=True)
     desc = fields.CharField(max_length=500, null=True, description="备注")
     channel_level = fields.CharEnumField(PartnerLevel, null=True, description="代理商级别", index=True)
+    tech_ids = fields.JSONField(default=list, description="关联技术ID列表")
     is_deleted = fields.BooleanField(default=False, description="软删除标记", index=True)
     order = fields.IntField(default=0, description="排序", index=True)
     parent_id = fields.IntField(default=0, max_length=10, description="父部门ID", index=True)
@@ -306,9 +307,20 @@ class PartnerRegistration(BaseModel, TimestampMixin):
     reviewer_id = fields.BigIntField(null=True, description="审核人ID", index=True)
     review_comment = fields.CharField(max_length=500, null=True, description="审核备注")
     reviewed_at = fields.DatetimeField(null=True, description="审核时间", index=True)
+    invite_code = fields.CharField(max_length=32, null=True, description="邀请码", index=True)
 
     class Meta:
         table = "partner_registration"
+
+
+class PartnerInvite(BaseModel, TimestampMixin):
+    code = fields.CharField(max_length=32, unique=True, description="邀请码", index=True)
+    created_by = fields.BigIntField(description="创建技术ID", index=True)
+    used_by = fields.BigIntField(null=True, description="使用注册申请ID", index=True)
+    used_at = fields.DatetimeField(null=True, description="使用时间", index=True)
+
+    class Meta:
+        table = "partner_invite"
 
 
 class SystemSettingItem(BaseModel, TimestampMixin):

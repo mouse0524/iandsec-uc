@@ -19,6 +19,16 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
     async def get_dept_tree(self, name):
         search = str(name or "").strip()
         all_depts = await self.model.filter(is_deleted=False).order_by("order")
+        tech_ids = {
+            int(tech_id)
+            for dept in all_depts
+            for tech_id in (dept.tech_ids or [])
+            if int(tech_id or 0) > 0
+        }
+        tech_map = {}
+        if tech_ids:
+            users = await User.filter(id__in=tech_ids, is_active=True)
+            tech_map = {user.id: (user.alias or user.username or str(user.id)) for user in users}
 
         # 辅助函数，用于递归构建部门树
         def build_tree(parent_id):
@@ -35,6 +45,8 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                         "name": dept.name,
                         "desc": dept.desc,
                         "channel_level": dept.channel_level,
+                        "tech_ids": dept.tech_ids or [],
+                        "tech_names": [tech_map.get(int(tech_id), str(tech_id)) for tech_id in (dept.tech_ids or [])],
                         "order": dept.order,
                         "parent_id": dept.parent_id,
                         "children": children,
@@ -104,9 +116,20 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         # 创建关系
         await DeptClosure.bulk_create(dept_closure_objs)
 
+    async def _normalize_tech_ids(self, tech_ids: list[int] | None) -> list[int]:
+        ids = list(dict.fromkeys(int(item) for item in tech_ids or [] if int(item or 0) > 0))
+        if not ids:
+            return []
+        users = await User.filter(id__in=ids, is_active=True, roles__name="技术").values_list("id", flat=True)
+        valid_ids = set(int(item) for item in users)
+        if len(valid_ids) != len(ids):
+            raise HTTPException(status_code=400, detail="请选择有效的技术人员")
+        return ids
+
     @atomic()
     async def create_dept(self, obj_in: DeptCreate):
         obj_in.name = str(obj_in.name or "").strip()
+        obj_in.tech_ids = await self._normalize_tech_ids(obj_in.tech_ids)
         if not obj_in.name:
             raise HTTPException(status_code=400, detail="部门名称不能为空")
         if await Dept.filter(name=obj_in.name).exists():
@@ -136,6 +159,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
     @atomic()
     async def update_dept(self, obj_in: DeptUpdate):
         obj_in.name = str(obj_in.name or "").strip()
+        obj_in.tech_ids = await self._normalize_tech_ids(obj_in.tech_ids)
         if not obj_in.name:
             raise HTTPException(status_code=400, detail="部门名称不能为空")
         if await Dept.filter(name=obj_in.name).exclude(id=obj_in.id).exists():

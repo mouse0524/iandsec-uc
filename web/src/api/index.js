@@ -83,6 +83,7 @@ export default {
       params,
       responseType: 'blob',
     }),
+  previewTicketAttachment: (params = {}) => request.get('/ticket/attachment/preview-cache', { params, timeout: 300000 }),
   resubmitTicket: (data = {}) => request.post('/ticket/resubmit', data),
   getTicketActions: (params = {}) => request.get('/ticket/actions', { params }),
   // project
@@ -137,6 +138,7 @@ export default {
     return request.get('/partner/register/list', { params: query })
   },
   reviewPartnerRegister: (data = {}) => request.post('/partner/register/review', data),
+  createPartnerInvite: () => request.post('/partner/invite/create'),
   // global notice
   createNotice: (data = {}) => request.post('/notice/create', data),
   getNoticeList: (params = {}) => request.get('/notice/list', { params }),

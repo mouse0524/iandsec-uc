@@ -1,13 +1,16 @@
 <script setup>
-import { h, onMounted, ref } from 'vue'
-import { NButton, NInput, NTag, NModal, NForm, NFormItem, NSelect, NTabs, NTabPane } from 'naive-ui'
+import { computed, h, onMounted, ref, watch } from 'vue'
+import { NButton, NInput, NInputGroup, NTag, NModal, NForm, NFormItem, NSelect, NTabs, NTabPane } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
+import TheIcon from '@/components/icon/TheIcon.vue'
 import api from '@/api'
+import { useUserStore } from '@/store'
 
 defineOptions({ name: '注册审核' })
 
+const userStore = useUserStore()
 const $table = ref(null)
 const activeTab = ref('pending')
 const queryItems = ref({ reviewed: false, register_type: 'all', keyword: '' })
@@ -18,6 +21,11 @@ const rejectFormRef = ref(null)
 const rejectForm = ref({
   reason: '',
 })
+const inviteLink = ref('')
+const inviteLoading = ref(false)
+const inviteCopied = ref(false)
+let inviteCopiedTimer = 0
+const canCreateInvite = computed(() => (userStore.role || []).some((role) => role?.name === '技术'))
 
 const statusTextMap = {
   pending: '待审核',
@@ -53,6 +61,56 @@ watch(
 onMounted(() => {
   $table.value?.handleSearch()
 })
+
+function buildInviteLink(code) {
+  return `${window.location.origin}/login?invite_code=${encodeURIComponent(code)}`
+}
+
+async function createInviteLink() {
+  inviteLoading.value = true
+  try {
+    const res = await api.createPartnerInvite()
+    inviteLink.value = res?.data?.link || (res?.data?.code ? buildInviteLink(res.data.code) : '')
+    inviteCopied.value = false
+    if (inviteLink.value) $message.success('邀请链接已生成')
+  } finally {
+    inviteLoading.value = false
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const success = document.execCommand('copy')
+  textarea.remove()
+  if (!success) throw new Error('copy failed')
+}
+
+async function copyInviteLink() {
+  if (!inviteLink.value) return
+  try {
+    await copyText(inviteLink.value)
+    inviteCopied.value = true
+    window.clearTimeout(inviteCopiedTimer)
+    inviteCopiedTimer = window.setTimeout(() => {
+      inviteCopied.value = false
+    }, 1800)
+    $message.success('邀请链接已复制')
+  } catch (error) {
+    $message.error('复制失败，请手动选中链接复制')
+  }
+}
 
 function handleTabChange(tab) {
   activeTab.value = tab
@@ -190,6 +248,33 @@ const columns = computed(() => {
       :get-data="api.getPartnerRegisterList"
     >
       <template #queryBar>
+        <QueryBarItem v-if="canCreateInvite" label="" :label-width="0">
+          <div class="invite-tools">
+            <NButton type="primary" :loading="inviteLoading" @click="createInviteLink">
+              <template #icon>
+                <TheIcon icon="material-symbols:add-link-rounded" :size="18" />
+              </template>
+              {{ inviteLink ? '重新生成' : '生成邀请链接' }}
+            </NButton>
+            <NInputGroup v-if="inviteLink" class="invite-link-group">
+              <NInput
+                v-model:value="inviteLink"
+                class="invite-link"
+                readonly
+                placeholder="邀请链接"
+              />
+              <NButton type="primary" secondary class="copy-button" @click="copyInviteLink">
+                <template #icon>
+                  <TheIcon
+                    :icon="inviteCopied ? 'material-symbols:check-rounded' : 'material-symbols:content-copy-outline-rounded'"
+                    :size="18"
+                  />
+                </template>
+                {{ inviteCopied ? '已复制' : '复制' }}
+              </NButton>
+            </NInputGroup>
+          </div>
+        </QueryBarItem>
         <QueryBarItem label="注册类型" :label-width="60">
           <NSelect
             v-model:value="queryItems.register_type"
@@ -225,3 +310,38 @@ const columns = computed(() => {
     </NModal>
   </CommonPage>
 </template>
+
+<style scoped>
+.invite-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: min(720px, 100%);
+}
+
+.invite-link-group {
+  width: min(560px, calc(100vw - 320px));
+  min-width: 320px;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(24, 160, 88, .12);
+}
+
+.invite-link :deep(.n-input__input-el) {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.copy-button {
+  min-width: 86px;
+}
+
+@media (max-width: 768px) {
+  .invite-tools,
+  .invite-link-group {
+    width: 100%;
+    min-width: 0;
+  }
+}
+</style>

@@ -1,53 +1,42 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import 'vue-files-preview/lib/style.css'
+import { OpenFileViewer } from '@open-file-viewer/vue'
+import {
+  audioPlugin,
+  emailPlugin,
+  epubPlugin,
+  fallbackPlugin,
+  imagePlugin,
+  officePlugin,
+  pdfPlugin,
+  textPlugin,
+  videoPlugin,
+} from '@open-file-viewer/core'
+import '@open-file-viewer/core/style.css'
+import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import api from '@/api'
 
 defineOptions({ name: 'WebdavFilePreview' })
 
-const previewLoaders = {
-  audio: () => import('vue-files-preview/es/packages/preview/supports/audio-preview/index.vue.mjs'),
-  code: () => import('vue-files-preview/es/packages/preview/supports/code-preview/index.vue.mjs'),
-  docx: () => import('vue-files-preview/es/packages/preview/supports/docx-preview/index.vue.mjs'),
-  epub: () => import('vue-files-preview/es/packages/preview/supports/epub-preview/index.vue.mjs'),
-  md: () => import('vue-files-preview/es/packages/preview/supports/md-preview/index.vue.mjs'),
-  msg: () => import('vue-files-preview/es/packages/preview/supports/msg-preview/index.vue.mjs'),
-  pdf: () => import('vue-files-preview/es/packages/preview/supports/pdf-preview/index.vue.mjs'),
-  pic: () => import('vue-files-preview/es/packages/preview/supports/pic-preview/index.vue.mjs'),
-  ppt: () => import('vue-files-preview/es/packages/preview/supports/ppt-preview/index.vue.mjs'),
-  txt: () => import('vue-files-preview/es/packages/preview/supports/txt-preview/index.vue.mjs'),
-  unknown: () => import('vue-files-preview/es/packages/preview/supports/unknown-preview/index.vue.mjs'),
-  video: () => import('vue-files-preview/es/packages/preview/supports/video-preview/index.vue.mjs'),
-  xlsx: () => import('vue-files-preview/es/packages/preview/supports/xlsx-preview/index.vue.mjs'),
-}
-
-const previewTypes = {
-  audio: ['mp3', 'wav', 'wma', 'ogg', 'aac', 'flac'],
-  code: ['html', 'css', 'less', 'scss', 'js', 'json', 'ts', 'vue', 'c', 'cpp', 'java', 'py', 'go', 'php', 'lua', 'rb', 'pl', 'swift', 'vb', 'cs', 'sh', 'rs', 'vim', 'log', 'lock', 'mod', 'mht', 'mhtml', 'xml'],
-  docx: ['docx'],
-  epub: ['epub'],
-  md: ['md'],
-  msg: ['msg'],
-  pdf: ['pdf'],
-  pic: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'ico'],
-  ppt: ['ppt', 'pptx', 'fodp', 'odp', 'otp', 'pot', 'potm', 'potx', 'pps', 'ppsm', 'ppsx', 'pptm'],
-  txt: ['txt'],
-  unknown: ['doc', 'docm', 'dot', 'dotm', 'dotx', 'fodt', 'odt', 'ott', 'rtf', 'djvu', 'xps'],
-  video: ['mp4', 'webm', 'ogg', 'mkv', 'avi', 'mpeg', 'flv', 'mov', 'wmv'],
-  xlsx: ['xlsx', 'xls', 'csv', 'fods', 'ods', 'ots', 'xlsm', 'xlt', 'xltm'],
-}
-
-function previewType(name) {
-  const ext = String(name || '').split('.').pop()?.toLowerCase()
-  return Object.keys(previewTypes).find((type) => previewTypes[type].includes(ext)) || 'unknown'
-}
+const previewPlugins = [
+  imagePlugin(),
+  videoPlugin(),
+  audioPlugin(),
+  textPlugin(),
+  pdfPlugin({ workerSrc: pdfWorkerSrc }),
+  officePlugin({ pdf: { workerSrc: pdfWorkerSrc } }),
+  epubPlugin(),
+  emailPlugin(),
+  fallbackPlugin(),
+]
 
 const route = useRoute()
 const fileUrl = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
+const viewerErrorMessage = ref('')
 
 const fileName = computed(() => {
   const value = route.query.name
@@ -59,7 +48,22 @@ const filePath = computed(() => {
   return Array.isArray(value) ? value[0] || '' : value || ''
 })
 
-const PreviewComponent = computed(() => defineAsyncComponent(previewLoaders[previewType(fileName.value)]))
+const cacheFingerprint = computed(() => {
+  const value = route.query.fingerprint
+  return Array.isArray(value) ? value[0] || '' : value || ''
+})
+
+const ticketAttachmentId = computed(() => {
+  const value = route.query.ticket_attachment_id
+  return Array.isArray(value) ? value[0] || '' : value || ''
+})
+
+const directPreviewUrl = computed(() => {
+  const value = route.query.url
+  return Array.isArray(value) ? value[0] || '' : value || ''
+})
+
+const visibleErrorMessage = computed(() => errorMessage.value || viewerErrorMessage.value)
 
 function buildAbsoluteApiUrl(apiUrl) {
   if (!apiUrl) return ''
@@ -69,14 +73,22 @@ function buildAbsoluteApiUrl(apiUrl) {
 }
 
 async function preparePreview() {
-  if (!filePath.value) {
-    errorMessage.value = '预览参数不完整，请返回网盘页面重新打开文件。'
+  if (directPreviewUrl.value) {
+    viewerErrorMessage.value = ''
+    fileUrl.value = buildAbsoluteApiUrl(directPreviewUrl.value)
+    return
+  }
+  if (!filePath.value && !ticketAttachmentId.value) {
+    errorMessage.value = '预览参数不完整，请返回来源页面重新打开文件。'
     return
   }
   try {
     loading.value = true
     errorMessage.value = ''
-    const res = await api.webdavPreviewCache({ path: filePath.value })
+    viewerErrorMessage.value = ''
+    const res = ticketAttachmentId.value
+      ? await api.previewTicketAttachment({ attachment_id: ticketAttachmentId.value })
+      : await api.webdavPreviewCache({ path: filePath.value, fingerprint: cacheFingerprint.value || undefined })
     const previewUrl = buildAbsoluteApiUrl(res?.data?.preview_url || '')
     if (!previewUrl) {
       errorMessage.value = '预览链接生成失败，请稍后重试。'
@@ -88,6 +100,14 @@ async function preparePreview() {
   } finally {
     loading.value = false
   }
+}
+
+function handlePreviewError(error) {
+  viewerErrorMessage.value = error?.message || '文件预览失败，请下载后查看。'
+}
+
+function handlePreviewUnsupported() {
+  viewerErrorMessage.value = '该文件暂不支持在线预览，请下载后查看。'
 }
 
 function downloadFile() {
@@ -123,16 +143,29 @@ onMounted(() => {
       </button>
     </header>
 
-    <section v-if="fileUrl" class="preview-shell">
-      <component :is="PreviewComponent" :url="fileUrl" :name="fileName" height="100%" overflow="auto" />
+    <section v-if="fileUrl && !visibleErrorMessage" class="preview-shell">
+      <OpenFileViewer
+        :file="fileUrl"
+        :file-name="fileName"
+        width="100%"
+        height="100%"
+        fit="contain"
+        :toolbar="false"
+        theme="light"
+        locale="zh-CN"
+        :plugins="previewPlugins"
+        @load="viewerErrorMessage = ''"
+        @error="handlePreviewError"
+        @unsupported="handlePreviewUnsupported"
+      />
     </section>
     <section v-else class="empty-state">
       <TheIcon
-        :icon="errorMessage ? 'material-symbols:link-off-rounded' : 'line-md:loading-twotone-loop'"
+        :icon="visibleErrorMessage ? 'material-symbols:link-off-rounded' : 'line-md:loading-twotone-loop'"
         :size="42"
       />
-      <h2>{{ errorMessage || '正在缓存文件' }}</h2>
-      <p>{{ errorMessage || '文件准备好后会自动打开预览。' }}</p>
+      <h2>{{ visibleErrorMessage || '正在缓存文件' }}</h2>
+      <p>{{ visibleErrorMessage || '文件准备好后会自动打开预览。' }}</p>
     </section>
   </main>
 </template>
@@ -220,14 +253,11 @@ onMounted(() => {
   padding: 12px;
 }
 
-.preview-shell :deep(.vue-files-preview) {
+.preview-shell :deep(.ofv-root) {
   height: 100% !important;
   min-height: 100%;
+  border: 0;
   overflow: auto !important;
-}
-
-.preview-shell :deep(.docx-preview) {
-  min-height: 100%;
 }
 
 .empty-state {

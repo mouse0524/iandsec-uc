@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
+from urllib.parse import quote, urlsplit
+
+from fastapi import APIRouter, HTTPException, Query, Request
 from tortoise.expressions import Q
 
 from app.log import logger
@@ -7,23 +9,94 @@ from app.controllers.partner import partner_controller
 from app.controllers.system_setting import system_setting_controller
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
-from app.models.admin import PartnerRegistration, User
+from app.models.admin import PartnerInvite, PartnerRegistration, User
 from app.models.enums import PartnerRegisterStatus, RegisterType
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.partner import PartnerRegisterIn, PartnerReviewIn, UserRegisterIn
+from app.schemas.partner import PartnerInviteCreateOut, PartnerRegisterIn, PartnerReviewIn, UserRegisterIn
 
 router = APIRouter()
 
 
-async def _is_cs_or_admin(user_id: int) -> bool:
+async def _get_current_user() -> User | None:
+    user_id = CTX_USER_ID.get()
+    return await User.filter(id=user_id).first()
+
+
+async def _get_user_role_names(user: User | None) -> list[str]:
+    if not user:
+        return []
+    roles = await user.roles
+    return [role.name for role in roles]
+
+
+def _can_manage_all_registers(user: User | None, role_names: list[str]) -> bool:
+    return bool(user and (user.is_superuser or user.username == "admin" or "管理员" in role_names or "客服" in role_names))
+
+
+def _can_review_registration(
+    user: User | None, role_names: list[str], *, register_id: int, invited_registration_ids: list[int]
+) -> bool:
+    if _can_manage_all_registers(user, role_names):
+        return True
+    return "技术" in role_names and int(register_id) in {int(item) for item in invited_registration_ids}
+
+
+def _build_register_list_query(
+    *,
+    user: User,
+    role_names: list[str],
+    invited_registration_ids: list[int],
+    status: PartnerRegisterStatus | None = None,
+    register_type: RegisterType | None = None,
+    reviewed: bool | None = None,
+    keyword: str | None = None,
+) -> Q:
+    q = Q()
+    if not _can_manage_all_registers(user, role_names):
+        q &= Q(id__in=invited_registration_ids)
+    if status:
+        q &= Q(status=status)
+    elif reviewed is True:
+        q &= Q(status__in=[PartnerRegisterStatus.APPROVED, PartnerRegisterStatus.REJECTED])
+    elif reviewed is False:
+        q &= Q(status=PartnerRegisterStatus.PENDING)
+    if register_type:
+        q &= Q(register_type=register_type)
+    if keyword:
+        q &= (
+            Q(company_name__contains=keyword)
+            | Q(contact_name__contains=keyword)
+            | Q(email__contains=keyword)
+            | Q(phone__contains=keyword)
+            | Q(hardware_id__contains=keyword)
+        )
+    return q
+
+
+async def _tech_invited_registration_ids(tech_id: int) -> list[int]:
+    rows = await PartnerInvite.filter(created_by=tech_id).values_list("used_by", flat=True)
+    return [int(item) for item in rows if item]
+
+
+def _build_invite_link(request: Request, code: str) -> str:
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if not origin:
+        referer = (request.headers.get("referer") or "").strip()
+        parsed = urlsplit(referer)
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+    if not origin:
+        origin = str(request.base_url).rstrip("/")
+    return f"{origin}/login?invite_code={quote(code, safe='')}"
+
+
+async def _is_tech(user_id: int) -> bool:
     user = await User.filter(id=user_id).first()
     if not user:
         return False
-    if user.is_superuser:
-        return True
     roles = await user.roles
     role_names = [role.name for role in roles]
-    return "管理员" in role_names or "客服" in role_names
+    return "技术" in role_names
 
 
 def _register_closed_message(register_type: RegisterType) -> str:
@@ -89,6 +162,15 @@ async def user_register(payload: UserRegisterIn):
     return await partner_register(payload)
 
 
+@router.post("/invite/create", summary="创建注册邀请链接", dependencies=[DependAuth])
+async def create_partner_invite(request: Request):
+    user_id = CTX_USER_ID.get()
+    if not await _is_tech(user_id):
+        return Fail(code=403, msg="仅技术可以创建邀请链接")
+    invite = await partner_controller.create_invite(tech_id=user_id)
+    return Success(data=PartnerInviteCreateOut(code=invite.code, link=_build_invite_link(request, invite.code)).model_dump())
+
+
 @router.get("/register/list", summary="注册申请列表", dependencies=[DependAuth])
 async def partner_register_list(
     page: int = Query(1, description="页码"),
@@ -108,26 +190,21 @@ async def partner_register_list(
         register_type,
         reviewed,
     )
-    if not await _is_cs_or_admin(user_id):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    if not user or not (_can_manage_all_registers(user, role_names) or "技术" in role_names):
         return Fail(code=403, msg="您暂无权限查看注册申请列表")
 
-    q = Q()
-    if status:
-        q &= Q(status=status)
-    elif reviewed is True:
-        q &= Q(status__in=[PartnerRegisterStatus.APPROVED, PartnerRegisterStatus.REJECTED])
-    elif reviewed is False:
-        q &= Q(status=PartnerRegisterStatus.PENDING)
-    if register_type:
-        q &= Q(register_type=register_type)
-    if keyword:
-        q &= (
-            Q(company_name__contains=keyword)
-            | Q(contact_name__contains=keyword)
-            | Q(email__contains=keyword)
-            | Q(phone__contains=keyword)
-            | Q(hardware_id__contains=keyword)
-        )
+    invited_registration_ids = await _tech_invited_registration_ids(user.id) if "技术" in role_names else []
+    q = _build_register_list_query(
+        user=user,
+        role_names=role_names,
+        invited_registration_ids=invited_registration_ids,
+        status=status,
+        register_type=register_type,
+        reviewed=reviewed,
+        keyword=keyword,
+    )
 
     query = PartnerRegistration.filter(q)
     total = await query.count()
@@ -146,7 +223,10 @@ async def partner_register_review(payload: PartnerReviewIn):
         payload.id,
         payload.approved,
     )
-    if not await _is_cs_or_admin(user_id):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    invited_registration_ids = await _tech_invited_registration_ids(user.id) if user and "技术" in role_names else []
+    if not _can_review_registration(user, role_names, register_id=payload.id, invited_registration_ids=invited_registration_ids):
         return Fail(code=403, msg="您暂无权限执行审核操作")
 
     if not payload.approved and not (payload.comment or "").strip():

@@ -27,6 +27,8 @@ const props = defineProps({
 
 const attachments = computed(() => props.ticket?.attachments || [])
 const imageAttachments = computed(() => attachments.value.filter((item) => isImageName(item.origin_name || item.file_path || '')))
+const previewableExtensions = new Set(['docx', 'pptx', 'xlsx'])
+const previewingAttachmentId = ref(null)
 const imagePreviewMap = ref({})
 const actionImagePreviewMap = ref({})
 const descriptionImagePreviewVisible = ref(false)
@@ -168,6 +170,32 @@ async function openAttachment(item) {
   link.click()
   link.remove()
   window.URL.revokeObjectURL(url)
+}
+
+function isPreviewableAttachment(item) {
+  const name = String(item?.origin_name || item?.file_path || '')
+  const ext = name.split('.').pop()?.toLowerCase()
+  return previewableExtensions.has(ext)
+}
+
+async function previewAttachment(item) {
+  if (!item?.id) return
+  previewingAttachmentId.value = item.id
+  try {
+    const res = await api.previewTicketAttachment({ attachment_id: item.id })
+    const previewUrl = res?.data?.preview_url || ''
+    if (!previewUrl) {
+      $message.error('预览链接生成失败，请稍后重试')
+      return
+    }
+    const routeUrl = `/public/webdav/preview?${new URLSearchParams({
+      name: item.origin_name || `attachment-${item.id}`,
+      url: previewUrl,
+    }).toString()}`
+    window.open(routeUrl, '_blank', 'noopener,noreferrer')
+  } finally {
+    previewingAttachmentId.value = null
+  }
 }
 
 async function copyImage(item) {
@@ -344,6 +372,16 @@ function getActionIconClass(action) {
           </div>
           <div class="attachment-actions">
             <NButton v-if="isImageName(item.origin_name || item.file_path || '')" size="small" type="info" quaternary @click="copyImage(item)">复制图片</NButton>
+            <NButton
+              v-if="isPreviewableAttachment(item)"
+              size="small"
+              type="info"
+              quaternary
+              :loading="previewingAttachmentId === item.id"
+              @click="previewAttachment(item)"
+            >
+              预览
+            </NButton>
             <NButton size="small" type="primary" quaternary @click="openAttachment(item)">下载</NButton>
           </div>
         </div>

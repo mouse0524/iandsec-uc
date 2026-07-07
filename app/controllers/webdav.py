@@ -130,6 +130,10 @@ class WebDavController:
         return secret
 
     @staticmethod
+    def _get_preview_cache_signature_secret(conf: dict) -> str:
+        return str(conf.get("webdav_signature_secret") or settings.SECRET_KEY).strip()
+
+    @staticmethod
     def _sign(secret: str, code: str, ts: int) -> str:
         msg = f"{code}:{ts}".encode("utf-8")
         return hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
@@ -177,15 +181,15 @@ class WebDavController:
             raise HTTPException(status_code=401, detail="签名校验失败")
 
     async def build_preview_cache_signature(self, *, cache_key: str, filename: str) -> dict[str, int | str]:
-        conf = await self._get_config()
-        secret = self._get_signature_secret(conf)
+        conf = await system_setting_controller.get_full_dict()
+        secret = self._get_preview_cache_signature_secret(conf)
         ts = int(datetime.now(timezone.utc).timestamp())
         sig = self._sign(secret, f"preview-cache:{cache_key}:{filename}", ts)
         return {"ts": ts, "sig": sig}
 
     async def verify_preview_cache_signature(self, *, cache_key: str, filename: str, ts: int, sig: str) -> None:
-        conf = await self._get_config()
-        secret = self._get_signature_secret(conf)
+        conf = await system_setting_controller.get_full_dict()
+        secret = self._get_preview_cache_signature_secret(conf)
         signature_ttl = self._signature_ttl_seconds(conf)
         now_ts = int(datetime.now(timezone.utc).timestamp())
         if abs(now_ts - int(ts)) > signature_ttl:
@@ -673,9 +677,10 @@ class WebDavController:
         query = urlencode({"ts": sign_data["ts"], "sig": sign_data["sig"]})
         return f"/api/v1/public/webdav/preview-cache/{cache_key}/{quote(filename)}?{query}"
 
-    async def cache_preview_file(self, file_path: str) -> dict[str, str]:
+    async def cache_preview_file(self, file_path: str, cache_fingerprint: str | None = None) -> dict[str, str]:
         norm_path = self._normalize_path(file_path)
-        cache_key = hashlib.sha256(norm_path.encode("utf-8")).hexdigest()[:24]
+        cache_identity = norm_path if not cache_fingerprint else f"{norm_path}:{cache_fingerprint}"
+        cache_key = hashlib.sha256(cache_identity.encode("utf-8")).hexdigest()[:24]
         filename = self._safe_preview_filename(norm_path)
         target_dir = os.path.join(self.PREVIEW_CACHE_DIR, cache_key)
         target_path = os.path.join(target_dir, filename)

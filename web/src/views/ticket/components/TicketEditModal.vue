@@ -21,6 +21,10 @@ const uploadLoading = ref(false)
 const challengeRef = ref(null)
 const fileList = ref([])
 const form = ref(defaultForm())
+const attachmentAccept = computed(() => {
+  const items = appStore.ticketAttachmentExtensions || []
+  return items.length ? items.map((item) => `.${String(item).replace(/^\./, '')}`).join(',') : '.zip,.rar,.png,.jpg,.jpeg,.gif,.docx,.pptx,.xlsx'
+})
 const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
 const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
 const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
@@ -253,13 +257,13 @@ function validateChallenge() {
                   list-type="image-card"
                   :custom-request="customUpload"
                   :max="5"
-                  accept=".zip,.rar,.png,.jpg,.jpeg,.gif"
+                  :accept="attachmentAccept"
                   @remove="handleRemove"
                 >
                   <NButton :loading="uploadLoading">上传附件</NButton>
                 </NUpload>
               </div>
-              <div class="upload-tip">支持最多 5 个附件，支持粘贴图片上传。</div>
+              <div class="upload-tip">支持最多 5 个附件，单个最大 50M，支持粘贴图片上传，当前允许类型：{{ attachmentAccept }}。</div>
             </NFormItem>
             <NFormItem v-if="challengeEnabled" label="安全校验">
               <HumanChallenge

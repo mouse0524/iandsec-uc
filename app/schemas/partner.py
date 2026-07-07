@@ -14,6 +14,7 @@ class PartnerRegisterIn(BaseModel):
     hardware_id: str | None = Field(default=None, description="产品硬件ID")
     password: str = Field(..., min_length=6, max_length=32, description="密码")
     email_code: str = Field(..., description="邮箱验证码")
+    invite_code: str = Field(..., min_length=1, description="邀请码")
 
     @field_validator("company_name")
     @classmethod
@@ -34,3 +35,8 @@ class PartnerReviewIn(BaseModel):
     id: int = Field(..., description="申请ID")
     approved: bool = Field(..., description="是否通过")
     comment: Optional[str] = Field(None, description="审核备注")
+
+
+class PartnerInviteCreateOut(BaseModel):
+    code: str = Field(..., description="邀请码")
+    link: str = Field(..., description="邀请链接")

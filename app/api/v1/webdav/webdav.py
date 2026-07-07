@@ -96,9 +96,12 @@ async def list_webdav_download_logs(
     return SuccessExtra(data=rows, total=total, page=page, page_size=page_size)
 
 @router.get("/preview-cache", summary="缓存WebDAV文件用于预览")
-async def cache_webdav_preview_file(path: str = Query(..., description="文件路径")):
+async def cache_webdav_preview_file(
+    path: str = Query(..., description="文件路径"),
+    fingerprint: Optional[str] = Query(None, max_length=256, description="文件指纹"),
+):
     logger.info("[api.webdav.preview_cache] request path={}", path)
-    data = await webdav_controller.cache_preview_file(path)
+    data = await webdav_controller.cache_preview_file(path, cache_fingerprint=fingerprint)
     return Success(data={"preview_url": data["url_path"], "content_type": data["content_type"]})
 
 @router.get("/ops-password", summary="获取服务器运维工具密码")

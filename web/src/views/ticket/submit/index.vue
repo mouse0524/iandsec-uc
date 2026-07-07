@@ -19,7 +19,7 @@ const submitting = ref(false)
 const challengeRef = ref(null)
 const uploadedAttachmentIds = ref([])
 const uploadFileList = ref([])
-const attachmentAccept = ref('.zip,.rar,.png,.jpg,.gif')
+const attachmentAccept = ref('.zip,.rar,.png,.jpg,.jpeg,.gif,.docx,.pptx,.xlsx')
 const projectPhaseOptions = ref([
   { label: '售前', value: '售前' },
   { label: '实施', value: '实施' },
@@ -401,7 +401,7 @@ async function refreshChallenge() {
                   >
                     <NButton class="upload-btn" :loading="uploadLoading">上传附件</NButton>
                   </NUpload>
-                  <span class="upload-tip">支持最多 5 个附件，支持粘贴图片上传，当前允许类型：{{ attachmentAccept }}。</span>
+                  <span class="upload-tip">支持最多 5 个附件，单个最大 50M，支持粘贴图片上传，当前允许类型：{{ attachmentAccept }}。</span>
                 </div>
               </NFormItem>
               <NFormItem v-if="challengeEnabled" label="安全校验" path="captcha_code">

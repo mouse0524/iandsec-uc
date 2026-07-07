@@ -41,7 +41,7 @@ export default defineConfig(({ command, mode }) => {
         : undefined,
     },
     build: {
-      target: 'es2015',
+      target: 'es2020',
       outDir: OUTPUT_DIR || 'dist',
       reportCompressedSize: false, // Disable gzip size report
       chunkSizeWarningLimit: 6144, // Keep lazy Excel preview below warning limit

@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -5,7 +6,7 @@ from tortoise.expressions import Q
 from tortoise.transactions import atomic
 
 from app.log import logger
-from app.models.admin import PartnerRegistration, Role, User
+from app.models.admin import PartnerInvite, PartnerRegistration, Role, User
 from app.models.enums import PartnerLevel, PartnerRegisterStatus, RegisterType
 from app.controllers.dept import dept_controller
 from app.controllers.mail import mail_controller
@@ -16,6 +17,31 @@ from app.utils.password import get_password_hash
 
 
 class PartnerController:
+    @staticmethod
+    def generate_invite_code() -> str:
+        return secrets.token_urlsafe(12)[:16]
+
+    async def create_invite(self, *, tech_id: int) -> PartnerInvite:
+        for _ in range(5):
+            try:
+                return await PartnerInvite.create(code=self.generate_invite_code(), created_by=tech_id)
+            except Exception as exc:
+                if "duplicate" not in str(exc).lower() and "unique" not in str(exc).lower():
+                    raise
+        raise HTTPException(status_code=500, detail="邀请码生成失败，请重试")
+
+    async def _reserve_invite(self, code: str, registration_id: int) -> PartnerInvite:
+        updated = await PartnerInvite.filter(code=code, used_by=None).update(
+            used_by=registration_id,
+            used_at=datetime.now(),
+        )
+        if updated != 1:
+            raise HTTPException(status_code=400, detail="邀请码无效或已使用")
+        invite = await PartnerInvite.filter(code=code, used_by=registration_id).first()
+        if not invite:
+            raise HTTPException(status_code=400, detail="邀请码无效或已使用")
+        return invite
+
     @staticmethod
     async def _check_uniqueness(
         *,
@@ -76,12 +102,14 @@ class PartnerController:
             return False
         return await PartnerRegistration.filter(q & condition).exists()
 
+    @atomic()
     async def register(self, payload: PartnerRegisterIn) -> PartnerRegistration:
         email = payload.email.strip().lower()
         username = email
         phone = payload.phone.strip()
         register_type = payload.register_type
         hardware_id = (payload.hardware_id or "").strip() or None
+        invite_code = payload.invite_code.strip()
 
         if register_type == RegisterType.USER and not hardware_id:
             raise HTTPException(status_code=400, detail="用户注册必须填写产品硬件ID")
@@ -93,7 +121,7 @@ class PartnerController:
         await user_controller.validate_password_policy(payload.password)
 
         password_hash = get_password_hash(payload.password)
-        return await PartnerRegistration.create(
+        register_obj = await PartnerRegistration.create(
             register_type=register_type,
             company_name=payload.company_name,
             contact_name=payload.contact_name,
@@ -102,7 +130,10 @@ class PartnerController:
             username=username,
             hardware_id=hardware_id,
             password_hash=password_hash,
+            invite_code=invite_code,
         )
+        await self._reserve_invite(invite_code, register_obj.id)
+        return register_obj
 
     @atomic()
     async def _review_approve(self, register_obj: PartnerRegistration) -> None:
@@ -129,12 +160,21 @@ class PartnerController:
 
         child_name = (register_obj.company_name or "").strip() or register_obj.contact_name
         child_desc = f"{'渠道商' if register_obj.register_type == RegisterType.CHANNEL else '用户'}注册自动创建"
+        invite = await PartnerInvite.filter(code=register_obj.invite_code, used_by=register_obj.id).first()
+        if not invite:
+            raise HTTPException(status_code=400, detail="邀请码无效或已使用")
+
         child_dept = await dept_controller.get_or_create(
             name=child_name,
             parent_id=parent_dept.id,
             desc=child_desc,
             channel_level=PartnerLevel.UNSIGNED if register_obj.register_type == RegisterType.CHANNEL else None,
         )
+        tech_ids = list(dict.fromkeys([*(child_dept.tech_ids or []), int(invite.created_by)]))
+        if child_dept.tech_ids != tech_ids:
+            child_dept.tech_ids = tech_ids
+            await child_dept.save()
+            await dept_controller.clear_dept_dict_cache()
         logger.info(
             "[partner.review] dept_ready register_id={} dept_id={} dept_name={}",
             register_obj.id,

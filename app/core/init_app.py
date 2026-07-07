@@ -75,6 +75,8 @@ def _ticket_redmine_api_paths() -> list[str]:
 def _ticket_submit_api_paths() -> list[str]:
     return [
         "/api/v1/ticket/upload",
+        "/api/v1/ticket/attachment/download",
+        "/api/v1/ticket/attachment/preview-cache",
         "/api/v1/ticket/create",
         "/api/v1/ticket/list",
         "/api/v1/ticket/export",
@@ -198,7 +200,31 @@ async def init_superuser():
         )
 
 
+def _old_ai_knowledge_menu_filter() -> Q:
+    return Q(name="AI知识库") | Q(path="/skill-know") | Q(component__startswith="/skill-know")
+
+
+async def _delete_old_ai_knowledge_menus() -> None:
+    old_menus = await Menu.filter(_old_ai_knowledge_menu_filter()).all()
+    menus_by_id = {menu.id: menu for menu in old_menus}
+    frontier = set(menus_by_id)
+    while frontier:
+        children = await Menu.filter(parent_id__in=list(frontier)).all()
+        frontier = {menu.id for menu in children if menu.id not in menus_by_id}
+        menus_by_id.update({menu.id: menu for menu in children})
+    if not menus_by_id:
+        return
+
+    menus = list(menus_by_id.values())
+    for role in await Role.all():
+        await role.menus.remove(*menus)
+    await Menu.filter(id__in=list(menus_by_id)).delete()
+    await user_controller.clear_all_permission_cache()
+
+
 async def init_menus():
+    await _delete_old_ai_knowledge_menus()
+
     menus = await Menu.exists()
     if not menus:
         parent_menu = await Menu.create(
@@ -763,8 +789,10 @@ async def init_menus():
             keepalive=False,
             redirect="/wiki/search",
         )
-    elif wiki_parent.name != "企业知识库":
+    else:
         wiki_parent.name = "企业知识库"
+        wiki_parent.redirect = "/wiki/search"
+        wiki_parent.is_hidden = False
         await wiki_parent.save()
     await Menu.filter(
         Q(component__in=["/wiki/pages", "/wiki/learning"]) | Q(path__in=["pages", "learning"], parent_id=wiki_parent.id)
@@ -824,6 +852,7 @@ async def init_menus():
                 redirect="",
                 **child,
             )
+    await user_controller.clear_all_permission_cache()
 
 
 async def init_apis():
@@ -865,6 +894,33 @@ async def _backfill_existing_role_permissions(
         await role_controller.clear_role_dict_cache()
         logger.info("[init_roles] backfilled permissions role={} api_count={}", role_name, len(apis))
     return changed
+
+
+async def _remove_existing_role_permissions(
+    *,
+    role_names: list[str],
+    api_paths: list[str],
+    component_paths: list[str],
+) -> None:
+    roles = await Role.filter(name__in=role_names)
+    if not roles:
+        return
+    apis = await Api.filter(path__in=api_paths)
+    menus = await Menu.filter(Q(component__in=component_paths) | Q(path__in=component_paths))
+    if not apis and not menus:
+        return
+
+    changed = False
+    for role in roles:
+        if apis:
+            await role.apis.remove(*apis)
+            changed = True
+        if menus:
+            await role.menus.remove(*menus)
+            changed = True
+
+    if changed:
+        await user_controller.clear_all_permission_cache()
 
 
 async def init_db():
@@ -916,7 +972,26 @@ async def ensure_security_columns():
             ("ALTER TABLE `project` ADD COLUMN `end_time` DATETIME NULL", "project.end_time"),
             ("ALTER TABLE `project` ADD COLUMN `maintenance_time` DATETIME NULL", "project.maintenance_time"),
             ("ALTER TABLE `dept` ADD COLUMN `channel_level` VARCHAR(20) NULL", "dept.channel_level"),
+            ("ALTER TABLE `dept` ADD COLUMN `tech_ids` JSON NULL", "dept.tech_ids"),
             ("ALTER TABLE `user` ADD COLUMN `channel_level` VARCHAR(20) NULL", "user.channel_level"),
+            ("ALTER TABLE `partner_registration` ADD COLUMN `invite_code` VARCHAR(32) NULL", "partner_registration.invite_code"),
+            (
+                """
+                CREATE TABLE IF NOT EXISTS `partner_invite` (
+                    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                    `code` VARCHAR(32) NOT NULL UNIQUE,
+                    `created_by` BIGINT NOT NULL,
+                    `used_by` BIGINT NULL,
+                    `used_at` DATETIME(6) NULL,
+                    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                    KEY `idx_partner_invite_code` (`code`),
+                    KEY `idx_partner_invite_created_by` (`created_by`),
+                    KEY `idx_partner_invite_used_by` (`used_by`)
+                )
+                """,
+                "partner_invite.table",
+            ),
             (
                 "UPDATE `project_activity` SET `title` = LEFT(`content`, 200) "
                 "WHERE `activity_type` = '备注' AND `content` IS NOT NULL AND TRIM(`content`) <> '' "
@@ -1019,6 +1094,23 @@ async def init_roles():
                 role_name="技术",
                 api_paths=_ticket_redmine_api_paths(),
             )
+            for role_name in ["用户", "渠道商", "技术"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=[
+                        "/api/v1/ticket/attachment/download",
+                        "/api/v1/ticket/attachment/preview-cache",
+                    ],
+                )
+            await _backfill_existing_role_permissions(
+                role_name="技术",
+                api_paths=["/api/v1/partner/invite/create"],
+                component_paths=["/partner", "/partner/review"],
+            )
+            await _backfill_existing_role_permissions(
+                role_name="技术",
+                api_paths=["/api/v1/partner/register/list", "/api/v1/partner/register/review"],
+            )
             for role_name in ["用户", "渠道商"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
@@ -1034,22 +1126,16 @@ async def init_roles():
                     api_paths=_project_api_paths(),
                     component_paths=["/project", "/project/list", "/project/activity"],
                 )
-            for role_name in ["用户", "渠道商", "客服", "技术", "管理员"]:
+            for role_name in ["用户", "渠道商", "客服", "技术"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=_wiki_read_api_paths(),
                     component_paths=["/wiki", "/wiki/search", "/wiki/view"],
                 )
-            for role_name in ["客服", "技术", "管理员"]:
-                await _backfill_existing_role_permissions(
-                    role_name=role_name,
-                    api_paths=_wiki_edit_api_paths(),
-                    component_paths=["/wiki/sources"],
-                )
-            await _backfill_existing_role_permissions(
-                role_name="管理员",
-                api_paths=_wiki_admin_api_paths(),
-                component_paths=["/wiki/records"],
+            await _remove_existing_role_permissions(
+                role_names=["用户", "渠道商", "客服", "技术"],
+                api_paths=[*_wiki_edit_api_paths(), *_wiki_admin_api_paths()],
+                component_paths=["/wiki/sources", "/wiki/records"],
             )
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
@@ -1080,6 +1166,7 @@ async def init_roles():
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
     )
+    partner_invite_apis = await Api.filter(path__in=["/api/v1/partner/invite/create"])
     settings_apis = await Api.filter(
         path__in=[
             "/api/v1/settings/get",
@@ -1168,11 +1255,12 @@ async def init_roles():
 
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)
+    await role_map["技术"].apis.add(*partner_invite_apis)
+    await role_map["技术"].apis.add(*partner_review_apis)
     await role_map["技术"].apis.add(*project_apis)
-    await role_map["技术"].apis.add(*wiki_edit_apis)
     await role_map["技术"].menus.add(*tech_menus)
+    await role_map["技术"].menus.add(*partner_review_menus)
     await role_map["技术"].menus.add(*project_menus)
-    await role_map["技术"].menus.add(*wiki_edit_menus)
 
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
@@ -1180,11 +1268,9 @@ async def init_roles():
         *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/export", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
     )
     await role_map["客服"].apis.add(*project_apis)
-    await role_map["客服"].apis.add(*wiki_edit_apis)
     await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)
     await role_map["客服"].menus.add(*project_menus)
-    await role_map["客服"].menus.add(*wiki_edit_menus)
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)

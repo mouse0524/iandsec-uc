@@ -19,13 +19,14 @@ from app.controllers.user import user_controller
 from app.core.redis_client import execute_redis
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
-from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
+from app.models.admin import Dept, DeptClosure, Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
 from app.services.human_challenge import human_challenge_service
 from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
+from app.utils.company_name import company_name_search_q
 from app.utils.http_headers import build_download_content_disposition
 from app.utils.request import get_client_ip
 
@@ -46,18 +47,37 @@ async def _get_user_role_names(user: User) -> list[str]:
     return [role.name for role in roles]
 
 
-def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) -> bool:
-    if user.is_superuser or "管理员" in role_names or "客服" in role_names:
+async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
+    # ponytail: department table scan; split to a relation table if department count makes this hot.
+    depts = await Dept.filter(is_deleted=False).all()
+    dept_ids = [dept.id for dept in depts if int(tech_id) in {int(item or 0) for item in (dept.tech_ids or [])}]
+    if not dept_ids:
+        return []
+    descendant_ids = await DeptClosure.filter(ancestor__in=dept_ids).values_list("descendant", flat=True)
+    visible_dept_ids = set(dept_ids) | {int(item) for item in descendant_ids}
+    return [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
+
+
+def _can_view_all_tickets(user: User, role_names: list[str]) -> bool:
+    return bool(user.is_superuser or getattr(user, "username", "") == "admin" or {"管理员", "客服"}.intersection(role_names))
+
+
+async def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) -> bool:
+    if _can_view_all_tickets(user, role_names):
         return True
     if "技术" in role_names:
-        return ticket.submitter_id == user.id or ticket.tech_id == user.id
+        if ticket.submitter_id == user.id or ticket.tech_id == user.id:
+            return True
+        return ticket.submitter_id in await _tech_related_submitter_ids(user.id)
     return ticket.submitter_id == user.id
 
 
-def _build_ticket_search(
+def _build_ticket_search_sync(
     *,
     user: User,
     role_names: list[str],
+    related_submitter_ids: list[int] | None = None,
+    scope: str | None = None,
     status: TicketStatus | None = None,
     exclude_status: TicketStatus | None = None,
     project_phase: str | None = None,
@@ -88,7 +108,7 @@ def _build_ticket_search(
     if root_cause:
         q &= Q(root_cause=root_cause)
     if company_name:
-        q &= Q(company_name__contains=company_name)
+        q &= company_name_search_q(company_name)
     if title:
         q &= Q(title__contains=title)
     if created_start:
@@ -100,12 +120,23 @@ def _build_ticket_search(
     if finished_end:
         q &= Q(finished_at__lt=finished_end)
 
-    if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
-        if "技术" in role_names:
-            q &= Q(submitter_id=user.id) | Q(tech_id=user.id)
-        else:
-            q &= Q(submitter_id=user.id)
+    if _can_view_all_tickets(user, role_names):
+        return q
+    if "技术" in role_names:
+        tech_q = Q(submitter_id=user.id) | Q(submitter_id__in=related_submitter_ids or [])
+        if scope != "mine":
+            tech_q |= Q(tech_id=user.id)
+        q &= tech_q
+    else:
+        q &= Q(submitter_id=user.id)
     return q
+
+
+async def _build_ticket_search(**kwargs) -> Q:
+    user = kwargs["user"]
+    role_names = kwargs["role_names"]
+    related_submitter_ids = await _tech_related_submitter_ids(user.id) if "技术" in role_names else []
+    return _build_ticket_search_sync(**kwargs, related_submitter_ids=related_submitter_ids)
 
 
 def _clean_export_text(value) -> str:
@@ -242,6 +273,7 @@ async def list_ticket(
     created_end: datetime | None = Query(None, description="??????"),
     finished_start: datetime | None = Query(None, description="??????"),
     finished_end: datetime | None = Query(None, description="??????"),
+    scope: str | None = Query(None, description="Scope"),
 ):
     start_at = perf_counter()
     user = await _get_current_user()
@@ -249,7 +281,7 @@ async def list_ticket(
 
     filter_start_at = perf_counter()
     role_names = await _get_user_role_names(user)
-    q = _build_ticket_search(
+    q = await _build_ticket_search(
         user=user,
         role_names=role_names,
         status=status,
@@ -265,11 +297,12 @@ async def list_ticket(
         created_end=created_end,
         finished_start=finished_start,
         finished_end=finished_end,
+        scope=scope,
     )
     filter_cost_ms = int((perf_counter() - filter_start_at) * 1000)
 
     query_start_at = perf_counter()
-    summary_q = _build_ticket_search(
+    summary_q = await _build_ticket_search(
         user=user,
         role_names=role_names,
         status=None,
@@ -285,6 +318,7 @@ async def list_ticket(
         created_end=created_end,
         finished_start=finished_start,
         finished_end=finished_end,
+        scope=scope,
     )
     (total, rows), status_summary = await asyncio.gather(
         ticket_controller.list_tickets(page=page, page_size=page_size, search=q),
@@ -321,10 +355,11 @@ async def export_tickets(
     created_end: datetime | None = Query(None, description="Created end time"),
     finished_start: datetime | None = Query(None, description="Finished start time"),
     finished_end: datetime | None = Query(None, description="Finished end time"),
+    scope: str | None = Query(None, description="Scope"),
 ):
     user = await _get_current_user()
     role_names = await _get_user_role_names(user)
-    q = _build_ticket_search(
+    q = await _build_ticket_search(
         user=user,
         role_names=role_names,
         status=status,
@@ -339,6 +374,7 @@ async def export_tickets(
         created_end=created_end,
         finished_start=finished_start,
         finished_end=finished_end,
+        scope=scope,
     )
     total = await Ticket.filter(q).count()
     if total > TICKET_EXPORT_MAX_ROWS:
@@ -513,7 +549,7 @@ async def get_ticket(ticket_id: int = Query(..., description="工单ID")):
     perm_start_at = perf_counter()
     role_names = await _get_user_role_names(user)
     ticket = await Ticket.get(id=ticket_id)
-    if not _can_access_ticket(ticket, user, role_names):
+    if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="您暂无权限查看该工单")
     perm_cost_ms = int((perf_counter() - perm_start_at) * 1000)
 
@@ -542,6 +578,9 @@ async def review_ticket(payload: TicketReviewIn):
     role_names = await _get_user_role_names(user)
     if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
         return Fail(code=403, msg="仅客服或管理员可执行审核操作")
+    current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
+    if not await _can_access_ticket(current_ticket, user, role_names):
+        return Fail(code=403, msg="暂无权限操作该工单")
 
     ticket = await ticket_controller.set_customer_service_review(
         ticket_id=payload.ticket_id,
@@ -566,6 +605,9 @@ async def tech_action_ticket(payload: TicketTechActionIn):
     role_names = await _get_user_role_names(user)
     if not user.is_superuser and "管理员" not in role_names and "技术" not in role_names:
         return Fail(code=403, msg="仅技术或管理员可处理工单")
+    current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
+    if not await _can_access_ticket(current_ticket, user, role_names):
+        return Fail(code=403, msg="暂无权限操作该工单")
 
     ticket = await ticket_controller.set_tech_action(
         ticket_id=payload.ticket_id,
@@ -596,8 +638,10 @@ async def assign_ticket_tech(payload: TicketAssignTechIn):
     is_tech = "技术" in role_names
     if not (is_admin or is_customer_service or is_tech):
         return Fail(code=403, msg="仅客服、技术或管理员可改派技术处理人")
+    current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
+    if not await _can_access_ticket(current_ticket, user, role_names):
+        return Fail(code=403, msg="暂无权限操作该工单")
     if is_tech and not (is_admin or is_customer_service):
-        current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
         if current_ticket.tech_id != user.id:
             return Fail(code=403, msg="技术只能改派自己当前处理的工单")
 
@@ -616,6 +660,14 @@ async def download_ticket_attachment(attachment_id: int = Query(..., description
     role_names = await _get_user_role_names(user)
     data = await ticket_controller.get_attachment_download(attachment_id=attachment_id, user=user, role_names=role_names)
     return FileResponse(data["abs_path"], media_type=data["media_type"], filename=None, headers=data["headers"])
+
+
+@router.get("/attachment/preview-cache", summary="缓存工单附件用于预览", dependencies=[DependAuth])
+async def cache_ticket_attachment_preview(attachment_id: int = Query(..., description="附件ID")):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    data = await ticket_controller.cache_attachment_preview(attachment_id=attachment_id, user=user, role_names=role_names)
+    return Success(data=data)
 
 
 @router.post("/resubmit", summary="重提工单", dependencies=[DependAuth])
@@ -753,7 +805,7 @@ async def ticket_actions(ticket_id: int = Query(..., description="工单ID")):
     user = await _get_current_user()
     role_names = await _get_user_role_names(user)
     ticket = await Ticket.get(id=ticket_id)
-    if not _can_access_ticket(ticket, user, role_names):
+    if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="您暂无权限查看该工单")
     logs = await TicketActionLog.filter(ticket_id=ticket_id).order_by("id")
     data = [await item.to_dict() for item in logs]
@@ -767,7 +819,7 @@ async def push_ticket_to_redmine(payload: TicketRedmineSyncIn):
     if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
         return Fail(code=403, msg="仅技术或管理员可同步 Redmine")
     ticket = await ticket_controller.get_ticket(payload.ticket_id)
-    if not _can_access_ticket(ticket, user, role_names):
+    if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="暂无权限操作该工单")
     data = await redmine_sync_service.push_ticket(
         ticket,
@@ -790,7 +842,7 @@ async def pull_ticket_from_redmine(payload: TicketRedmineSyncIn):
     if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
         return Fail(code=403, msg="仅技术或管理员可拉取 Redmine 状态")
     ticket = await ticket_controller.get_ticket(payload.ticket_id)
-    if not _can_access_ticket(ticket, user, role_names):
+    if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="暂无权限操作该工单")
     data = await redmine_sync_service.pull_ticket(ticket, operator_id=user.id)
     return Success(msg="Redmine 状态已更新", data=data)

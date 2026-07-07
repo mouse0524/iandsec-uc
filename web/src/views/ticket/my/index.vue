@@ -96,7 +96,7 @@ function handleTableDataChange(rows) {
 }
 
 async function getMyTicketList(params = {}) {
-  const query = { ...(params || {}) }
+  const query = { ...(params || {}), scope: 'mine' }
   if (!query.status) {
     query.exclude_status = 'done'
   }
@@ -130,7 +130,7 @@ function formatExportTimestamp() {
 }
 
 async function exportTicketList() {
-  const res = await api.exportTickets({ ...queryItems.value })
+  const res = await api.exportTickets({ ...queryItems.value, scope: 'mine' })
   const blob =
     res instanceof Blob
       ? res

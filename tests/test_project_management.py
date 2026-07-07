@@ -8,8 +8,9 @@ from app.controllers import project as project_module
 from app.controllers.project import project_controller
 from app.core.init_app import _project_api_paths
 from app.models.enums import PartnerLevel
-from app.schemas.depts import DeptCreate
+from app.schemas.depts import DeptCreate, DeptUpdate
 from app.schemas.partner import PartnerRegisterIn
+from app.utils.company_name import company_name_search_terms
 
 
 @pytest.fixture
@@ -19,6 +20,11 @@ def anyio_backend():
 
 def test_project_activity_delete_api_is_in_permission_seed():
     assert "/api/v1/project/activity/delete" in _project_api_paths()
+
+
+def test_company_name_search_terms_cover_project_name_variants():
+    assert "广东太力科技" in company_name_search_terms("广东太力科技股份有限公司")
+    assert "科瑞石油" in company_name_search_terms("山东科瑞石油技术有限公司")
 
 
 @pytest.mark.anyio
@@ -104,8 +110,17 @@ async def test_project_row_counts_linked_tickets_and_activities(monkeypatch):
 
     class FakeTicket:
         @staticmethod
-        def filter(**kwargs):
-            assert kwargs.get("company_name") == "项目A"
+        def filter(*args, **kwargs):
+            filters = []
+
+            def collect(node):
+                filters.append(node.filters)
+                for child in node.children:
+                    collect(child)
+
+            for query in args:
+                collect(query)
+            assert {"company_name__contains": "项目A"} in filters
             if kwargs.get("issue_type") == "现网问题":
                 return CountQuery(2)
             if kwargs.get("issue_type") == "现网需求":
@@ -282,6 +297,7 @@ def test_partner_register_company_name_must_be_full_company_name():
         "phone": "13800000000",
         "password": "Password123",
         "email_code": "123456",
+        "invite_code": "INVITE123",
     }
 
     with pytest.raises(ValidationError):
@@ -295,6 +311,12 @@ def test_dept_accepts_channel_level():
     payload = DeptCreate(name="安得科技有限公司", channel_level=PartnerLevel.GOLD)
 
     assert payload.channel_level == PartnerLevel.GOLD
+
+
+def test_dept_update_treats_empty_parent_as_root():
+    payload = DeptUpdate(id=1, name="安得科技有限公司", parent_id=None)
+
+    assert payload.parent_id == 0
 
 
 @pytest.mark.anyio

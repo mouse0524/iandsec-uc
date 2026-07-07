@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from mimetypes import guess_type
@@ -13,7 +15,8 @@ from app.log import logger
 from app.controllers.mail import mail_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
-from app.models.admin import Ticket, TicketActionLog, TicketAttachment, User
+from app.controllers.webdav import webdav_controller
+from app.models.admin import Dept, DeptClosure, Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.settings import settings
 from app.utils.file_signature import detect_file_type, normalize_ext
@@ -182,6 +185,17 @@ class TicketController:
                 owner_ids,
             )
         return bound_count
+
+    @staticmethod
+    async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
+        # ponytail: department table scan; split to a relation table if department count makes this hot.
+        depts = await Dept.filter(is_deleted=False).all()
+        dept_ids = [dept.id for dept in depts if int(tech_id) in {int(item or 0) for item in (dept.tech_ids or [])}]
+        if not dept_ids:
+            return []
+        descendant_ids = await DeptClosure.filter(ancestor__in=dept_ids).values_list("descendant", flat=True)
+        visible_dept_ids = set(dept_ids) | {int(item) for item in descendant_ids}
+        return [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
 
     async def create_ticket(self, *, submitter_id: int, payload: dict, notify_pending_review: bool = True) -> Ticket:
         logger.info(
@@ -825,7 +839,7 @@ class TicketController:
                 pass
             raise HTTPException(status_code=500, detail=f"保存文件失败: {exc}")
 
-        detected_ext = detect_file_type(head)
+        detected_ext = detect_file_type(head, filename, abs_path)
         if not detected_ext:
             raise HTTPException(status_code=400, detail="无法识别文件magic头，请上传受支持的标准文件")
         if detected_ext != ext:
@@ -923,9 +937,10 @@ class TicketController:
         if not ticket:
             raise HTTPException(status_code=404, detail="所属工单不存在")
 
-        if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
+        if not user.is_superuser and user.username != "admin" and not {"管理员", "客服"}.intersection(role_names):
             if "技术" in role_names:
-                if ticket.submitter_id != user.id and ticket.tech_id != user.id:
+                related_submitter_ids = await self._tech_related_submitter_ids(user.id)
+                if ticket.submitter_id != user.id and ticket.tech_id != user.id and ticket.submitter_id not in related_submitter_ids:
                     raise HTTPException(status_code=403, detail="无权限下载该附件")
             elif ticket.submitter_id != user.id:
                 raise HTTPException(status_code=403, detail="无权限下载该附件")
@@ -946,6 +961,30 @@ class TicketController:
             "filename": attachment.origin_name or os.path.basename(attachment.file_path),
             "media_type": attachment.mime_type or "application/octet-stream",
             "headers": {"Content-Disposition": build_download_content_disposition(attachment.origin_name or "download")},
+        }
+
+    async def cache_attachment_preview(self, *, attachment_id: int, user: User, role_names: list[str]) -> dict:
+        data = await self.get_attachment_download(attachment_id=attachment_id, user=user, role_names=role_names)
+        abs_path = data["abs_path"]
+        stat = os.stat(abs_path)
+        cache_key = hashlib.sha256(f"ticket:{abs_path}:{stat.st_mtime_ns}:{stat.st_size}".encode("utf-8")).hexdigest()[:24]
+        filename = webdav_controller._safe_preview_filename(data["filename"])
+        target_dir = os.path.join(webdav_controller.PREVIEW_CACHE_DIR, cache_key)
+        target_path = os.path.join(target_dir, filename)
+
+        if not os.path.exists(target_path) or os.path.getsize(target_path) <= 0:
+            os.makedirs(target_dir, exist_ok=True)
+            temp_path = f"{target_path}.tmp"
+            try:
+                shutil.copyfile(abs_path, temp_path)
+                os.replace(temp_path, target_path)
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        return {
+            "preview_url": await webdav_controller._build_preview_cache_url(cache_key, filename),
+            "content_type": data["media_type"],
         }
 
 

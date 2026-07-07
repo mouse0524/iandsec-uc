@@ -100,13 +100,7 @@ async def _role_names(user: User) -> list[str]:
 
 
 async def _require_wiki_editor() -> User:
-    user = await _current_user()
-    if user.is_superuser:
-        return user
-    roles = set(await _role_names(user))
-    if roles.intersection({"管理员", "客服", "技术"}):
-        return user
-    raise HTTPException(status_code=403, detail="Only admin, customer service, or technical roles can edit wiki")
+    return await _require_wiki_admin()
 
 
 async def _require_wiki_admin() -> User:

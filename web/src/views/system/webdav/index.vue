@@ -15,6 +15,7 @@ const loading = ref(false)
 const fileTable = ref(null)
 const creatingSharePath = ref('')
 const downloadingPath = ref('')
+const previewingPath = ref('')
 const clearingCache = ref(false)
 const userStore = useUserStore()
 const isCreatingShare = computed(() => !!creatingSharePath.value)
@@ -80,6 +81,7 @@ const fileColumns = [
         {
           class: 'file-name-button file',
           type: 'button',
+          disabled: previewingPath.value === row.path,
           onClick: () => previewFile(row),
         },
         [h('span', { class: 'file-icon' }, '📄'), h('span', { class: 'file-title' }, row.name)]
@@ -219,13 +221,31 @@ function buildAbsoluteApiUrl(apiUrl) {
   return `${window.location.origin}${path}`
 }
 
-function previewFile(row) {
+function webdavPreviewFingerprint(row) {
+  return `${row?.size || 0}:${row?.mod_time || ''}`
+}
+
+async function previewFile(row) {
   if (!row?.path) return
-  const routeUrl = `/webdav/preview?${new URLSearchParams({
-    name: row.name || '',
-    path: row.path || '',
-  }).toString()}`
-  window.open(routeUrl, '_blank', 'noopener,noreferrer')
+  try {
+    previewingPath.value = row.path
+    const res = await api.webdavPreviewCache({
+      path: row.path,
+      fingerprint: webdavPreviewFingerprint(row),
+    })
+    const previewUrl = res?.data?.preview_url || ''
+    if (!previewUrl) {
+      $message.error('预览链接生成失败，请稍后重试')
+      return
+    }
+    const routeUrl = `/public/webdav/preview?${new URLSearchParams({
+      name: row.name || '',
+      url: previewUrl,
+    }).toString()}`
+    window.open(routeUrl, '_blank', 'noopener,noreferrer')
+  } finally {
+    previewingPath.value = ''
+  }
 }
 
 async function downloadFile(row) {

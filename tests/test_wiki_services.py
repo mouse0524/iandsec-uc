@@ -2,9 +2,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 from openpyxl import Workbook
 from PIL import Image
 
+from app.api.v1.wiki import wiki as wiki_module
 from app.services.wiki.markdown_converter import _save_docling_images, convert_to_markdown
 from app.services.wiki import learning_service as learning_module
 from app.services.wiki import import_service as import_module
@@ -14,7 +16,7 @@ from app.services.wiki.learning_service import wiki_learning_service
 from app.services.wiki.search_service import search_terms
 from app.services.wiki.wiki_builder import content_hash, normalize_page_path, slugify, wiki_builder
 from app.api.v1.wiki.wiki import _message_preview, _safe_child, _sse
-from app.core.init_app import _wiki_edit_api_paths
+from app.core.init_app import _old_ai_knowledge_menu_filter, _wiki_edit_api_paths, _wiki_read_api_paths
 
 
 def test_wiki_text_and_csv_conversion(tmp_path: Path):
@@ -265,6 +267,44 @@ def test_wiki_edit_permissions_include_chunk_upload_endpoints():
     assert "/api/v1/wiki/source/upload/init" in paths
     assert "/api/v1/wiki/source/upload/chunk" in paths
     assert "/api/v1/wiki/source/upload/complete" in paths
+
+
+@pytest.mark.anyio
+async def test_wiki_source_editor_requires_admin(monkeypatch):
+    user = type("User", (), {"is_superuser": False})()
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(_user):
+        return ["技术"]
+
+    monkeypatch.setattr(wiki_module, "_current_user", fake_current_user)
+    monkeypatch.setattr(wiki_module, "_role_names", fake_role_names)
+
+    with pytest.raises(HTTPException):
+        await wiki_module._require_wiki_editor()
+
+
+def test_wiki_read_permissions_include_view_source_endpoints():
+    paths = set(_wiki_read_api_paths())
+
+    assert "/api/v1/wiki/source/list" in paths
+    assert "/api/v1/wiki/source/markdown" in paths
+
+
+def test_old_ai_knowledge_menu_cleanup_targets_legacy_menu():
+    def filters(q):
+        data = dict(q.filters)
+        for child in q.children:
+            data.update(filters(child))
+        return data
+
+    data = filters(_old_ai_knowledge_menu_filter())
+
+    assert data["name"] == "AI知识库"
+    assert data["path"] == "/skill-know"
+    assert data["component__startswith"] == "/skill-know"
 
 
 def test_wiki_query_archive_markdown_contains_citations():

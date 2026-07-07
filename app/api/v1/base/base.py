@@ -20,6 +20,7 @@ from app.models.admin import (
     Api,
     AuditLog,
     Menu,
+    PartnerInvite,
     PartnerRegistration,
     Role,
     TerminalAuthReport,
@@ -60,6 +61,9 @@ PUBLIC_CONFIG_KEYS = {
     "password_required_categories",
     "password_min_category_count",
 }
+REGISTER_EMAIL_CODE_SENT_MSG = "如果该邮箱可用于注册，验证码已发送，请查收邮箱"
+RESET_PASSWORD_CODE_SENT_MSG = "如果该邮箱已注册，重置验证码已发送，请查收邮箱"
+RESET_PASSWORD_CODE_INVALID_MSG = "邮箱验证码错误或已失效"
 
 
 def _format_lock_message(ttl_seconds: int) -> str:
@@ -219,13 +223,6 @@ async def send_email_code(payload: SendVerifyCodeIn, request: Request):
 
     email = payload.email.strip().lower()
     logger.info("[api.send_email_code] start email={}", email)
-    if await User.filter(email=email).exists():
-        logger.warning("[api.send_email_code] email_exists email={}", email)
-        return Fail(code=400, msg="该邮箱已完成注册，可直接登录")
-
-    if await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING, email=email).exists():
-        return Fail(code=400, msg="该邮箱已有待审核申请，请耐心等待审核结果")
-
     valid, challenge_error = await human_challenge_service.verify(
         captcha_id=payload.captcha_id,
         captcha_code=payload.captcha_code,
@@ -238,9 +235,20 @@ async def send_email_code(payload: SendVerifyCodeIn, request: Request):
         logger.warning("[api.send_email_code] captcha_invalid email={} captcha_id={}", email, payload.captcha_id)
         return Fail(code=400, msg=challenge_error)
 
+    invite_code = (payload.invite_code or "").strip()
+    if not invite_code or not await PartnerInvite.filter(code=invite_code, used_by=None).exists():
+        return Fail(code=400, msg="邀请码无效或已使用")
+
+    if await User.filter(email=email).exists():
+        logger.warning("[api.send_email_code] email_exists email={}", email)
+        return Success(msg=REGISTER_EMAIL_CODE_SENT_MSG)
+
+    if await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING, email=email).exists():
+        return Success(msg=REGISTER_EMAIL_CODE_SENT_MSG)
+
     await mail_controller.send_partner_verify_code(email)
     logger.info("[api.send_email_code] success email={}", email)
-    return Success(msg="验证码已发送，请查收邮箱")
+    return Success(msg=REGISTER_EMAIL_CODE_SENT_MSG)
 
 
 @router.post("/send_reset_password_code", summary="发送找回密码验证码")
@@ -258,10 +266,10 @@ async def send_reset_password_code(payload: SendResetPasswordCodeIn, request: Re
 
     user = await User.filter(email=email).first()
     if not user:
-        return Fail(code=404, msg="该邮箱未注册")
+        return Success(msg=RESET_PASSWORD_CODE_SENT_MSG)
 
     await mail_controller.send_reset_password_code(email)
-    return Success(msg="验证码已发送，请查收邮箱")
+    return Success(msg=RESET_PASSWORD_CODE_SENT_MSG)
 
 
 @router.post("/reset_password_by_email", summary="邮箱验证码重置密码")
@@ -269,11 +277,11 @@ async def reset_password_by_email(payload: ResetPasswordByEmailIn):
     email = payload.email.strip().lower()
     user = await User.filter(email=email).first()
     if not user:
-        return Fail(code=404, msg="该邮箱未注册")
+        return Fail(code=400, msg=RESET_PASSWORD_CODE_INVALID_MSG)
 
     valid = await mail_controller.verify_email_code(email, payload.email_code)
     if not valid:
-        return Fail(code=400, msg="邮箱验证码错误或已失效")
+        return Fail(code=400, msg=RESET_PASSWORD_CODE_INVALID_MSG)
 
     await user_controller.validate_password_policy(payload.new_password)
     user.password = get_password_hash(payload.new_password)

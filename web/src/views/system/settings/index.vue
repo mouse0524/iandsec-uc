@@ -56,7 +56,7 @@ const form = ref({
   allow_channel_register: true,
   allow_user_register: true,
   customer_service_auto_approve_register: false,
-  ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'gif'],
+  ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'jpeg', 'gif', 'docx', 'pptx', 'xlsx'],
   ticket_project_phases: ['售前', '实施', '售后'],
   ticket_cs_review_project_phases: ['实施', '售后'],
   ticket_issue_types: ['现网问题', '现网需求', '产品建议'],

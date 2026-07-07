@@ -64,7 +64,7 @@ class SystemSettingController:
             "customer_service_auto_approve_register": False,
         },
         "ticket": {
-            "ticket_attachment_extensions": ["zip", "rar", "png", "jpg", "gif"],
+            "ticket_attachment_extensions": ["zip", "rar", "png", "jpg", "jpeg", "gif", "docx", "pptx", "xlsx"],
             "ticket_project_phases": ["售前", "实施", "售后"],
             "ticket_cs_review_project_phases": ["实施", "售后"],
             "ticket_issue_types": ["现网问题", "现网需求", "产品建议"],
@@ -271,7 +271,9 @@ class SystemSettingController:
             "allow_channel_register": allow_channel_register,
             "allow_user_register": allow_user_register,
             "customer_service_auto_approve_register": site.get("customer_service_auto_approve_register", False),
-            "ticket_attachment_extensions": ticket.get("ticket_attachment_extensions") or [],
+            "ticket_attachment_extensions": list(
+                dict.fromkeys((ticket.get("ticket_attachment_extensions") or []) + ["docx", "pptx", "xlsx"])
+            ),
             "ticket_project_phases": ticket.get("ticket_project_phases") or [],
             "ticket_cs_review_project_phases": ticket.get("ticket_cs_review_project_phases") or [],
             "ticket_issue_types": ticket.get("ticket_issue_types") or [],

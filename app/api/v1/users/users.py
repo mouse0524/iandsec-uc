@@ -22,6 +22,7 @@ async def list_user(
     email: str = Query("", description="邮箱地址"),
     phone: str = Query("", description="手机号"),
     dept_id: int = Query(None, description="部门ID"),
+    role_name: str = Query("", description="角色名称"),
 ):
     q = Q()
     if username:
@@ -34,6 +35,8 @@ async def list_user(
         q &= Q(phone__contains=phone)
     if dept_id is not None:
         q &= Q(dept_id=dept_id)
+    if role_name:
+        q &= Q(roles__name=role_name)
     total, user_objs = await user_controller.list(page=page, page_size=page_size, search=q)
     data = [await obj.to_dict(m2m=True, exclude_fields=["password"]) for obj in user_objs]
     for item in data:

@@ -9,6 +9,7 @@ class SendVerifyCodeIn(BaseModel):
     captcha_code: str | None = Field(default=None, description="图形验证码")
     turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
     register_type: RegisterType | None = Field(default=None, description="注册类型")
+    invite_code: str | None = Field(default=None, description="邀请码")
 
 
 class SendResetPasswordCodeIn(BaseModel):

@@ -17,6 +17,7 @@ from app.controllers.user import user_controller
 from app.log import logger
 from app.models.admin import Dept, Project, ProjectActivity, ProjectAttachment, Ticket, User
 from app.settings import settings
+from app.utils.company_name import company_name_search_q
 from app.utils.file_signature import detect_file_type, normalize_ext
 from app.utils.http_headers import build_download_content_disposition
 
@@ -520,8 +521,8 @@ class ProjectController:
 
     async def _project_row(self, project: Project) -> dict:
         data = await project.to_dict()
-        issue_count = await Ticket.filter(company_name=project.project_name, issue_type="现网问题").count()
-        requirement_count = await Ticket.filter(company_name=project.project_name, issue_type="现网需求").count()
+        issue_count = await Ticket.filter(company_name_search_q(project.project_name), issue_type="现网问题").count()
+        requirement_count = await Ticket.filter(company_name_search_q(project.project_name), issue_type="现网需求").count()
         activity_count = await ProjectActivity.filter(project_id=project.id).count()
         attachment_rows = await ProjectAttachment.filter(project_id=project.id).order_by("id")
         attachments = [await item.to_dict() for item in attachment_rows]
@@ -684,7 +685,7 @@ class ProjectController:
                 pass
             raise HTTPException(status_code=500, detail=f"保存文件失败: {exc}")
 
-        detected_ext = detect_file_type(head)
+        detected_ext = detect_file_type(head, filename, abs_path)
         if not detected_ext or detected_ext != ext or detected_ext not in allowed_extensions:
             try:
                 os.remove(abs_path)

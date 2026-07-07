@@ -31,14 +31,15 @@ const {
   handleAdd,
 } = useCRUD({
   name: 'API',
-  initForm: { order: 0 },
-  doCreate: api.createDept,
-  doUpdate: api.updateDept,
+  initForm: { order: 0, tech_ids: [] },
+  doCreate: (data) => api.createDept(deptPayload(data)),
+  doUpdate: (data) => api.updateDept(deptPayload(data)),
   doDelete: api.deleteDept,
   refresh: () => $table.value?.handleSearch(),
 })
 
 const deptOption = ref([])
+const techOptions = ref([])
 const isDisabled = ref(false)
 const channelLevelOptions = [
   { label: '区域代理', value: '区域代理' },
@@ -65,7 +66,33 @@ const deptRules = {
 
 async function addDepts() {
   isDisabled.value = false
+  await loadTechOptions()
   handleAdd()
+}
+
+async function loadTechOptions(keyword = '') {
+  const res = await api.getUserList({ page: 1, page_size: 20, alias: keyword || undefined, role_name: '技术' })
+  techOptions.value = (res?.data || [])
+    .filter((item) => item.is_active !== false)
+    .map((item) => ({ label: item.alias || item.username, value: item.id }))
+}
+
+function seedTechOptions(row) {
+  const ids = row.tech_ids || []
+  const names = row.tech_names || []
+  ids.forEach((id, index) => {
+    if (!techOptions.value.some((item) => item.value === id)) {
+      techOptions.value.push({ label: names[index] || String(id), value: id })
+    }
+  })
+}
+
+function deptPayload(data) {
+  return {
+    ...data,
+    parent_id: data.parent_id || 0,
+    tech_ids: data.tech_ids || [],
+  }
 }
 
 const columns = [
@@ -93,6 +120,15 @@ const columns = [
     },
   },
   {
+    title: '关联技术',
+    key: 'tech_names',
+    align: 'center',
+    width: 'auto',
+    render(row) {
+      return row.tech_names?.length ? row.tech_names.join('、') : '-'
+    },
+  },
+  {
     title: '操作',
     key: 'actions',
     width: 'auto',
@@ -113,6 +149,7 @@ const columns = [
                 } else {
                   isDisabled.value = false
                 }
+                seedTechOptions(row)
                 handleEdit(row)
               },
             },
@@ -225,6 +262,18 @@ const columns = [
         </NFormItem>
         <NFormItem label="代理商级别" path="channel_level">
           <NSelect v-model:value="modalForm.channel_level" :options="channelLevelOptions" clearable />
+        </NFormItem>
+        <NFormItem label="关联技术" path="tech_ids">
+          <NSelect
+            v-model:value="modalForm.tech_ids"
+            :options="techOptions"
+            multiple
+            clearable
+            filterable
+            remote
+            @focus="loadTechOptions"
+            @search="loadTechOptions"
+          />
         </NFormItem>
         <NFormItem label="排序" path="order">
           <NInputNumber v-model:value="modalForm.order" min="0"></NInputNumber>
