@@ -546,6 +546,9 @@ async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
     class FakeWorkbook:
         active = FakeSheet()
 
+        def close(self):
+            pass
+
     class FakeProjectQuery:
         async def first(self):
             return None
@@ -591,6 +594,35 @@ async def test_import_projects_creates_agent_under_channel_dept(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_projects_closes_workbook_on_error(monkeypatch):
+    closed = False
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([("错误列",)])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    class FakeFile:
+        filename = "import.xlsx"
+
+        async def read(self):
+            return b"xlsx"
+
+    monkeypatch.setattr(project_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+
+    with pytest.raises(HTTPException):
+        await project_controller.import_projects(user_id=7, file=FakeFile())
+
+    assert closed
+
+
+@pytest.mark.anyio
 async def test_import_projects_accumulates_points_and_updates_region_status(monkeypatch):
     calls = []
 
@@ -607,6 +639,9 @@ async def test_import_projects_accumulates_points_and_updates_region_status(monk
 
     class FakeWorkbook:
         active = FakeSheet()
+
+        def close(self):
+            pass
 
     class ExistingProject:
         product_points = [{"product_name": "EDG", "points": 5}]
@@ -708,6 +743,9 @@ async def test_import_projects_moves_existing_agent_under_channel_dept(monkeypat
     class FakeWorkbook:
         active = FakeSheet()
 
+        def close(self):
+            pass
+
     class FakeProjectQuery:
         async def first(self):
             return None
@@ -779,6 +817,9 @@ async def test_import_projects_leaves_missing_assignee_blank(monkeypatch):
 
     class FakeWorkbook:
         active = FakeSheet()
+
+        def close(self):
+            pass
 
     class FakeProjectQuery:
         async def first(self):

@@ -261,114 +261,117 @@ class ProjectController:
         if not (file.filename or "").lower().endswith(".xlsx"):
             raise HTTPException(status_code=400, detail="请上传 xlsx 文件")
         wb = load_workbook(BytesIO(await file.read()), data_only=True, read_only=True)
-        ws = wb.active
-        rows = ws.iter_rows(values_only=True)
-        headers = [self._cell_text(item) for item in next(rows, [])]
-        required = {"所属代理商", "项目名称", "终端点数"}
-        if not required.issubset(headers):
-            raise HTTPException(status_code=400, detail="导入模板缺少：所属代理商、项目名称、终端点数")
-        idx = {name: headers.index(name) for name in headers if name}
-        has_assignee = "负责人" in idx
-        config = await self._config()
-        created = updated = skipped = 0
-        errors = []
-        imported_project_keys = set()
-        parent_dept = None
-        agents = {}
-        for row_no, row in enumerate(rows, start=2):
-            agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
-            project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
-            import_product = self._cell_text(row[idx["产品名称"]] if "产品名称" in idx and len(row) > idx["产品名称"] else "")
-            region = self._cell_text(row[idx["区域"]] if "区域" in idx and len(row) > idx["区域"] else "")
-            status = self._cell_text(row[idx["状态"]] if "状态" in idx and len(row) > idx["状态"] else "")
-            points = row[idx["终端点数"]] if len(row) > idx["终端点数"] else None
-            assignee_id = await self._resolve_import_assignee(row[idx["负责人"]]) if has_assignee and len(row) > idx["负责人"] else None
-            if not agent_name and not project_name and not points:
-                skipped += 1
-                continue
-            try:
-                if not agent_name or not project_name:
-                    raise HTTPException(status_code=400, detail="所属代理商和项目名称不能为空")
-                if parent_dept is None:
-                    parent_dept = await dept_controller.get_or_create(
-                        name=IMPORT_AGENT_PARENT_DEPT_NAME,
-                        parent_id=0,
-                        desc="项目导入自动创建",
+        try:
+            ws = wb.active
+            rows = ws.iter_rows(values_only=True)
+            headers = [self._cell_text(item) for item in next(rows, [])]
+            required = {"所属代理商", "项目名称", "终端点数"}
+            if not required.issubset(headers):
+                raise HTTPException(status_code=400, detail="导入模板缺少：所属代理商、项目名称、终端点数")
+            idx = {name: headers.index(name) for name in headers if name}
+            has_assignee = "负责人" in idx
+            config = await self._config()
+            created = updated = skipped = 0
+            errors = []
+            imported_project_keys = set()
+            parent_dept = None
+            agents = {}
+            for row_no, row in enumerate(rows, start=2):
+                agent_name = self._cell_text(row[idx["所属代理商"]] if len(row) > idx["所属代理商"] else "")
+                project_name = self._cell_text(row[idx["项目名称"]] if len(row) > idx["项目名称"] else "")
+                import_product = self._cell_text(row[idx["产品名称"]] if "产品名称" in idx and len(row) > idx["产品名称"] else "")
+                region = self._cell_text(row[idx["区域"]] if "区域" in idx and len(row) > idx["区域"] else "")
+                status = self._cell_text(row[idx["状态"]] if "状态" in idx and len(row) > idx["状态"] else "")
+                points = row[idx["终端点数"]] if len(row) > idx["终端点数"] else None
+                assignee_id = await self._resolve_import_assignee(row[idx["负责人"]]) if has_assignee and len(row) > idx["负责人"] else None
+                if not agent_name and not project_name and not points:
+                    skipped += 1
+                    continue
+                try:
+                    if not agent_name or not project_name:
+                        raise HTTPException(status_code=400, detail="所属代理商和项目名称不能为空")
+                    if parent_dept is None:
+                        parent_dept = await dept_controller.get_or_create(
+                            name=IMPORT_AGENT_PARENT_DEPT_NAME,
+                            parent_id=0,
+                            desc="项目导入自动创建",
+                        )
+                    agent = agents.get(agent_name)
+                    if not agent:
+                        agent = await dept_controller.get_or_create(
+                            name=agent_name,
+                            parent_id=parent_dept.id,
+                            desc="项目导入自动创建",
+                        )
+                        agents[agent_name] = agent
+                    if agent.parent_id != parent_dept.id:
+                        agent.parent_id = parent_dept.id
+                        await agent.save()
+                        await dept_controller.clear_dept_dict_cache()
+                    data = await self._validate_payload(
+                        {
+                            "project_name": project_name,
+                            "agent_id": agent.id,
+                            "product_points": self._parse_import_product_points(points, config["products"], import_product),
+                            **({"region": region} if region else {}),
+                            **({"status": status} if status else {}),
+                            **({"assignee_id": assignee_id} if has_assignee else {}),
+                        }
                     )
-                agent = agents.get(agent_name)
-                if not agent:
-                    agent = await dept_controller.get_or_create(
-                        name=agent_name,
-                        parent_id=parent_dept.id,
-                        desc="项目导入自动创建",
+                    project = await Project.filter(project_name=project_name, agent_id=agent.id).first()
+                    project_key = (agent.id, project_name)
+                    if project:
+                        project.product_points = (
+                            self._merge_product_points(project.product_points, data["product_points"])
+                            if project_key in imported_project_keys
+                            else data["product_points"]
+                        )
+                        if region:
+                            project.region = data.get("region")
+                        if status:
+                            project.status = data.get("status")
+                        if has_assignee:
+                            project.assignee_id = data.get("assignee_id")
+                            project.assigned_by = user_id if project.assignee_id else None
+                            project.assigned_at = datetime.now() if project.assignee_id else None
+                        await project.save()
+                        updated += 1
+                    else:
+                        assignee_id = data.get("assignee_id")
+                        await Project.create(
+                            **data,
+                            created_by=user_id,
+                            assigned_by=user_id if assignee_id else None,
+                            assigned_at=datetime.now() if assignee_id else None,
+                        )
+                        created += 1
+                    imported_project_keys.add(project_key)
+                except HTTPException as exc:
+                    error = {"row": row_no, "error": exc.detail}
+                    errors.append(error)
+                    logger.warning(
+                        "[project.import] row_failed row={} agent={} project={} error={}",
+                        row_no,
+                        agent_name,
+                        project_name,
+                        exc.detail,
                     )
-                    agents[agent_name] = agent
-                if agent.parent_id != parent_dept.id:
-                    agent.parent_id = parent_dept.id
-                    await agent.save()
-                    await dept_controller.clear_dept_dict_cache()
-                data = await self._validate_payload(
-                    {
-                        "project_name": project_name,
-                        "agent_id": agent.id,
-                        "product_points": self._parse_import_product_points(points, config["products"], import_product),
-                        **({"region": region} if region else {}),
-                        **({"status": status} if status else {}),
-                        **({"assignee_id": assignee_id} if has_assignee else {}),
-                    }
-                )
-                project = await Project.filter(project_name=project_name, agent_id=agent.id).first()
-                project_key = (agent.id, project_name)
-                if project:
-                    project.product_points = (
-                        self._merge_product_points(project.product_points, data["product_points"])
-                        if project_key in imported_project_keys
-                        else data["product_points"]
-                    )
-                    if region:
-                        project.region = data.get("region")
-                    if status:
-                        project.status = data.get("status")
-                    if has_assignee:
-                        project.assignee_id = data.get("assignee_id")
-                        project.assigned_by = user_id if project.assignee_id else None
-                        project.assigned_at = datetime.now() if project.assignee_id else None
-                    await project.save()
-                    updated += 1
-                else:
-                    assignee_id = data.get("assignee_id")
-                    await Project.create(
-                        **data,
-                        created_by=user_id,
-                        assigned_by=user_id if assignee_id else None,
-                        assigned_at=datetime.now() if assignee_id else None,
-                    )
-                    created += 1
-                imported_project_keys.add(project_key)
-            except HTTPException as exc:
-                error = {"row": row_no, "error": exc.detail}
-                errors.append(error)
-                logger.warning(
-                    "[project.import] row_failed row={} agent={} project={} error={}",
-                    row_no,
-                    agent_name,
-                    project_name,
-                    exc.detail,
-                )
-        if created or updated:
-            await self.clear_summary_cache()
-        logger.info(
-            "[project.import] completed user_id={} filename={} headers={} created={} updated={} skipped={} failed={} errors={}",
-            user_id,
-            file.filename,
-            headers,
-            created,
-            updated,
-            skipped,
-            len(errors),
-            errors,
-        )
-        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+            if created or updated:
+                await self.clear_summary_cache()
+            logger.info(
+                "[project.import] completed user_id={} filename={} headers={} created={} updated={} skipped={} failed={} errors={}",
+                user_id,
+                file.filename,
+                headers,
+                created,
+                updated,
+                skipped,
+                len(errors),
+                errors,
+            )
+            return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+        finally:
+            wb.close()
 
     async def create_project(self, *, user_id: int, payload: dict) -> Project:
         attachment_ids = payload.pop("attachment_ids", [])

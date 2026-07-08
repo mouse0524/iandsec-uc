@@ -627,6 +627,29 @@ async def test_import_depts_updates_same_name(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_depts_closes_workbook_on_error(monkeypatch):
+    closed = False
+
+    class FakeSheet:
+        def iter_rows(self, values_only=True):
+            return iter([("错误列",)])
+
+    class FakeWorkbook:
+        active = FakeSheet()
+
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(dept_module, "load_workbook", lambda *args, **kwargs: FakeWorkbook())
+
+    with pytest.raises(HTTPException):
+        await dept_controller.import_depts(dept_import_file([]))
+
+    assert closed
+
+
+@pytest.mark.anyio
 async def test_export_depts_writes_import_headers(monkeypatch):
     rows = [
         Obj(id=1, name="根部门", parent_id=0, order=1, desc="根", channel_level=None, tech_ids=[]),

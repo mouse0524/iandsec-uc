@@ -265,58 +265,61 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         if not (file.filename or "").lower().endswith(".xlsx"):
             raise HTTPException(status_code=400, detail="请上传 xlsx 文件")
         workbook = load_workbook(BytesIO(await file.read()), data_only=True, read_only=True)
-        rows = workbook.active.iter_rows(values_only=True)
-        headers = [self._cell_text(item) for item in next(rows, [])]
-        if "部门名称" not in headers:
-            raise HTTPException(status_code=400, detail="导入模板缺少：部门名称")
-        idx = {name: headers.index(name) for name in headers if name}
-        depts = await Dept.filter(is_deleted=False).all()
-        by_name = {item.name: item for item in depts}
-        created = updated = skipped = 0
-        errors = []
+        try:
+            rows = workbook.active.iter_rows(values_only=True)
+            headers = [self._cell_text(item) for item in next(rows, [])]
+            if "部门名称" not in headers:
+                raise HTTPException(status_code=400, detail="导入模板缺少：部门名称")
+            idx = {name: headers.index(name) for name in headers if name}
+            depts = await Dept.filter(is_deleted=False).all()
+            by_name = {item.name: item for item in depts}
+            created = updated = skipped = 0
+            errors = []
 
-        def cell(row, name):
-            index = idx.get(name)
-            return row[index] if index is not None and len(row) > index else None
+            def cell(row, name):
+                index = idx.get(name)
+                return row[index] if index is not None and len(row) > index else None
 
-        for row_no, row in enumerate(rows, start=2):
-            name = self._cell_text(cell(row, "部门名称"))
-            if not any(self._cell_text(item) for item in row):
-                skipped += 1
-                continue
-            try:
-                if not name:
-                    raise HTTPException(status_code=400, detail="部门名称不能为空")
-                parent_name = self._cell_text(cell(row, "上级部门"))
-                parent_id = 0
-                if parent_name:
-                    parent = by_name.get(parent_name)
-                    if not parent:
-                        raise HTTPException(status_code=400, detail=f"上级部门不存在：{parent_name}")
-                    parent_id = int(parent.id)
-                payload = {
-                    "name": name,
-                    "parent_id": parent_id,
-                    "order": self._parse_import_order(cell(row, "排序")),
-                    "desc": self._cell_text(cell(row, "备注")),
-                    "channel_level": self._parse_channel_level(cell(row, "渠道等级")),
-                    "tech_ids": await self._resolve_import_tech_ids(
-                        cell(row, "关联技术"),
-                        cell(row, self.LEGACY_TECH_ID_HEADER),
-                    ),
-                }
-                current = by_name.get(name)
-                if current:
-                    await self.update_dept(DeptUpdate(id=current.id, **payload))
-                    updated += 1
-                else:
-                    new_dept = await self.create_dept(DeptCreate(**payload))
-                    if new_dept:
-                        by_name[name] = new_dept
-                    created += 1
-            except HTTPException as exc:
-                errors.append({"row": row_no, "error": exc.detail})
-        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+            for row_no, row in enumerate(rows, start=2):
+                name = self._cell_text(cell(row, "部门名称"))
+                if not any(self._cell_text(item) for item in row):
+                    skipped += 1
+                    continue
+                try:
+                    if not name:
+                        raise HTTPException(status_code=400, detail="部门名称不能为空")
+                    parent_name = self._cell_text(cell(row, "上级部门"))
+                    parent_id = 0
+                    if parent_name:
+                        parent = by_name.get(parent_name)
+                        if not parent:
+                            raise HTTPException(status_code=400, detail=f"上级部门不存在：{parent_name}")
+                        parent_id = int(parent.id)
+                    payload = {
+                        "name": name,
+                        "parent_id": parent_id,
+                        "order": self._parse_import_order(cell(row, "排序")),
+                        "desc": self._cell_text(cell(row, "备注")),
+                        "channel_level": self._parse_channel_level(cell(row, "渠道等级")),
+                        "tech_ids": await self._resolve_import_tech_ids(
+                            cell(row, "关联技术"),
+                            cell(row, self.LEGACY_TECH_ID_HEADER),
+                        ),
+                    }
+                    current = by_name.get(name)
+                    if current:
+                        await self.update_dept(DeptUpdate(id=current.id, **payload))
+                        updated += 1
+                    else:
+                        new_dept = await self.create_dept(DeptCreate(**payload))
+                        if new_dept:
+                            by_name[name] = new_dept
+                        created += 1
+                except HTTPException as exc:
+                    errors.append({"row": row_no, "error": exc.detail})
+            return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+        finally:
+            workbook.close()
 
     @atomic()
     async def create_dept(self, obj_in: DeptCreate):
