@@ -236,6 +236,50 @@ def test_production_container_includes_aerich_config_and_migrations():
 
 
 @pytest.mark.anyio
+async def test_pending_migrations_skips_missing_aerich_baseline(monkeypatch):
+    def fake_run(*args, **kwargs):
+        return init_app.subprocess.CompletedProcess(
+            args[0],
+            2,
+            "",
+            "Error: You need to run `aerich init-db` first to initialize the database.",
+        )
+
+    monkeypatch.setattr(init_app.shutil, "which", lambda name: "aerich")
+    monkeypatch.setattr(init_app.subprocess, "run", fake_run)
+
+    await init_app._run_pending_migrations()
+
+
+@pytest.mark.anyio
+async def test_runtime_schema_fallback_adds_missing_department_invite_fields(monkeypatch):
+    class FakeDB:
+        def __init__(self):
+            self.tables = {"dept", "partner_registration"}
+            self.columns = set()
+            self.scripts = []
+
+        async def execute_query_dict(self, query, values=None):
+            if "information_schema.TABLES" in query:
+                return [{"count": int(values[0] in self.tables)}]
+            if "information_schema.COLUMNS" in query:
+                return [{"count": int(tuple(values) in self.columns)}]
+            raise AssertionError(query)
+
+        async def execute_script(self, sql):
+            self.scripts.append(sql)
+
+    db = FakeDB()
+    monkeypatch.setattr(init_app.Tortoise, "get_connection", lambda name: db)
+
+    await init_app._ensure_department_tech_invite_schema()
+
+    assert any("ADD COLUMN `tech_ids`" in sql for sql in db.scripts)
+    assert any("ADD COLUMN `invite_code`" in sql for sql in db.scripts)
+    assert any("CREATE TABLE IF NOT EXISTS `partner_invite`" in sql for sql in db.scripts)
+
+
+@pytest.mark.anyio
 async def test_init_db_runs_migrations_before_schema_generation(monkeypatch):
     calls = []
 
@@ -248,13 +292,17 @@ async def test_init_db_runs_migrations_before_schema_generation(monkeypatch):
     async def fake_generate_schemas(*args, **kwargs):
         calls.append("schemas")
 
+    async def fake_ensure_schema():
+        calls.append("ensure")
+
     monkeypatch.setattr(init_app, "_run_pending_migrations", fake_run_pending_migrations)
+    monkeypatch.setattr(init_app, "_ensure_department_tech_invite_schema", fake_ensure_schema)
     monkeypatch.setattr(init_app.Tortoise, "init", fake_init)
     monkeypatch.setattr(init_app.Tortoise, "generate_schemas", fake_generate_schemas)
 
     await init_app.init_db()
 
-    assert calls == ["migrate", "init", "schemas"]
+    assert calls == ["migrate", "init", "schemas", "ensure"]
 
 
 @pytest.mark.anyio

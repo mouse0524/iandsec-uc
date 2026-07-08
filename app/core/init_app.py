@@ -921,7 +921,63 @@ async def _run_pending_migrations() -> None:
     if result.stderr.strip():
         logger.warning("[init_db] aerich upgrade stderr: {}", result.stderr.strip())
     if result.returncode != 0:
+        if "aerich init-db" in result.stderr and "initialize the database" in result.stderr:
+            logger.warning(
+                "[init_db] aerich migration baseline is missing; continuing with runtime schema fallback"
+            )
+            return
         raise RuntimeError(f"aerich upgrade failed with exit code {result.returncode}")
+
+
+async def _table_exists(db, table: str) -> bool:
+    rows = await db.execute_query_dict(
+        """
+        SELECT COUNT(*) AS count
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+        """,
+        [table],
+    )
+    return bool(rows and int(rows[0]["count"]) > 0)
+
+
+async def _column_exists(db, table: str, column: str) -> bool:
+    rows = await db.execute_query_dict(
+        """
+        SELECT COUNT(*) AS count
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        """,
+        [table, column],
+    )
+    return bool(rows and int(rows[0]["count"]) > 0)
+
+
+async def _add_column_if_missing(db, table: str, column: str, definition: str) -> None:
+    if await _table_exists(db, table) and not await _column_exists(db, table, column):
+        await db.execute_script(f"ALTER TABLE `{table}` ADD COLUMN `{column}` {definition}")
+
+
+async def _ensure_department_tech_invite_schema() -> None:
+    db = Tortoise.get_connection(settings.TORTOISE_ORM["apps"]["models"]["default_connection"])
+    await _add_column_if_missing(db, "dept", "tech_ids", "JSON NULL")
+    await _add_column_if_missing(db, "partner_registration", "invite_code", "VARCHAR(32) NULL")
+    await db.execute_script(
+        """
+        CREATE TABLE IF NOT EXISTS `partner_invite` (
+            `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+            `code` VARCHAR(32) NOT NULL UNIQUE,
+            `created_by` BIGINT NOT NULL,
+            `used_by` BIGINT NULL,
+            `used_at` DATETIME(6) NULL,
+            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+            KEY `idx_partner_invite_code` (`code`),
+            KEY `idx_partner_invite_created_by` (`created_by`),
+            KEY `idx_partner_invite_used_by` (`used_by`)
+        )
+        """
+    )
 
 
 async def _backfill_existing_role_permissions(
@@ -998,6 +1054,9 @@ async def init_db():
             logger.warning("[init_db] schema generation skipped because tables already exist: {}", exc)
         else:
             raise
+    await _ensure_department_tech_invite_schema()
+
+
 async def init_roles():
     old_partner_role = await Role.filter(name="代理商").first()
     if old_partner_role:
