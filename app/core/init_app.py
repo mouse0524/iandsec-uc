@@ -3,7 +3,6 @@ from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 from tortoise.expressions import Q
-from tortoise.transactions import in_transaction
 
 from app.api import api_router
 from app.controllers.api import api_controller
@@ -932,107 +931,6 @@ async def init_db():
             logger.warning("[init_db] schema generation skipped because tables already exist: {}", exc)
         else:
             raise
-    await ensure_security_columns()
-
-
-async def ensure_security_columns():
-    async with in_transaction() as conn:
-        for sql, label in [
-            ("ALTER TABLE `user` ADD COLUMN `token_version` INT NOT NULL DEFAULT 0", "user.token_version"),
-            ("ALTER TABLE `auditlog` ADD COLUMN `is_archived` BOOL NOT NULL DEFAULT 0", "auditlog.is_archived"),
-            ("ALTER TABLE `ticket` ADD COLUMN `issue_type` VARCHAR(30) NOT NULL DEFAULT '现网问题'", "ticket.issue_type"),
-            ("ALTER TABLE `ticket` ADD COLUMN `impact_scope` VARCHAR(30) NOT NULL DEFAULT '全部'", "ticket.impact_scope"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_issue_id` BIGINT NULL", "ticket.redmine_issue_id"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_issue_url` VARCHAR(500) NULL", "ticket.redmine_issue_url"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_sync_status` VARCHAR(20) NOT NULL DEFAULT 'never'", "ticket.redmine_sync_status"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_sync_error` TEXT NULL", "ticket.redmine_sync_error"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_synced_at` DATETIME(6) NULL", "ticket.redmine_synced_at"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_last_updated_on` DATETIME(6) NULL", "ticket.redmine_last_updated_on"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_id` BIGINT NULL", "ticket.redmine_status_id"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_status_name` VARCHAR(120) NULL", "ticket.redmine_status_name"),
-            ("ALTER TABLE `ticket` ADD COLUMN `redmine_closed` BOOL NOT NULL DEFAULT 0", "ticket.redmine_closed"),
-            (
-                "ALTER TABLE `global_notice` ADD COLUMN `delivery_channels` JSON NULL",
-                "global_notice.delivery_channels",
-            ),
-            ("ALTER TABLE `ticket` MODIFY COLUMN `status` VARCHAR(32) NOT NULL DEFAULT 'pending_review'", "ticket.status.width"),
-            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `action` VARCHAR(32) NOT NULL", "ticket_action_log.action.width"),
-            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `from_status` VARCHAR(32) NULL", "ticket_action_log.from_status.width"),
-            ("ALTER TABLE `ticket_action_log` MODIFY COLUMN `to_status` VARCHAR(32) NOT NULL", "ticket_action_log.to_status.width"),
-            ("ALTER TABLE `project` MODIFY COLUMN `company_name` VARCHAR(120) NULL", "project.company_name.nullable"),
-            ("ALTER TABLE `project` MODIFY COLUMN `product_name` VARCHAR(120) NULL", "project.product_name.nullable"),
-            ("ALTER TABLE `project` MODIFY COLUMN `version` VARCHAR(80) NULL", "project.version.nullable"),
-            ("ALTER TABLE `project` MODIFY COLUMN `points` INT NULL", "project.points.nullable"),
-            ("ALTER TABLE `project` ADD COLUMN `product_points` JSON NULL", "project.product_points"),
-            ("ALTER TABLE `project` ADD COLUMN `region` VARCHAR(30) NULL", "project.region"),
-            ("ALTER TABLE `project` ADD COLUMN `agent_id` BIGINT NULL", "project.agent_id"),
-            ("ALTER TABLE `project` ADD COLUMN `server_version` VARCHAR(80) NULL", "project.server_version"),
-            ("ALTER TABLE `project` ADD COLUMN `client_version` VARCHAR(80) NULL", "project.client_version"),
-            ("ALTER TABLE `project` ADD COLUMN `start_time` DATETIME NULL", "project.start_time"),
-            ("ALTER TABLE `project` ADD COLUMN `end_time` DATETIME NULL", "project.end_time"),
-            ("ALTER TABLE `project` ADD COLUMN `maintenance_time` DATETIME NULL", "project.maintenance_time"),
-            ("ALTER TABLE `dept` ADD COLUMN `channel_level` VARCHAR(20) NULL", "dept.channel_level"),
-            ("ALTER TABLE `dept` ADD COLUMN `tech_ids` JSON NULL", "dept.tech_ids"),
-            ("ALTER TABLE `user` ADD COLUMN `channel_level` VARCHAR(20) NULL", "user.channel_level"),
-            ("ALTER TABLE `partner_registration` ADD COLUMN `invite_code` VARCHAR(32) NULL", "partner_registration.invite_code"),
-            (
-                """
-                CREATE TABLE IF NOT EXISTS `partner_invite` (
-                    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
-                    `code` VARCHAR(32) NOT NULL UNIQUE,
-                    `created_by` BIGINT NOT NULL,
-                    `used_by` BIGINT NULL,
-                    `used_at` DATETIME(6) NULL,
-                    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                    KEY `idx_partner_invite_code` (`code`),
-                    KEY `idx_partner_invite_created_by` (`created_by`),
-                    KEY `idx_partner_invite_used_by` (`used_by`)
-                )
-                """,
-                "partner_invite.table",
-            ),
-            (
-                "UPDATE `project_activity` SET `title` = LEFT(`content`, 200) "
-                "WHERE `activity_type` = '备注' AND `content` IS NOT NULL AND TRIM(`content`) <> '' "
-                "AND (`title` IS NULL OR `title` = '' OR `title` = '备注')",
-                "project_activity.remark_title_backfill",
-            ),
-            (
-                """
-                CREATE TABLE IF NOT EXISTS `webdav_download_log` (
-                    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
-                    `download_type` VARCHAR(20) NOT NULL,
-                    `file_path` VARCHAR(1000) NOT NULL,
-                    `file_name` VARCHAR(255) NULL,
-                    `share_code` VARCHAR(32) NULL,
-                    `downloader_id` BIGINT NULL,
-                    `downloader_name` VARCHAR(120) NULL,
-                    `source_ip` VARCHAR(64) NULL,
-                    `user_agent` VARCHAR(500) NULL,
-                    `referer` VARCHAR(500) NULL,
-                    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                    KEY `idx_webdav_dl_type` (`download_type`),
-                    KEY `idx_webdav_dl_share` (`share_code`),
-                    KEY `idx_webdav_dl_user` (`downloader_id`),
-                    KEY `idx_webdav_dl_ip` (`source_ip`),
-                    KEY `idx_webdav_dl_created` (`created_at`)
-                )
-                """,
-                "webdav_download_log.table",
-            ),
-        ]:
-            try:
-                await conn.execute_query(sql)
-                logger.info("[init_db] added missing column {}", label)
-            except Exception as exc:
-                message = str(exc).lower()
-                if "duplicate" in message or "exists" in message or "unknown column" in message:
-                    continue
-                logger.warning("[init_db] ensure column {} skipped error={}", label, exc)
-
-
 async def init_roles():
     old_partner_role = await Role.filter(name="代理商").first()
     if old_partner_role:

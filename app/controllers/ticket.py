@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -16,6 +17,7 @@ from app.controllers.mail import mail_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
 from app.controllers.webdav import webdav_controller
+from app.core.redis_client import execute_redis
 from app.models.admin import Dept, DeptClosure, Ticket, TicketActionLog, TicketAttachment, User
 from app.models.enums import TicketActionType, TicketStatus
 from app.settings import settings
@@ -188,6 +190,14 @@ class TicketController:
 
     @staticmethod
     async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
+        cache_key = f"ticket:tech_related_submitters:{tech_id}:v1"
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                return [int(item) for item in json.loads(cached)]
+        except Exception as exc:
+            logger.warning("[ticket.scope] cache_read_failed tech_id={} error={}", tech_id, str(exc))
+
         # ponytail: department table scan; split to a relation table if department count makes this hot.
         depts = await Dept.filter(is_deleted=False).all()
         dept_ids = [dept.id for dept in depts if int(tech_id) in {int(item or 0) for item in (dept.tech_ids or [])}]
@@ -195,7 +205,12 @@ class TicketController:
             return []
         descendant_ids = await DeptClosure.filter(ancestor__in=dept_ids).values_list("descendant", flat=True)
         visible_dept_ids = set(dept_ids) | {int(item) for item in descendant_ids}
-        return [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
+        submitter_ids = [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
+        try:
+            await execute_redis("setex", cache_key, 300, json.dumps(submitter_ids, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[ticket.scope] cache_write_failed tech_id={} error={}", tech_id, str(exc))
+        return submitter_ids
 
     async def create_ticket(self, *, submitter_id: int, payload: dict, notify_pending_review: bool = True) -> Ticket:
         logger.info(

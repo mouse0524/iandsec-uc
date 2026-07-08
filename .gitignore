@@ -21,6 +21,7 @@ tests/*
 !tests/test_human_challenge.py
 !tests/test_email_enumeration.py
 !tests/test_department_tech_invites.py
+!tests/test_review_report_fixes.py
 
 db.sqlite3
 db.sqlite3-journal

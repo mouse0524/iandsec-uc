@@ -1,9 +1,11 @@
+import json
 from typing import Optional
 
 import jwt
 from fastapi import Depends, Header, HTTPException, Request
 
 from app.core.ctx import CTX_USER_ID, CTX_USER_NAME
+from app.core.redis_client import execute_redis
 from app.log import logger
 from app.controllers.user import user_controller
 from app.models import Role, User
@@ -55,11 +57,32 @@ class PermissionControl:
             return
         method = request.method
         path = request.url.path
+        cache_key = f"perm:api:user:{current_user.id}:v2"
+        cache_api_key = method.lower() + path
+        try:
+            cached = await execute_redis("get", cache_key)
+            if cached:
+                if cache_api_key in set(json.loads(cached)):
+                    return
+                raise HTTPException(status_code=403, detail=f"Permission denied method:{method} path:{path}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("[permission] cache_read_failed key={} error={}", cache_key, str(exc))
         roles: list[Role] = await current_user.roles
         if not roles:
             raise HTTPException(status_code=403, detail="The user is not bound to a role")
         apis = [await role.apis for role in roles]
         permission_apis = list(set((api.method, api.path) for api in sum(apis, [])))
+        try:
+            await execute_redis(
+                "setex",
+                cache_key,
+                600,
+                json.dumps([api_method.lower() + api_path for api_method, api_path in permission_apis], ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.warning("[permission] cache_write_failed key={} error={}", cache_key, str(exc))
         # path = "/api/v1/auth/userinfo"
         # method = "GET"
         if (method, path) not in permission_apis:

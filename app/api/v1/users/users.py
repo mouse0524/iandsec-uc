@@ -89,6 +89,7 @@ async def delete_user(
     await user_controller.clear_permission_cache(user_id)
     await user_controller.clear_user_basic_cache(user_id)
     await user_controller.clear_auth_cache(user_id)
+    await user_controller.clear_ticket_scope_cache()
     return Success(msg="Deleted Successfully")
 
 

@@ -47,10 +47,7 @@
 - 改后端纯 Python 逻辑时，最低成本先跑 `python -m compileall app`；涉及数据库/接口行为再跑 `python -m pytest` 或启动 compose 验证。
 - 改前端页面或路由后，最低成本验证通常是 `cd web && pnpm run build`；必要时再跑 `pnpm run lint`。
 
-## Skill-Know 高风险点
-- 智能对话页面：`web/src/views/skill-know/chat/index.vue`；流式接口：`app/api/v1/skill_know/chat.py`；核心服务：`app/services/skill_know/chat_service.py`。
-- 对话链路有两层流式：后端 SSE 事件 `assistant.delta`/`final`，前端收到后再逐字 reveal；改流式体验时必须同时检查 `final` 是否覆盖 `rawAnswer`。
-- SSE 响应已设置 `text/event-stream`、`Cache-Control: no-cache`、`X-Accel-Buffering: no`；若调试栏 `first chunk` 很晚，优先排查代理/压缩/上游模型缓冲，不要只改 Vue。
-- 文档管理页：`web/src/views/skill-know/documents/index.vue`；文档接口：`app/api/v1/skill_know/documents.py`。
-- 引用跳转依赖 `document_id` 和 `chunk_id` 查询参数；文档预览按 `chunks` 渲染并高亮片段，不能只改完整 Markdown 预览。
-- 文档上传前端使用 2MB 分片、3 并发和 localStorage 续传 key；后端有 `/upload/init`、`/upload/chunk`、`/upload/status`、`/upload/complete` 配套接口。
+## 企业知识库高风险点
+- 知识来源页面：`web/src/views/wiki/sources/index.vue`；知识库接口：`app/api/v1/wiki/wiki.py`；核心服务：`app/services/wiki/`。
+- LLM 调用封装保留在 `app/services/llm/openai_client.py`，系统设置页维护 LLM 配置。
+- 当前知识库方向是文件优先的 `llm-wiki`：原始资料在 `raw/`，LLM 维护 Markdown 在 `wiki/`，不要回退到旧 `skill-know` 路径。

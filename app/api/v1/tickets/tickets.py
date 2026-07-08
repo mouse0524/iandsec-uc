@@ -20,7 +20,7 @@ from app.core.redis_client import execute_redis
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
 from app.models.admin import Dept, DeptClosure, Ticket, TicketActionLog, TicketAttachment, User
-from app.models.enums import TicketActionType, TicketStatus
+from app.models.enums import ROLE_ADMIN, ROLE_AGENT, ROLE_CHANNEL, ROLE_CUSTOMER_SERVICE, ROLE_TECH, ROLE_USER, TicketActionType, TicketStatus
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
 from app.services.human_challenge import human_challenge_service
@@ -48,6 +48,14 @@ async def _get_user_role_names(user: User) -> list[str]:
 
 
 async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
+    cache_key = f"ticket:tech_related_submitters:{tech_id}:v1"
+    try:
+        cached = await execute_redis("get", cache_key)
+        if cached:
+            return [int(item) for item in json.loads(cached)]
+    except Exception as exc:
+        logger.warning("[ticket.scope] cache_read_failed tech_id={} error={}", tech_id, str(exc))
+
     # ponytail: department table scan; split to a relation table if department count makes this hot.
     depts = await Dept.filter(is_deleted=False).all()
     dept_ids = [dept.id for dept in depts if int(tech_id) in {int(item or 0) for item in (dept.tech_ids or [])}]
@@ -55,17 +63,26 @@ async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
         return []
     descendant_ids = await DeptClosure.filter(ancestor__in=dept_ids).values_list("descendant", flat=True)
     visible_dept_ids = set(dept_ids) | {int(item) for item in descendant_ids}
-    return [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
+    submitter_ids = [int(item) for item in await User.filter(dept_id__in=visible_dept_ids).values_list("id", flat=True)]
+    try:
+        await execute_redis("setex", cache_key, 300, json.dumps(submitter_ids, ensure_ascii=False))
+    except Exception as exc:
+        logger.warning("[ticket.scope] cache_write_failed tech_id={} error={}", tech_id, str(exc))
+    return submitter_ids
 
 
 def _can_view_all_tickets(user: User, role_names: list[str]) -> bool:
-    return bool(user.is_superuser or getattr(user, "username", "") == "admin" or {"管理员", "客服"}.intersection(role_names))
+    return bool(
+        user.is_superuser
+        or getattr(user, "username", "") == "admin"
+        or {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE}.intersection(role_names)
+    )
 
 
 async def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) -> bool:
     if _can_view_all_tickets(user, role_names):
         return True
-    if "技术" in role_names:
+    if ROLE_TECH in role_names:
         if ticket.submitter_id == user.id or ticket.tech_id == user.id:
             return True
         return ticket.submitter_id in await _tech_related_submitter_ids(user.id)
@@ -122,7 +139,7 @@ def _build_ticket_search_sync(
 
     if _can_view_all_tickets(user, role_names):
         return q
-    if "技术" in role_names:
+    if ROLE_TECH in role_names:
         tech_q = Q(submitter_id=user.id) | Q(submitter_id__in=related_submitter_ids or [])
         if scope != "mine":
             tech_q |= Q(tech_id=user.id)
@@ -135,7 +152,7 @@ def _build_ticket_search_sync(
 async def _build_ticket_search(**kwargs) -> Q:
     user = kwargs["user"]
     role_names = kwargs["role_names"]
-    related_submitter_ids = await _tech_related_submitter_ids(user.id) if "技术" in role_names else []
+    related_submitter_ids = await _tech_related_submitter_ids(user.id) if ROLE_TECH in role_names else []
     return _build_ticket_search_sync(**kwargs, related_submitter_ids=related_submitter_ids)
 
 
@@ -181,7 +198,9 @@ async def create_ticket(payload: TicketCreate, request: Request):
     user = await _get_current_user()
     logger.info("[api.ticket.create] request user_id={}", user.id)
     role_names = await _get_user_role_names(user)
-    if not user.is_superuser and not any(role in role_names for role in ["用户", "渠道商", "代理商", "技术", "管理员"]):
+    if not user.is_superuser and not any(
+        role in role_names for role in [ROLE_USER, ROLE_CHANNEL, ROLE_AGENT, ROLE_TECH, ROLE_ADMIN]
+    ):
         return Fail(code=403, msg="您当前账号暂无提交工单权限，请联系管理员")
 
     pending = await partner_controller.has_pending_registration(
@@ -256,24 +275,24 @@ async def get_ticket_prefill():
     return Success(data=data)
 
 
-@router.get("/list", summary="????", dependencies=[DependAuth])
+@router.get("/list", summary="工单列表", dependencies=[DependAuth])
 async def list_ticket(
-    page: int = Query(1, description="??"),
-    page_size: int = Query(10, description="????"),
-    status: TicketStatus | None = Query(None, description="??"),
+    page: int = Query(1, description="页码"),
+    page_size: int = Query(10, description="每页数量"),
+    status: TicketStatus | None = Query(None, description="状态"),
     exclude_status: TicketStatus | None = Query(None, description="排除状态"),
-    project_phase: str | None = Query(None, description="????"),
+    project_phase: str | None = Query(None, description="项目阶段"),
     issue_type: str | None = Query(None, description="跟踪"),
     impact_scope: str | None = Query(None, description="影响范围"),
-    category: str | None = Query(None, description="??"),
-    root_cause: str | None = Query(None, description="????"),
+    category: str | None = Query(None, description="分类"),
+    root_cause: str | None = Query(None, description="根因"),
     company_name: str | None = Query(None, description="项目名称"),
-    title: str | None = Query(None, description="??"),
-    created_start: datetime | None = Query(None, description="??????"),
-    created_end: datetime | None = Query(None, description="??????"),
-    finished_start: datetime | None = Query(None, description="??????"),
-    finished_end: datetime | None = Query(None, description="??????"),
-    scope: str | None = Query(None, description="Scope"),
+    title: str | None = Query(None, description="标题"),
+    created_start: datetime | None = Query(None, description="创建开始时间"),
+    created_end: datetime | None = Query(None, description="创建结束时间"),
+    finished_start: datetime | None = Query(None, description="完成开始时间"),
+    finished_end: datetime | None = Query(None, description="完成结束时间"),
+    scope: str | None = Query(None, description="范围"),
 ):
     start_at = perf_counter()
     user = await _get_current_user()
@@ -341,21 +360,21 @@ async def list_ticket(
     return SuccessExtra(data=rows, total=total, page=page, page_size=page_size, status_summary=status_summary)
 
 
-@router.get("/export", summary="Export tickets", dependencies=[DependAuth])
+@router.get("/export", summary="导出工单", dependencies=[DependAuth])
 async def export_tickets(
-    status: TicketStatus | None = Query(None, description="Status"),
-    project_phase: str | None = Query(None, description="Project phase"),
-    issue_type: str | None = Query(None, description="Tracking"),
-    impact_scope: str | None = Query(None, description="Impact scope"),
-    category: str | None = Query(None, description="Category"),
-    root_cause: str | None = Query(None, description="Root cause"),
-    company_name: str | None = Query(None, description="Project name"),
-    title: str | None = Query(None, description="Title"),
-    created_start: datetime | None = Query(None, description="Created start time"),
-    created_end: datetime | None = Query(None, description="Created end time"),
-    finished_start: datetime | None = Query(None, description="Finished start time"),
-    finished_end: datetime | None = Query(None, description="Finished end time"),
-    scope: str | None = Query(None, description="Scope"),
+    status: TicketStatus | None = Query(None, description="状态"),
+    project_phase: str | None = Query(None, description="项目阶段"),
+    issue_type: str | None = Query(None, description="跟踪"),
+    impact_scope: str | None = Query(None, description="影响范围"),
+    category: str | None = Query(None, description="分类"),
+    root_cause: str | None = Query(None, description="根因"),
+    company_name: str | None = Query(None, description="项目名称"),
+    title: str | None = Query(None, description="标题"),
+    created_start: datetime | None = Query(None, description="创建开始时间"),
+    created_end: datetime | None = Query(None, description="创建结束时间"),
+    finished_start: datetime | None = Query(None, description="完成开始时间"),
+    finished_end: datetime | None = Query(None, description="完成结束时间"),
+    scope: str | None = Query(None, description="范围"),
 ):
     user = await _get_current_user()
     role_names = await _get_user_role_names(user)
@@ -406,63 +425,60 @@ async def export_tickets(
         *(item.operator_id for item in actions if item.operator_id),
     }
     user_map: dict[int, str] = {}
-    for uid in user_ids:
-        try:
-            basic = await user_controller.get_user_basic(int(uid))
-            user_map[int(uid)] = str(basic.get("alias") or basic.get("username") or "")
-        except Exception:
-            user_map[int(uid)] = ""
+    if user_ids:
+        users = await User.filter(id__in=user_ids)
+        user_map = {int(user.id): str(user.alias or user.username or "") for user in users}
 
     status_text = {
-        TicketStatus.PENDING_REVIEW.value: "Pending review",
-        TicketStatus.CS_REJECTED.value: "CS rejected",
-        TicketStatus.TECH_PROCESSING.value: "Tech processing",
-        TicketStatus.FIELD_VERIFICATION.value: "Field verification",
-        TicketStatus.PENDING_CLOSE.value: "Pending close",
-        TicketStatus.TECH_REJECTED.value: "Tech rejected",
-        TicketStatus.DONE.value: "Closed",
+        TicketStatus.PENDING_REVIEW.value: "待客服审核",
+        TicketStatus.CS_REJECTED.value: "客服驳回",
+        TicketStatus.TECH_PROCESSING.value: "待技术处理",
+        TicketStatus.FIELD_VERIFICATION.value: "现场验证",
+        TicketStatus.PENDING_CLOSE.value: "待关闭",
+        TicketStatus.TECH_REJECTED.value: "技术驳回",
+        TicketStatus.DONE.value: "已关闭",
     }
     action_text = {
-        TicketActionType.SUBMIT.value: "Submit",
-        TicketActionType.RESUBMIT.value: "Resubmit",
-        TicketActionType.CS_APPROVE.value: "CS approve",
-        TicketActionType.CS_REJECT.value: "CS reject",
-        TicketActionType.TECH_START.value: "Tech start",
-        TicketActionType.TECH_ASSIGN.value: "Tech assign",
-        TicketActionType.TECH_NOTE.value: "Tech note",
-        TicketActionType.FIELD_VERIFY.value: "Field verification",
-        TicketActionType.FIELD_REJECT.value: "Field verification rejected",
-        TicketActionType.TECH_REJECT.value: "Tech reject",
-        TicketActionType.FINISH.value: "Finish",
-        TicketActionType.CLOSE.value: "Close",
+        TicketActionType.SUBMIT.value: "提交",
+        TicketActionType.RESUBMIT.value: "重新提交",
+        TicketActionType.CS_APPROVE.value: "客服通过",
+        TicketActionType.CS_REJECT.value: "客服驳回",
+        TicketActionType.TECH_START.value: "技术开始处理",
+        TicketActionType.TECH_ASSIGN.value: "改派技术",
+        TicketActionType.TECH_NOTE.value: "技术备注",
+        TicketActionType.FIELD_VERIFY.value: "现场验证",
+        TicketActionType.FIELD_REJECT.value: "现场验证驳回",
+        TicketActionType.TECH_REJECT.value: "技术驳回",
+        TicketActionType.FINISH.value: "处理完成",
+        TicketActionType.CLOSE.value: "关闭",
     }
 
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Tickets"
+    sheet.title = "工单"
     headers = [
-        "Ticket No",
-        "Status",
-        "Project Phase",
-        "Tracking",
-        "Impact Scope",
-        "Category",
-        "Root Cause",
-        "Title",
-        "Company",
-        "Contact",
-        "Email",
-        "Phone",
-        "Submitter",
-        "Reviewer",
-        "Technician",
-        "Description",
-        "Reject Reason",
-        "Attachments",
-        "Action Logs",
-        "Created At",
-        "Updated At",
-        "Finished At",
+        "工单编号",
+        "状态",
+        "项目阶段",
+        "跟踪",
+        "影响范围",
+        "分类",
+        "根因",
+        "标题",
+        "项目名称",
+        "联系人",
+        "邮箱",
+        "手机号",
+        "提交人",
+        "审核人",
+        "技术处理人",
+        "描述",
+        "驳回原因",
+        "附件",
+        "操作日志",
+        "创建时间",
+        "更新时间",
+        "完成时间",
     ]
     sheet.append(headers)
     for cell in sheet[1]:
@@ -576,7 +592,7 @@ async def review_ticket(payload: TicketReviewIn):
     user = await _get_current_user()
     logger.info("[api.ticket.review] request user_id={} ticket_id={} approved={}", user.id, payload.ticket_id, payload.approved)
     role_names = await _get_user_role_names(user)
-    if not user.is_superuser and "管理员" not in role_names and "客服" not in role_names:
+    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_CUSTOMER_SERVICE not in role_names:
         return Fail(code=403, msg="仅客服或管理员可执行审核操作")
     current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
     if not await _can_access_ticket(current_ticket, user, role_names):
@@ -603,7 +619,7 @@ async def tech_action_ticket(payload: TicketTechActionIn):
         payload.action,
     )
     role_names = await _get_user_role_names(user)
-    if not user.is_superuser and "管理员" not in role_names and "技术" not in role_names:
+    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_TECH not in role_names:
         return Fail(code=403, msg="仅技术或管理员可处理工单")
     current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
     if not await _can_access_ticket(current_ticket, user, role_names):
@@ -633,9 +649,9 @@ async def assign_ticket_tech(payload: TicketAssignTechIn):
         payload.tech_id,
     )
     role_names = await _get_user_role_names(user)
-    is_admin = user.is_superuser or "管理员" in role_names
-    is_customer_service = "客服" in role_names
-    is_tech = "技术" in role_names
+    is_admin = user.is_superuser or ROLE_ADMIN in role_names
+    is_customer_service = ROLE_CUSTOMER_SERVICE in role_names
+    is_tech = ROLE_TECH in role_names
     if not (is_admin or is_customer_service or is_tech):
         return Fail(code=403, msg="仅客服、技术或管理员可改派技术处理人")
     current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
@@ -816,7 +832,7 @@ async def ticket_actions(ticket_id: int = Query(..., description="工单ID")):
 async def push_ticket_to_redmine(payload: TicketRedmineSyncIn):
     user = await _get_current_user()
     role_names = await _get_user_role_names(user)
-    if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
+    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_TECH not in role_names:
         return Fail(code=403, msg="仅技术或管理员可同步 Redmine")
     ticket = await ticket_controller.get_ticket(payload.ticket_id)
     if not await _can_access_ticket(ticket, user, role_names):
@@ -839,7 +855,7 @@ async def push_ticket_to_redmine(payload: TicketRedmineSyncIn):
 async def pull_ticket_from_redmine(payload: TicketRedmineSyncIn):
     user = await _get_current_user()
     role_names = await _get_user_role_names(user)
-    if not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names and "\u6280\u672f" not in role_names:
+    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_TECH not in role_names:
         return Fail(code=403, msg="仅技术或管理员可拉取 Redmine 状态")
     ticket = await ticket_controller.get_ticket(payload.ticket_id)
     if not await _can_access_ticket(ticket, user, role_names):

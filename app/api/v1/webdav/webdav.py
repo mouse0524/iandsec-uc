@@ -12,6 +12,7 @@ from app.controllers.webdav import webdav_controller
 from app.core.redis_client import execute_redis
 from app.log import logger
 from app.models.admin import User
+from app.models.enums import ROLE_ADMIN
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.webdav import WebDavShareCreateIn, WebDavShareDeleteIn
 from app.utils.ops_password import generate_replace_decrypt_password, generate_server_ops_password
@@ -50,7 +51,7 @@ async def clear_webdav_cache():
     user_id = CTX_USER_ID.get()
     user = await User.filter(id=user_id).prefetch_related("roles").first()
     role_names = [role.name for role in await user.roles] if user else []
-    if not user or (not user.is_superuser and "\u7ba1\u7406\u5458" not in role_names):
+    if not user or (not user.is_superuser and ROLE_ADMIN not in role_names):
         raise HTTPException(status_code=403, detail="仅管理员可清理网盘缓存")
     cleared = await webdav_controller.clear_list_cache()
     return Success(msg="网盘缓存已刷新", data={"cleared": cleared})

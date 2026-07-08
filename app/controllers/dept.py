@@ -64,6 +64,25 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         except Exception:
             pass
 
+    async def clear_ticket_scope_cache(self) -> None:
+        try:
+            keys: set[str] = set()
+            cursor = 0
+            while True:
+                cursor, batch = await execute_redis(
+                    "scan",
+                    cursor=cursor,
+                    match="ticket:tech_related_submitters:*",
+                    count=500,
+                )
+                keys.update(batch or [])
+                if int(cursor or 0) == 0:
+                    break
+            if keys:
+                await execute_redis("delete", *keys)
+        except Exception:
+            pass
+
     async def get_dept_info(self):
         pass
 
@@ -83,11 +102,13 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                 dept_obj.channel_level = channel_level or dept_obj.channel_level
                 await dept_obj.save()
                 await self.clear_dept_dict_cache()
+                await self.clear_ticket_scope_cache()
                 logger.info("[dept.get_or_create] revive name={} dept_id={} parent_id={}", name, dept_obj.id, parent_id)
             elif channel_level and not dept_obj.channel_level:
                 dept_obj.channel_level = channel_level
                 await dept_obj.save()
                 await self.clear_dept_dict_cache()
+                await self.clear_ticket_scope_cache()
             return dept_obj
 
         dept_obj = await Dept.create(
@@ -103,6 +124,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         closure_rows.append(DeptClosure(ancestor=dept_obj.id, descendant=dept_obj.id, level=0))
         await DeptClosure.bulk_create(closure_rows)
         await self.clear_dept_dict_cache()
+        await self.clear_ticket_scope_cache()
         return dept_obj
 
     async def update_dept_closure(self, obj: Dept):
@@ -155,6 +177,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             new_obj.parent_id,
         )
         await self.clear_dept_dict_cache()
+        await self.clear_ticket_scope_cache()
 
     @atomic()
     async def update_dept(self, obj_in: DeptUpdate):
@@ -177,6 +200,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             obj_in.parent_id,
         )
         await self.clear_dept_dict_cache()
+        await self.clear_ticket_scope_cache()
         dept_obj = await self.get(id=obj_in.id)
         # 更新部门关系
         if dept_obj.parent_id != obj_in.parent_id:

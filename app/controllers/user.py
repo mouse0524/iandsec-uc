@@ -19,7 +19,6 @@ from .system_setting import system_setting_controller
 
 class UserController(CRUDBase[User, UserCreate, UserUpdate]):
     USER_BASIC_CACHE_TTL_SECONDS = 600
-    USER_AUTH_CACHE_TTL_SECONDS = 600
     def __init__(self):
         super().__init__(model=User)
 
@@ -52,36 +51,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         return data
 
     async def get_auth_user(self, user_id: int) -> User | None:
-        cache_key = f"auth:user:{user_id}:v1"
-        try:
-            cached = await execute_redis("get", cache_key)
-            if cached:
-                data = json.loads(cached)
-                user = await self.model.filter(id=user_id).first()
-                if not user:
-                    await execute_redis("delete", cache_key)
-                    return None
-                return user
-        except Exception as exc:
-            logger.warning("[user.auth_cache] read_failed key={} error={}", cache_key, str(exc))
-
-        user = await self.model.filter(id=user_id).first()
-        if not user:
-            return None
-        data = {
-            "id": user.id,
-            "username": user.username,
-            "alias": user.alias,
-            "email": user.email,
-            "is_active": user.is_active,
-            "is_superuser": user.is_superuser,
-            "token_version": int(getattr(user, "token_version", 0) or 0),
-        }
-        try:
-            await execute_redis("setex", cache_key, self.USER_AUTH_CACHE_TTL_SECONDS, json.dumps(data, ensure_ascii=False))
-        except Exception as exc:
-            logger.warning("[user.auth_cache] write_failed key={} error={}", cache_key, str(exc))
-        return user
+        return await self.model.filter(id=user_id).first()
 
     async def get_by_username(self, username: str) -> Optional[User]:
         return await self.model.filter(username=username).first()
@@ -116,6 +86,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
     async def update(self, id: int, obj_in: UserUpdate | dict) -> User:
         obj = await super().update(id=id, obj_in=obj_in)
         await self.inherit_dept_channel_level(obj)
+        await self.clear_ticket_scope_cache()
         return obj
 
     @staticmethod
@@ -252,6 +223,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
             f"perm:api:user:{user_id}:v1",
             f"perm:menu:user:{user_id}:v2",
             f"perm:api:user:{user_id}:v2",
+            f"ticket:tech_related_submitters:{user_id}:v1",
         ]
         try:
             await execute_redis("delete", *keys)
@@ -274,16 +246,33 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
 
     @staticmethod
     async def clear_auth_cache(user_id: int) -> None:
+        return None
+
+    @staticmethod
+    async def clear_ticket_scope_cache() -> None:
         try:
-            await execute_redis("delete", f"auth:user:{user_id}:v1")
+            keys: set[str] = set()
+            cursor = 0
+            while True:
+                cursor, batch = await execute_redis(
+                    "scan",
+                    cursor=cursor,
+                    match="ticket:tech_related_submitters:*",
+                    count=500,
+                )
+                keys.update(batch or [])
+                if int(cursor or 0) == 0:
+                    break
+            if keys:
+                await execute_redis("delete", *keys)
         except Exception as exc:
-            logger.warning("[user.cache] clear_auth_failed user_id={} error={}", user_id, str(exc))
+            logger.warning("[user.cache] clear_ticket_scope_failed error={}", str(exc))
 
     @staticmethod
     async def clear_all_permission_cache() -> None:
         try:
             keys: set[str] = set()
-            for pattern in ("perm:menu:user:*", "perm:api:user:*"):
+            for pattern in ("perm:menu:user:*", "perm:api:user:*", "ticket:tech_related_submitters:*"):
                 cursor = 0
                 while True:
                     cursor, batch = await execute_redis("scan", cursor=cursor, match=pattern, count=500)

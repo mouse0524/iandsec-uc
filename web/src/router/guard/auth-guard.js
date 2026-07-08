@@ -4,6 +4,11 @@ import { EMPTY_ROUTE, NOT_FOUND_ROUTE } from '../routes'
 
 export const WHITE_LIST = ['/login', '/404', '/403', '/public/webdav/share/download', '/public/webdav/preview']
 const BASIC_AUTH_PATHS = ['/profile', '/webdav/preview']
+const WORKBENCH_REDIRECTS = [
+  { role: '客服', path: '/ticket/review' },
+  { role: '技术', path: '/ticket/tech' },
+]
+
 export function createAuthGuard(router) {
   router.beforeEach(async (to) => {
     const token = getToken()
@@ -42,9 +47,8 @@ export function createAuthGuard(router) {
 
     const roleNames = (userStore.role || []).map((item) => item?.name).filter(Boolean)
     if (!userStore.isSuperUser && to.path.startsWith('/workbench')) {
-      if (roleNames.includes('客服')) return { path: '/ticket/review' }
-      if (roleNames.includes('技术')) return { path: '/ticket/tech' }
-      return { path: '/ticket/my' }
+      const redirect = WORKBENCH_REDIRECTS.find((item) => roleNames.includes(item.role))
+      return { path: redirect?.path || '/ticket/my' }
     }
 
     const isBasicAuthPath = BASIC_AUTH_PATHS.some((path) => to.path === path || to.path.startsWith(`${path}/`))

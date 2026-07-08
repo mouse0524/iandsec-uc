@@ -62,3 +62,11 @@ class PartnerLevel(StrEnum):
     GOLD = "金牌"
     UNSIGNED = "未签约"
 
+
+ROLE_ADMIN = "管理员"
+ROLE_CUSTOMER_SERVICE = "客服"
+ROLE_TECH = "技术"
+ROLE_USER = "用户"
+ROLE_CHANNEL = "渠道商"
+ROLE_AGENT = "代理商"
+
