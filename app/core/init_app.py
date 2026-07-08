@@ -1,3 +1,10 @@
+import asyncio
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -884,6 +891,39 @@ async def init_apis():
     await api_controller.refresh_api()
 
 
+async def _run_pending_migrations() -> None:
+    aerich = shutil.which("aerich")
+    if not aerich:
+        for name in ("aerich.exe", "aerich"):
+            candidate = Path(sys.executable).with_name(name)
+            if candidate.exists():
+                aerich = str(candidate)
+                break
+    if not aerich:
+        raise RuntimeError("aerich command not found, cannot auto migrate database")
+
+    timeout = int(os.getenv("AUTO_MIGRATE_TIMEOUT_SECONDS", "300"))
+
+    def upgrade() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [aerich, "upgrade"],
+            cwd=settings.BASE_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+
+    result = await asyncio.to_thread(upgrade)
+    if result.stdout.strip():
+        logger.info("[init_db] aerich upgrade stdout: {}", result.stdout.strip())
+    if result.stderr.strip():
+        logger.warning("[init_db] aerich upgrade stderr: {}", result.stderr.strip())
+    if result.returncode != 0:
+        raise RuntimeError(f"aerich upgrade failed with exit code {result.returncode}")
+
+
 async def _backfill_existing_role_permissions(
     *,
     role_name: str,
@@ -949,6 +989,7 @@ async def _remove_existing_role_permissions(
 
 
 async def init_db():
+    await _run_pending_migrations()
     await Tortoise.init(config=settings.TORTOISE_ORM)
     try:
         await Tortoise.generate_schemas(safe=True)

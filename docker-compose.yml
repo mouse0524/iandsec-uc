@@ -36,6 +36,8 @@ services:
     volumes:
       # Bind mount release artifacts so routine git updates do not require rebuilding the image.
       - ./app:/opt/iandsec-uc/app
+      - ./migrations:/opt/iandsec-uc/migrations
+      - ./pyproject.toml:/opt/iandsec-uc/pyproject.toml
       - ./run.py:/opt/iandsec-uc/run.py
       - ./web:/opt/iandsec-uc/web
       - ./deploy/entrypoint.sh:/opt/iandsec-uc/entrypoint.sh

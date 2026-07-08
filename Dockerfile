@@ -14,7 +14,7 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /opt/iandsec-uc
 ENV TZ=Asia/Shanghai
-COPY requirements.txt run.py ./
+COPY requirements.txt pyproject.toml run.py ./
 COPY deploy/entrypoint.sh .
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
@@ -41,6 +41,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=core-pip \
     && pip install --disable-pip-version-check --no-deps chinese-days==0.0.2 -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY app ./app
+COPY migrations ./migrations
 
 COPY --from=web /opt/iandsec-uc/web/dist /opt/iandsec-uc/web/dist
 ADD /deploy/web.conf /etc/nginx/sites-available/web.conf

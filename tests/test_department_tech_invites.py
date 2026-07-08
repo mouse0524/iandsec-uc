@@ -13,6 +13,7 @@ from app.api.v1.users import users as user_api
 from app.controllers.partner import partner_controller
 from app.controllers.ticket import ticket_controller
 from app.controllers.webdav import webdav_controller
+from app.core import init_app
 from app.core.init_app import _ticket_submit_api_paths
 from app.settings import settings
 from app.utils.file_signature import detect_file_type
@@ -217,6 +218,43 @@ def test_schema_fallback_covers_department_tech_invites():
     text = migration.read_text(encoding="utf-8")
     for token in ("dept", "tech_ids", "partner_registration", "invite_code", "partner_invite"):
         assert token in text
+
+
+def test_aerich_toml_dependency_is_declared_for_online_installs():
+    assert "tomlkit==" in Path("requirements.txt").read_text(encoding="utf-8")
+    assert '"tomlkit==' in Path("pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_production_container_includes_aerich_config_and_migrations():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "pyproject.toml" in dockerfile
+    assert "migrations" in dockerfile
+    assert "./pyproject.toml:/opt/iandsec-uc/pyproject.toml" in compose
+    assert "./migrations:/opt/iandsec-uc/migrations" in compose
+
+
+@pytest.mark.anyio
+async def test_init_db_runs_migrations_before_schema_generation(monkeypatch):
+    calls = []
+
+    async def fake_run_pending_migrations():
+        calls.append("migrate")
+
+    async def fake_init(*args, **kwargs):
+        calls.append("init")
+
+    async def fake_generate_schemas(*args, **kwargs):
+        calls.append("schemas")
+
+    monkeypatch.setattr(init_app, "_run_pending_migrations", fake_run_pending_migrations)
+    monkeypatch.setattr(init_app.Tortoise, "init", fake_init)
+    monkeypatch.setattr(init_app.Tortoise, "generate_schemas", fake_generate_schemas)
+
+    await init_app.init_db()
+
+    assert calls == ["migrate", "init", "schemas"]
 
 
 @pytest.mark.anyio
