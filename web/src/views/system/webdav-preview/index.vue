@@ -131,7 +131,7 @@ onMounted(() => {
     <header class="preview-header">
       <div class="title-block">
         <div class="title-icon" aria-hidden="true">
-          <TheIcon icon="material-symbols:preview-rounded" :size="24" />
+          <TheIcon icon="material-symbols:preview" :size="24" />
         </div>
         <div class="title-copy">
           <h1>{{ fileName }}</h1>

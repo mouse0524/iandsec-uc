@@ -492,8 +492,34 @@ async def init_menus():
             keepalive=False,
             redirect="/partner/review",
         )
+    else:
+        partner_parent.menu_type = MenuType.CATALOG
+        partner_parent.name = "代理商中心"
+        partner_parent.order = 5
+        partner_parent.parent_id = 0
+        partner_parent.icon = "mdi:account-group-outline"
+        partner_parent.is_hidden = False
+        partner_parent.component = "Layout"
+        partner_parent.keepalive = False
+        partner_parent.redirect = "/partner/review"
+        await partner_parent.save()
 
-    if not await Menu.filter(parent_id=partner_parent.id, path="review").exists():
+    partner_review_menu = await Menu.filter(
+        Q(component="/partner/review") | Q(path="review", parent_id=partner_parent.id)
+    ).first()
+    if partner_review_menu:
+        partner_review_menu.menu_type = MenuType.MENU
+        partner_review_menu.name = "注册审核"
+        partner_review_menu.path = "review"
+        partner_review_menu.order = 1
+        partner_review_menu.parent_id = partner_parent.id
+        partner_review_menu.icon = "mdi:file-document-edit-outline"
+        partner_review_menu.is_hidden = False
+        partner_review_menu.component = "/partner/review"
+        partner_review_menu.keepalive = False
+        partner_review_menu.redirect = ""
+        await partner_review_menu.save()
+    else:
         await Menu.create(
             menu_type=MenuType.MENU,
             name="注册审核",

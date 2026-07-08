@@ -37,7 +37,7 @@ export function createAuthGuard(router) {
         router.hasRoute(EMPTY_ROUTE.name) && router.removeRoute(EMPTY_ROUTE.name)
         !router.hasRoute(NOT_FOUND_ROUTE.name) && router.addRoute(NOT_FOUND_ROUTE)
         permissionStore.setRoutesLoaded()
-        return { ...to, replace: true }
+        return { path: to.path, query: to.query, hash: to.hash, replace: true }
       } catch (error) {
         console.error('load dynamic routes failed', error)
         await userStore.logout()

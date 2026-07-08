@@ -2,6 +2,14 @@ import i18n from '~/i18n'
 const { t } = i18n.global
 
 const Layout = () => import('@/layout/index.vue')
+const EmptyRouteView = { render: () => null }
+
+export const EMPTY_ROUTE = {
+  name: 'Empty',
+  path: '/:pathMatch(.*)*',
+  component: EmptyRouteView,
+  isHidden: true,
+}
 
 export const basicRoutes = [
   {
@@ -144,6 +152,7 @@ export const basicRoutes = [
       title: '文件预览',
     },
   },
+  EMPTY_ROUTE,
 ]
 
 export const NOT_FOUND_ROUTE = {
@@ -151,12 +160,6 @@ export const NOT_FOUND_ROUTE = {
   path: '/:pathMatch(.*)*',
   redirect: '/404',
   isHidden: true,
-}
-
-export const EMPTY_ROUTE = {
-  name: 'Empty',
-  path: '/:pathMatch(.*)*',
-  component: null,
 }
 
 const modules = import.meta.glob('@/views/**/route.js', { eager: true })
