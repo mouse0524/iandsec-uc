@@ -1,4 +1,8 @@
-from fastapi import HTTPException
+from io import BytesIO
+import re
+
+from fastapi import HTTPException, UploadFile
+from openpyxl import Workbook, load_workbook
 from tortoise.expressions import Q
 from tortoise.exceptions import IntegrityError
 from tortoise.transactions import atomic
@@ -13,6 +17,9 @@ from app.schemas.depts import DeptCreate, DeptUpdate
 
 class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
     DEPT_DICT_CACHE_KEY = "dict:depts:v1"
+    IMPORT_HEADERS = ["部门名称", "上级部门", "排序", "备注", "渠道等级", "关联技术"]
+    LEGACY_TECH_ID_HEADER = "关联技术ID"
+
     def __init__(self):
         super().__init__(model=Dept)
 
@@ -148,6 +155,169 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             raise HTTPException(status_code=400, detail="请选择有效的技术人员")
         return ids
 
+    @staticmethod
+    def _cell_text(value) -> str:
+        return str(value or "").strip()
+
+    @staticmethod
+    def _parse_import_tech_ids(value) -> list[int]:
+        if value is None or value == "":
+            return []
+        items = [value] if isinstance(value, int) else re.split(r"[,，;；\s]+", str(value))
+        ids = []
+        for item in items:
+            text = str(item or "").strip()
+            if text:
+                try:
+                    ids.append(int(float(text)))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="关联技术ID必须是数字")
+        return list(dict.fromkeys(item for item in ids if item > 0))
+
+    @staticmethod
+    def _split_import_tech_names(value) -> list[str]:
+        text = str(value or "").strip()
+        if not text:
+            return []
+        return list(dict.fromkeys(item.strip() for item in re.split(r"[,，;；、\r\n]+", text) if item.strip()))
+
+    @staticmethod
+    def _tech_display_name(user: dict) -> str:
+        return str(user.get("alias") or user.get("username") or user.get("id") or "")
+
+    async def _tech_name_map(self, tech_ids: list[int]) -> dict[int, str]:
+        ids = list(dict.fromkeys(int(item) for item in tech_ids or [] if int(item or 0) > 0))
+        if not ids:
+            return {}
+        users = await User.filter(id__in=ids, is_active=True).values("id", "alias", "username")
+        return {int(user["id"]): self._tech_display_name(user) for user in users}
+
+    async def _resolve_import_tech_ids(self, names_value, legacy_ids_value=None) -> list[int]:
+        names = self._split_import_tech_names(names_value)
+        legacy_ids = self._parse_import_tech_ids(legacy_ids_value)
+        if not names:
+            return legacy_ids
+
+        users = await User.filter(
+            Q(alias__in=names) | Q(username__in=names),
+            is_active=True,
+            roles__name="技术",
+        ).values("id", "alias", "username")
+        by_alias = {str(user["alias"]): int(user["id"]) for user in users if user.get("alias")}
+        by_username = {str(user["username"]): int(user["id"]) for user in users if user.get("username")}
+        ids = []
+        missing = []
+        for name in names:
+            user_id = by_alias.get(name) or by_username.get(name)
+            if user_id:
+                ids.append(user_id)
+            else:
+                missing.append(name)
+        if missing:
+            raise HTTPException(status_code=400, detail=f"关联技术不存在或不是技术角色：{', '.join(missing)}")
+        return list(dict.fromkeys(ids + legacy_ids))
+
+    @staticmethod
+    def _parse_channel_level(value) -> PartnerLevel | None:
+        text = str(value or "").strip()
+        try:
+            return PartnerLevel(text) if text else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"渠道等级无效：{text}")
+
+    @staticmethod
+    def _parse_import_order(value) -> int:
+        try:
+            return int(float(value or 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="排序必须是数字")
+
+    async def export_depts(self) -> bytes:
+        rows = await Dept.filter(is_deleted=False).order_by("parent_id", "order", "id")
+        name_map = {int(item.id): item.name for item in rows}
+        tech_name_map = await self._tech_name_map(
+            [int(tech_id) for dept in rows for tech_id in (dept.tech_ids or []) if int(tech_id or 0) > 0]
+        )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "部门"
+        sheet.append(self.IMPORT_HEADERS)
+        for dept in rows:
+            sheet.append(
+                [
+                    dept.name,
+                    name_map.get(int(dept.parent_id), ""),
+                    int(dept.order or 0),
+                    dept.desc or "",
+                    dept.channel_level.value if dept.channel_level else "",
+                    ",".join(
+                        tech_name_map.get(int(item), str(item))
+                        for item in (dept.tech_ids or [])
+                        if int(item or 0) > 0
+                    ),
+                ]
+            )
+        buffer = BytesIO()
+        workbook.save(buffer)
+        return buffer.getvalue()
+
+    async def import_depts(self, file: UploadFile) -> dict:
+        if not (file.filename or "").lower().endswith(".xlsx"):
+            raise HTTPException(status_code=400, detail="请上传 xlsx 文件")
+        workbook = load_workbook(BytesIO(await file.read()), data_only=True, read_only=True)
+        rows = workbook.active.iter_rows(values_only=True)
+        headers = [self._cell_text(item) for item in next(rows, [])]
+        if "部门名称" not in headers:
+            raise HTTPException(status_code=400, detail="导入模板缺少：部门名称")
+        idx = {name: headers.index(name) for name in headers if name}
+        depts = await Dept.filter(is_deleted=False).all()
+        by_name = {item.name: item for item in depts}
+        created = updated = skipped = 0
+        errors = []
+
+        def cell(row, name):
+            index = idx.get(name)
+            return row[index] if index is not None and len(row) > index else None
+
+        for row_no, row in enumerate(rows, start=2):
+            name = self._cell_text(cell(row, "部门名称"))
+            if not any(self._cell_text(item) for item in row):
+                skipped += 1
+                continue
+            try:
+                if not name:
+                    raise HTTPException(status_code=400, detail="部门名称不能为空")
+                parent_name = self._cell_text(cell(row, "上级部门"))
+                parent_id = 0
+                if parent_name:
+                    parent = by_name.get(parent_name)
+                    if not parent:
+                        raise HTTPException(status_code=400, detail=f"上级部门不存在：{parent_name}")
+                    parent_id = int(parent.id)
+                payload = {
+                    "name": name,
+                    "parent_id": parent_id,
+                    "order": self._parse_import_order(cell(row, "排序")),
+                    "desc": self._cell_text(cell(row, "备注")),
+                    "channel_level": self._parse_channel_level(cell(row, "渠道等级")),
+                    "tech_ids": await self._resolve_import_tech_ids(
+                        cell(row, "关联技术"),
+                        cell(row, self.LEGACY_TECH_ID_HEADER),
+                    ),
+                }
+                current = by_name.get(name)
+                if current:
+                    await self.update_dept(DeptUpdate(id=current.id, **payload))
+                    updated += 1
+                else:
+                    new_dept = await self.create_dept(DeptCreate(**payload))
+                    if new_dept:
+                        by_name[name] = new_dept
+                    created += 1
+            except HTTPException as exc:
+                errors.append({"row": row_no, "error": exc.detail})
+        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
     @atomic()
     async def create_dept(self, obj_in: DeptCreate):
         obj_in.name = str(obj_in.name or "").strip()
@@ -178,6 +348,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
         )
         await self.clear_dept_dict_cache()
         await self.clear_ticket_scope_cache()
+        return new_obj
 
     @atomic()
     async def update_dept(self, obj_in: DeptUpdate):
@@ -221,6 +392,7 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             dept_obj.name,
             dept_obj.parent_id,
         )
+        return dept_obj
 
     @atomic()
     async def delete_dept(self, dept_id: int):

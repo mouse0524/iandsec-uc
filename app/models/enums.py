@@ -50,6 +50,12 @@ class PartnerRegisterStatus(StrEnum):
     REJECTED = "rejected"
 
 
+LEGACY_PENDING_PARTNER_REGISTER_STATUS = "待审核"
+PENDING_PARTNER_REGISTER_STATUSES = [
+    PartnerRegisterStatus.PENDING,
+]
+
+
 class RegisterType(StrEnum):
     CHANNEL = "channel"
     USER = "user"

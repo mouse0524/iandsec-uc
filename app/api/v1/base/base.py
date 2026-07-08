@@ -28,7 +28,12 @@ from app.models.admin import (
     User,
     WebDavShareLink,
 )
-from app.models.enums import PartnerRegisterStatus, RegisterType, TicketStatus
+from app.models.enums import (
+    PartnerRegisterStatus,
+    PENDING_PARTNER_REGISTER_STATUSES,
+    RegisterType,
+    TicketStatus,
+)
 from app.schemas.captcha import CaptchaOut
 from app.schemas.mail import ResetPasswordByEmailIn, SendResetPasswordCodeIn, SendVerifyCodeIn
 from app.schemas.base import Fail, Success
@@ -338,7 +343,7 @@ async def get_workbench_stats():
     ).count()
     ticket_active = ticket_pending_review + ticket_tech_processing + ticket_field_verification + ticket_pending_close
     ticket_today_completion_rate = round(ticket_today_done * 100 / ticket_today_created, 1) if ticket_today_created else 0
-    register_pending = await PartnerRegistration.filter(status=PartnerRegisterStatus.PENDING).count() if is_global else 0
+    register_pending = await PartnerRegistration.filter(status__in=PENDING_PARTNER_REGISTER_STATUSES).count() if is_global else 0
     register_approved = await PartnerRegistration.filter(status=PartnerRegisterStatus.APPROVED).count() if is_global else 0
     register_rejected = await PartnerRegistration.filter(status=PartnerRegisterStatus.REJECTED).count() if is_global else 0
     user_total = await User.all().count() if is_global else 0

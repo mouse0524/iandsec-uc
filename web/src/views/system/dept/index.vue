@@ -18,6 +18,8 @@ defineOptions({ name: '部门管理' })
 const $table = ref(null)
 const queryItems = ref({})
 const vPermission = resolveDirective('permission')
+const importInput = ref(null)
+const importing = ref(false)
 
 const {
   modalVisible,
@@ -51,8 +53,12 @@ const channelLevelOptions = [
 
 onMounted(() => {
   $table.value?.handleSearch()
-  api.getDepts().then((res) => (deptOption.value = res.data))
+  refreshDeptOptions()
 })
+
+function refreshDeptOptions() {
+  api.getDepts().then((res) => (deptOption.value = res.data))
+}
 
 const deptRules = {
   name: [
@@ -92,6 +98,52 @@ function deptPayload(data) {
     ...data,
     parent_id: data.parent_id || 0,
     tech_ids: data.tech_ids || [],
+  }
+}
+
+function triggerDownload(blob, filename) {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+function formatTimestamp() {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
+async function exportDepts() {
+  const res = await api.exportDepts()
+  const blob =
+    res instanceof Blob
+      ? res
+      : new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  triggerDownload(blob, `depts_${formatTimestamp()}.xlsx`)
+}
+
+function triggerDeptImport() {
+  importInput.value?.click()
+}
+
+async function importDepts(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  importing.value = true
+  try {
+    const res = await api.importDepts(file)
+    const data = res?.data || {}
+    $message.success(`导入完成：新增 ${data.created || 0}，更新 ${data.updated || 0}，失败 ${(data.errors || []).length}`)
+    $table.value?.handleSearch()
+    refreshDeptOptions()
+  } finally {
+    importing.value = false
+    event.target.value = ''
   }
 }
 
@@ -197,6 +249,26 @@ const columns = [
   <CommonPage show-footer title="部门列表">
     <template #action>
       <div>
+        <input ref="importInput" type="file" accept=".xlsx" style="display: none" @change="importDepts" />
+        <NButton
+          v-permission="'get/api/v1/dept/export'"
+          class="float-right mr-15"
+          type="primary"
+          secondary
+          @click="exportDepts"
+        >
+          <TheIcon icon="material-symbols:download" :size="18" class="mr-5" />导出
+        </NButton>
+        <NButton
+          v-permission="'post/api/v1/dept/import'"
+          class="float-right mr-15"
+          type="primary"
+          secondary
+          :loading="importing"
+          @click="triggerDeptImport"
+        >
+          <TheIcon icon="material-symbols:upload-file" :size="18" class="mr-5" />导入
+        </NButton>
         <NButton
           v-permission="'post/api/v1/dept/create'"
           class="float-right mr-15"

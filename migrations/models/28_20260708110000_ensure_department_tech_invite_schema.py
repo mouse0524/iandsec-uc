@@ -38,6 +38,7 @@ async def _drop_column_if_present(db: BaseDBAsyncClient, table: str, column: str
 async def upgrade(db: BaseDBAsyncClient) -> str:
     await _add_column_if_missing(db, "dept", "tech_ids", "JSON NULL")
     await _add_column_if_missing(db, "partner_registration", "invite_code", "VARCHAR(32) NULL")
+    await db.execute_script("UPDATE `partner_registration` SET `status` = 'pending' WHERE `status` = '待审核'")
     await db.execute_script(
         """
         CREATE TABLE IF NOT EXISTS `partner_invite` (

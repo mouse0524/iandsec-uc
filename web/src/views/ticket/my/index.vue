@@ -16,6 +16,7 @@ const $table = ref(null)
 const route = useRoute()
 const queryItems = ref({
   company_name: route.query.company_name || undefined,
+  submitter_name: route.query.submitter_name || undefined,
   issue_type: route.query.issue_type || undefined,
   status: route.query.status || undefined,
   created_start: route.query.created_start || undefined,
@@ -30,6 +31,7 @@ watch(
     queryItems.value = {
       ...queryItems.value,
       company_name: query.company_name || undefined,
+      submitter_name: query.submitter_name || undefined,
       issue_type: query.issue_type || undefined,
       status: query.status || undefined,
       created_start: query.created_start || undefined,
@@ -48,6 +50,7 @@ const summaryStats = ref({
   total: 0,
   pending_review: 0,
   tech_processing: 0,
+  field_verification: 0,
   pending_close: 0,
   done: 0,
   rejected: 0,
@@ -81,6 +84,7 @@ const summaryCards = computed(() => {
     { label: '当前总工单', value: stats.total || 0, tone: 'neutral' },
     { label: '审核中', value: stats.pending_review || 0, tone: 'warning' },
     { label: '技术处理中', value: stats.tech_processing || 0, tone: 'info' },
+    { label: '现场验证', value: stats.field_verification || 0, tone: 'warning' },
     { label: '待关闭', value: stats.pending_close || 0, tone: 'success' },
     { label: '已驳回', value: stats.rejected || 0, tone: 'error' },
     { label: '已关闭', value: stats.done || 0, tone: 'success' },
@@ -105,6 +109,7 @@ async function getMyTicketList(params = {}) {
     total: Number(res?.status_summary?.total || 0),
     pending_review: Number(res?.status_summary?.pending_review || 0),
     tech_processing: Number(res?.status_summary?.tech_processing || 0),
+    field_verification: Number(res?.status_summary?.field_verification || 0),
     pending_close: Number(res?.status_summary?.pending_close || 0),
     done: Number(res?.status_summary?.done || 0),
     rejected: Number(res?.status_summary?.rejected || 0),
@@ -271,6 +276,7 @@ function handleMoreAction(key, row) {
 
 const columns = [
   { title: '工单编号', key: 'ticket_no', align: 'center' },
+  { title: '提出人', key: 'submitter_name', align: 'center', render: (row) => row.submitter_name || '-' },
   { title: '项目名称', key: 'company_name', align: 'center', ellipsis: { tooltip: true } },
   { title: '项目阶段', key: 'project_phase', align: 'center' },
   { title: '跟踪', key: 'issue_type', align: 'center' },
@@ -380,6 +386,9 @@ const columns = [
           <template #queryBar>
             <QueryBarItem label="项目名称" :label-width="64">
               <NInput v-model:value="queryItems.company_name" clearable placeholder="输入项目名称" @keypress.enter="$table?.handleSearch()" />
+            </QueryBarItem>
+            <QueryBarItem label="提出人" :label-width="52">
+              <NInput v-model:value="queryItems.submitter_name" clearable placeholder="输入提出人" @keypress.enter="$table?.handleSearch()" />
             </QueryBarItem>
             <QueryBarItem label="标题" :label-width="40">
               <n-input v-model:value="queryItems.title" clearable placeholder="输入标题" @keypress.enter="$table?.handleSearch()" />

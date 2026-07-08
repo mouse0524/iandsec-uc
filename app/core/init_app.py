@@ -962,6 +962,7 @@ async def _ensure_department_tech_invite_schema() -> None:
     db = Tortoise.get_connection(settings.TORTOISE_ORM["apps"]["models"]["default_connection"])
     await _add_column_if_missing(db, "dept", "tech_ids", "JSON NULL")
     await _add_column_if_missing(db, "partner_registration", "invite_code", "VARCHAR(32) NULL")
+    await db.execute_script("UPDATE `partner_registration` SET `status` = 'pending' WHERE `status` = '待审核'")
     await db.execute_script(
         """
         CREATE TABLE IF NOT EXISTS `partner_invite` (

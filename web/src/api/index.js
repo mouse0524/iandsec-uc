@@ -44,6 +44,15 @@ export default {
   createDept: (data = {}) => request.post('/dept/create', data),
   updateDept: (data = {}) => request.post('/dept/update', data),
   deleteDept: (params = {}) => request.delete('/dept/delete', { params }),
+  exportDepts: () => request.get('/dept/export', { responseType: 'blob' }),
+  importDepts: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/dept/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    })
+  },
   // auditlog
   getAuditLogList: (params = {}) => request.get('/auditlog/list', { params }),
   archiveAuditLogs: (params = {}) => request.post('/auditlog/archive', null, { params }),

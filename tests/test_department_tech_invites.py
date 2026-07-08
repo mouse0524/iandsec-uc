@@ -1,14 +1,18 @@
 import zipfile
 import os
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from openpyxl import Workbook, load_workbook
 
+from app.controllers import dept as dept_module
 from app.controllers import partner as partner_module
 from app.controllers import ticket as ticket_module
 from app.api.v1.partner import partner as partner_api
 from app.api.v1.tickets import tickets as ticket_api
+from app.controllers.dept import dept_controller
 from app.api.v1.users import users as user_api
 from app.controllers.partner import partner_controller
 from app.controllers.ticket import ticket_controller
@@ -129,6 +133,24 @@ def test_mine_ticket_scope_still_includes_related_submitters_for_tech():
     assert {"tech_id": 7} not in filters
 
 
+def test_ticket_search_filters_by_submitter_ids():
+    q = ticket_api._build_ticket_search_sync(
+        user=Obj(id=1, username="admin", is_superuser=True),
+        role_names=[],
+        submitter_ids=[21, 22],
+    )
+
+    filters = []
+
+    def collect(node):
+        filters.append(node.filters)
+        for child in node.children:
+            collect(child)
+
+    collect(q)
+    assert {"submitter_id__in": [21, 22]} in filters
+
+
 @pytest.mark.anyio
 async def test_tech_assignment_alone_does_not_grant_ticket_access(monkeypatch):
     monkeypatch.setattr(ticket_api, "_tech_related_submitter_ids", lambda tech_id: FakeQuery([21, 22]).all())
@@ -204,11 +226,30 @@ def test_ticket_attachment_max_upload_size_is_50m():
     assert settings.MAX_UPLOAD_SIZE == 50 * 1024 * 1024
 
 
+def test_nginx_allows_50m_uploads():
+    assert "client_max_body_size 50m;" in Path("deploy/web.conf").read_text(encoding="utf-8")
+
+
 def test_ticket_attachment_preview_api_is_in_permission_seed():
     paths = set(_ticket_submit_api_paths())
 
     assert "/api/v1/ticket/attachment/download" in paths
     assert "/api/v1/ticket/attachment/preview-cache" in paths
+
+
+def test_my_ticket_page_has_field_verification_submitter_ui():
+    text = Path("web/src/views/ticket/my/index.vue").read_text(encoding="utf-8")
+
+    assert "field_verification: Number(res?.status_summary?.field_verification" in text
+    assert "queryItems.submitter_name" in text
+    assert "key: 'submitter_name'" in text
+
+
+def test_dept_page_has_import_export_controls():
+    text = Path("web/src/views/system/dept/index.vue").read_text(encoding="utf-8")
+
+    assert "exportDepts" in text
+    assert "importDepts" in text
 
 
 def test_schema_fallback_covers_department_tech_invites():
@@ -218,11 +259,20 @@ def test_schema_fallback_covers_department_tech_invites():
     text = migration.read_text(encoding="utf-8")
     for token in ("dept", "tech_ids", "partner_registration", "invite_code", "partner_invite"):
         assert token in text
+    assert "UPDATE `partner_registration` SET `status` = 'pending' WHERE `status` = '待审核'" in text
+
+
+def test_pending_register_status_filter_values_are_enum_safe():
+    field = partner_module.PartnerRegistration._meta.fields_map["status"]
+
+    assert [field.to_db_value(item, None) for item in partner_api.PENDING_PARTNER_REGISTER_STATUSES] == ["pending"]
 
 
 def test_aerich_toml_dependency_is_declared_for_online_installs():
     assert "tomlkit==" in Path("requirements.txt").read_text(encoding="utf-8")
+    assert "pydantic-settings==2.14.2" in Path("requirements.txt").read_text(encoding="utf-8")
     assert '"tomlkit==' in Path("pyproject.toml").read_text(encoding="utf-8")
+    assert '"pydantic-settings==2.14.2"' in Path("pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_production_container_includes_aerich_config_and_migrations():
@@ -277,6 +327,7 @@ async def test_runtime_schema_fallback_adds_missing_department_invite_fields(mon
     assert any("ADD COLUMN `tech_ids`" in sql for sql in db.scripts)
     assert any("ADD COLUMN `invite_code`" in sql for sql in db.scripts)
     assert any("CREATE TABLE IF NOT EXISTS `partner_invite`" in sql for sql in db.scripts)
+    assert any("UPDATE `partner_registration` SET `status` = 'pending' WHERE `status` = '待审核'" in sql for sql in db.scripts)
 
 
 @pytest.mark.anyio
@@ -432,6 +483,25 @@ def test_admin_register_scope_is_not_limited_by_invites():
     assert {"id__in": [11, 12]} not in filters
 
 
+def test_pending_register_list_includes_legacy_pending_status():
+    q = partner_api._build_register_list_query(
+        user=Obj(id=1, username="admin", is_superuser=False),
+        role_names=[],
+        invited_registration_ids=[],
+        reviewed=False,
+    )
+
+    filters = []
+
+    def collect(node):
+        filters.append(node.filters)
+        for child in node.children:
+            collect(child)
+
+    collect(q)
+    assert {"status__in": [partner_api.PartnerRegisterStatus.PENDING]} in filters
+
+
 def test_tech_can_review_only_own_invited_registration():
     user = Obj(id=7, username="tech", is_superuser=False)
 
@@ -494,3 +564,135 @@ async def test_reserve_invite_rejects_already_used_code(monkeypatch):
 
     with pytest.raises(HTTPException):
         await partner_controller._reserve_invite("INVITE123", 99)
+
+
+def dept_import_file(rows, headers=None):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(headers or ["部门名称", "上级部门", "排序", "备注", "渠道等级", "关联技术"])
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+
+    class FakeFile:
+        filename = "dept.xlsx"
+
+        async def read(self):
+            return buffer.getvalue()
+
+    return FakeFile()
+
+
+@pytest.mark.anyio
+async def test_import_depts_updates_same_name(monkeypatch):
+    existing = Obj(id=5, name="研发中心", parent_id=0, is_deleted=False)
+    updates = []
+    creates = []
+
+    class DeptQuery:
+        async def all(self):
+            return [existing]
+
+    monkeypatch.setattr(dept_module.Dept, "filter", lambda **kwargs: DeptQuery())
+
+    class UserQuery:
+        async def values(self, *args):
+            return [
+                {"id": 7, "alias": "张工", "username": "zhang"},
+                {"id": 8, "alias": None, "username": "tech_b"},
+            ]
+
+    monkeypatch.setattr(dept_module.User, "filter", lambda *args, **kwargs: UserQuery())
+
+    async def fake_update(obj_in):
+        updates.append(obj_in)
+
+    async def fake_create(obj_in):
+        creates.append(obj_in)
+
+    monkeypatch.setattr(dept_controller, "update_dept", fake_update)
+    monkeypatch.setattr(dept_controller, "create_dept", fake_create)
+
+    result = await dept_controller.import_depts(dept_import_file([["研发中心", "", 8, "更新备注", "", "张工,tech_b"]]))
+
+    assert result["updated"] == 1
+    assert result["created"] == 0
+    assert creates == []
+    assert updates[0].id == 5
+    assert updates[0].name == "研发中心"
+    assert updates[0].order == 8
+    assert updates[0].desc == "更新备注"
+    assert updates[0].tech_ids == [7, 8]
+
+
+@pytest.mark.anyio
+async def test_export_depts_writes_import_headers(monkeypatch):
+    rows = [
+        Obj(id=1, name="根部门", parent_id=0, order=1, desc="根", channel_level=None, tech_ids=[]),
+        Obj(id=2, name="子部门", parent_id=1, order=2, desc="子", channel_level=None, tech_ids=[7]),
+    ]
+
+    class DeptQuery:
+        def order_by(self, *args):
+            return self
+
+        def __await__(self):
+            async def result():
+                return rows
+
+            return result().__await__()
+
+    monkeypatch.setattr(dept_module.Dept, "filter", lambda **kwargs: DeptQuery())
+
+    class UserQuery:
+        async def values(self, *args):
+            return [{"id": 7, "alias": "张工", "username": "zhang"}]
+
+    monkeypatch.setattr(dept_module.User, "filter", lambda **kwargs: UserQuery())
+
+    data = await dept_controller.export_depts()
+    workbook = load_workbook(BytesIO(data), read_only=True)
+    sheet = workbook.active
+
+    assert [cell.value for cell in next(sheet.iter_rows(max_row=1))] == ["部门名称", "上级部门", "排序", "备注", "渠道等级", "关联技术"]
+    assert [cell.value for cell in next(sheet.iter_rows(min_row=3, max_row=3))] == ["子部门", "根部门", 2, "子", None, "张工"]
+
+
+@pytest.mark.anyio
+async def test_review_accepts_normalized_pending_status(monkeypatch):
+    register_obj = Obj(
+        id=99,
+        status=partner_api.PartnerRegisterStatus.PENDING,
+        reviewer_id=None,
+        review_comment=None,
+        reviewed_at=None,
+        email="user@example.com",
+        contact_name="user",
+        register_type=partner_api.RegisterType.USER,
+        saved=False,
+    )
+
+    async def fake_get(**kwargs):
+        assert kwargs == {"id": 99}
+        return register_obj
+
+    async def fake_save():
+        register_obj.saved = True
+
+    async def fake_notice(**kwargs):
+        return None
+
+    monkeypatch.setattr(partner_module.PartnerRegistration, "get", fake_get)
+    register_obj.save = fake_save
+    monkeypatch.setattr(partner_module.mail_controller, "send_register_review_notice", fake_notice)
+
+    result = await partner_controller.review(
+        register_id=99,
+        reviewer_id=1,
+        approved=False,
+        comment="资料不完整",
+    )
+
+    assert result.status == partner_api.PartnerRegisterStatus.REJECTED
+    assert result.saved

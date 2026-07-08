@@ -7,7 +7,12 @@ from tortoise.transactions import atomic
 
 from app.log import logger
 from app.models.admin import PartnerInvite, PartnerRegistration, Role, User
-from app.models.enums import PartnerLevel, PartnerRegisterStatus, RegisterType
+from app.models.enums import (
+    PartnerLevel,
+    PartnerRegisterStatus,
+    PENDING_PARTNER_REGISTER_STATUSES,
+    RegisterType,
+)
 from app.controllers.dept import dept_controller
 from app.controllers.mail import mail_controller
 from app.controllers.user import user_controller
@@ -60,7 +65,7 @@ class PartnerController:
         if hardware_id and await User.filter(hardware_id=hardware_id).exists():
             raise HTTPException(status_code=400, detail="产品硬件ID已被注册")
 
-        pending_q = Q(status=PartnerRegisterStatus.PENDING)
+        pending_q = Q(status__in=PENDING_PARTNER_REGISTER_STATUSES)
         if exclude_registration_id:
             pending_q &= ~Q(id=exclude_registration_id)
 
@@ -83,7 +88,7 @@ class PartnerController:
         username: str | None = None,
         hardware_id: str | None = None,
     ) -> bool:
-        q = Q(status=PartnerRegisterStatus.PENDING)
+        q = Q(status__in=PENDING_PARTNER_REGISTER_STATUSES)
         condition = Q()
         has_any = False
         if email:
@@ -213,7 +218,7 @@ class PartnerController:
             comment,
         )
         register_obj = await PartnerRegistration.get(id=register_id)
-        if register_obj.status != PartnerRegisterStatus.PENDING:
+        if register_obj.status not in PENDING_PARTNER_REGISTER_STATUSES:
             raise HTTPException(status_code=400, detail="该申请已审核")
 
         register_obj.reviewer_id = reviewer_id

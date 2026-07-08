@@ -71,6 +71,16 @@ async def _tech_related_submitter_ids(tech_id: int) -> list[int]:
     return submitter_ids
 
 
+async def _submitter_ids_by_keyword(keyword: str | None) -> list[int] | None:
+    text = str(keyword or "").strip()
+    if not text:
+        return None
+    rows = await User.filter(
+        Q(alias__contains=text) | Q(username__contains=text) | Q(email__contains=text) | Q(phone__contains=text)
+    ).values_list("id", flat=True)
+    return [int(item) for item in rows]
+
+
 def _can_view_all_tickets(user: User, role_names: list[str]) -> bool:
     return bool(
         user.is_superuser
@@ -108,6 +118,7 @@ def _build_ticket_search_sync(
     created_end: datetime | None = None,
     finished_start: datetime | None = None,
     finished_end: datetime | None = None,
+    submitter_ids: list[int] | None = None,
 ) -> Q:
     q = Q()
     if status:
@@ -136,6 +147,8 @@ def _build_ticket_search_sync(
         q &= Q(finished_at__gte=finished_start)
     if finished_end:
         q &= Q(finished_at__lt=finished_end)
+    if submitter_ids is not None:
+        q &= Q(submitter_id__in=submitter_ids)
 
     if _can_view_all_tickets(user, role_names):
         return q
@@ -153,7 +166,12 @@ async def _build_ticket_search(**kwargs) -> Q:
     user = kwargs["user"]
     role_names = kwargs["role_names"]
     related_submitter_ids = await _tech_related_submitter_ids(user.id) if ROLE_TECH in role_names else []
-    return _build_ticket_search_sync(**kwargs, related_submitter_ids=related_submitter_ids)
+    submitter_ids = await _submitter_ids_by_keyword(kwargs.pop("submitter_name", None))
+    return _build_ticket_search_sync(
+        **kwargs,
+        related_submitter_ids=related_submitter_ids,
+        submitter_ids=submitter_ids,
+    )
 
 
 def _clean_export_text(value) -> str:
@@ -287,6 +305,7 @@ async def list_ticket(
     category: str | None = Query(None, description="分类"),
     root_cause: str | None = Query(None, description="根因"),
     company_name: str | None = Query(None, description="项目名称"),
+    submitter_name: str | None = Query(None, description="提出人"),
     title: str | None = Query(None, description="标题"),
     created_start: datetime | None = Query(None, description="创建开始时间"),
     created_end: datetime | None = Query(None, description="创建结束时间"),
@@ -311,6 +330,7 @@ async def list_ticket(
         category=category,
         root_cause=root_cause,
         company_name=company_name,
+        submitter_name=submitter_name,
         title=title,
         created_start=created_start,
         created_end=created_end,
@@ -332,6 +352,7 @@ async def list_ticket(
         category=category,
         root_cause=root_cause,
         company_name=company_name,
+        submitter_name=submitter_name,
         title=title,
         created_start=created_start,
         created_end=created_end,
@@ -369,6 +390,7 @@ async def export_tickets(
     category: str | None = Query(None, description="分类"),
     root_cause: str | None = Query(None, description="根因"),
     company_name: str | None = Query(None, description="项目名称"),
+    submitter_name: str | None = Query(None, description="提出人"),
     title: str | None = Query(None, description="标题"),
     created_start: datetime | None = Query(None, description="创建开始时间"),
     created_end: datetime | None = Query(None, description="创建结束时间"),
@@ -388,6 +410,7 @@ async def export_tickets(
         category=category,
         root_cause=root_cause,
         company_name=company_name,
+        submitter_name=submitter_name,
         title=title,
         created_start=created_start,
         created_end=created_end,

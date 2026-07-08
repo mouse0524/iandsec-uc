@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Query
 import json
+from datetime import datetime
+from io import BytesIO
+
+from fastapi import APIRouter, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.controllers.dept import dept_controller
 from app.core.redis_client import execute_redis
 from app.schemas import Success
 from app.schemas.depts import *
+from app.utils.http_headers import build_download_content_disposition
 
 router = APIRouter()
 
@@ -37,6 +42,22 @@ async def get_dept(
     dept_obj = await dept_controller.get(id=id)
     data = await dept_obj.to_dict()
     return Success(data=data)
+
+
+@router.get("/export", summary="导出部门")
+async def export_dept():
+    data = await dept_controller.export_depts()
+    filename = f"depts_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": build_download_content_disposition(filename)},
+    )
+
+
+@router.post("/import", summary="导入部门")
+async def import_dept(file: UploadFile = File(...)):
+    return Success(data=await dept_controller.import_depts(file))
 
 
 @router.post("/create", summary="创建部门")

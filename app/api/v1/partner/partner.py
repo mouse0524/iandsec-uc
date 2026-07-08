@@ -10,7 +10,12 @@ from app.controllers.system_setting import system_setting_controller
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
 from app.models.admin import PartnerInvite, PartnerRegistration, User
-from app.models.enums import PartnerRegisterStatus, RegisterType
+from app.models.enums import (
+    LEGACY_PENDING_PARTNER_REGISTER_STATUS,
+    PartnerRegisterStatus,
+    PENDING_PARTNER_REGISTER_STATUSES,
+    RegisterType,
+)
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.partner import PartnerInviteCreateOut, PartnerRegisterIn, PartnerReviewIn, UserRegisterIn
 
@@ -54,12 +59,14 @@ def _build_register_list_query(
     q = Q()
     if not _can_manage_all_registers(user, role_names):
         q &= Q(id__in=invited_registration_ids)
-    if status:
+    if status == PartnerRegisterStatus.PENDING:
+        q &= Q(status__in=PENDING_PARTNER_REGISTER_STATUSES)
+    elif status:
         q &= Q(status=status)
     elif reviewed is True:
         q &= Q(status__in=[PartnerRegisterStatus.APPROVED, PartnerRegisterStatus.REJECTED])
     elif reviewed is False:
-        q &= Q(status=PartnerRegisterStatus.PENDING)
+        q &= Q(status__in=PENDING_PARTNER_REGISTER_STATUSES)
     if register_type:
         q &= Q(register_type=register_type)
     if keyword:
@@ -209,7 +216,12 @@ async def partner_register_list(
     query = PartnerRegistration.filter(q)
     total = await query.count()
     rows = await query.offset((page - 1) * page_size).limit(page_size).order_by("-id")
-    data = [await item.to_dict(exclude_fields=["password_hash"]) for item in rows]
+    data = []
+    for item in rows:
+        row = await item.to_dict(exclude_fields=["password_hash"])
+        if row.get("status") == LEGACY_PENDING_PARTNER_REGISTER_STATUS:
+            row["status"] = PartnerRegisterStatus.PENDING
+        data.append(row)
     logger.info("[api.partner.list] success user_id={} total={} page={}", user_id, total, page)
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
 
