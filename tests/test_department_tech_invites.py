@@ -210,6 +210,15 @@ def test_ticket_attachment_preview_api_is_in_permission_seed():
     assert "/api/v1/ticket/attachment/preview-cache" in paths
 
 
+def test_schema_fallback_covers_department_tech_invites():
+    migration = Path("migrations/models/28_20260708110000_ensure_department_tech_invite_schema.py")
+
+    assert migration.exists()
+    text = migration.read_text(encoding="utf-8")
+    for token in ("dept", "tech_ids", "partner_registration", "invite_code", "partner_invite"):
+        assert token in text
+
+
 @pytest.mark.anyio
 async def test_ticket_attachment_can_be_cached_for_preview(monkeypatch, tmp_path):
     source = tmp_path / "demo.docx"
