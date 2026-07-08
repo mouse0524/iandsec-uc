@@ -228,6 +228,7 @@ export default {
   wikiAsk: (data = {}) => request.post('/wiki/ask', data, { timeout: 300000 }),
   wikiMarkUnhelpful: (data = {}) => request.post('/wiki/feedback/unhelpful', data),
   wikiAdminMessages: (params = {}) => request.get('/wiki/admin/messages', { params }),
+  wikiArchiveMessage: (params = {}) => request.post('/wiki/admin/messages/archive', null, { params }),
   wikiLearningList: (params = {}) => request.get('/wiki/learning/list', { params }),
   wikiLearningApprove: (data = {}) => request.post('/wiki/learning/approve', data),
   wikiLearningReject: (data = {}) => request.post('/wiki/learning/reject', data),

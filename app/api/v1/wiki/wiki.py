@@ -158,7 +158,7 @@ async def _save_wiki_turn(
     question: str,
     answer: str,
     citations: list[dict],
-    archive_path: str,
+    archive_path: str | None = None,
 ) -> WikiMessage:
     await WikiMessage.create(
         conversation_id=conversation.id,
@@ -176,11 +176,21 @@ async def _save_wiki_turn(
     )
 
 
+async def _message_question(message: WikiMessage) -> str:
+    question = await WikiMessage.filter(
+        conversation_id=message.conversation_id,
+        owner_id=message.owner_id,
+        role="user",
+        id__lt=message.id,
+    ).order_by("-id").first()
+    return question.content if question else ""
+
+
 @router.post("/source/upload", summary="Upload wiki source", dependencies=[DependAuth])
 async def upload_source(file: UploadFile = File(...)):
     user = await _require_wiki_editor()
-    source = await wiki_import_service.create_source(user_id=user.id, file=file)
-    if source.status != "completed":
+    source, created = await wiki_import_service.create_source(user_id=user.id, file=file)
+    if created and source.status != "completed":
         asyncio.create_task(wiki_import_service.process(source.id))
     return Success(data=await source.to_dict())
 
@@ -223,9 +233,9 @@ async def complete_source_upload(payload: WikiUploadCompleteIn):
     if missing:
         raise HTTPException(status_code=400, detail=f"Missing chunks: {missing[:5]}")
     merged = await anyio.to_thread.run_sync(_merge_upload_chunks, upload_dir, payload.filename, payload.total_chunks)
-    source = await wiki_import_service.create_source_from_path(user_id=user.id, filename=payload.filename, raw_path=merged)
+    source, created = await wiki_import_service.create_source_from_path(user_id=user.id, filename=payload.filename, raw_path=merged)
     await anyio.to_thread.run_sync(partial(shutil.rmtree, upload_dir, ignore_errors=True))
-    if source.status != "completed":
+    if created and source.status != "completed":
         asyncio.create_task(wiki_import_service.process(source.id))
     return Success(data=await source.to_dict())
 
@@ -450,8 +460,7 @@ async def ask_wiki(payload: WikiAskIn):
             reason="no_match",
         )
         answer = "Wiki 中还没有匹配的知识，已生成待学习记录。"
-        archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=[])
-        return Success(data={"answer": answer, "citations": [], "candidate_id": candidate.id, "archive_path": archive_path})
+        return Success(data={"answer": answer, "citations": [], "candidate_id": candidate.id, "archive_path": None})
     context = "\n\n".join(f"[{item['id']}] {item['title']}\n{item['content'][:4000]}" for item in matches)
     result = await llm_openai_client.chat(
         [
@@ -468,10 +477,8 @@ async def ask_wiki(payload: WikiAskIn):
             reason="empty_answer",
         )
         answer = "模型没有生成有效回答，已生成待学习记录。"
-        archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=matches)
-        return Success(data={"answer": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": archive_path})
-    archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=matches)
-    return Success(data={"answer": answer, "citations": matches, "candidate_id": None, "archive_path": archive_path})
+        return Success(data={"answer": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None})
+    return Success(data={"answer": answer, "citations": matches, "candidate_id": None, "archive_path": None})
 
 
 @router.post("/ask/stream", summary="Ask wiki stream", dependencies=[DependAuth])
@@ -492,15 +499,13 @@ async def ask_wiki_stream(payload: WikiAskIn):
                     reason="no_match",
                 )
                 answer = "Wiki 中还没有匹配的知识，已生成待学习记录。"
-                archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=[])
                 message = await _save_wiki_turn(
                     conversation=conversation,
                     question=payload.question,
                     answer=answer,
                     citations=[],
-                    archive_path=archive_path,
                 )
-                yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": [], "candidate_id": candidate.id, "archive_path": archive_path}})
+                yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": [], "candidate_id": candidate.id, "archive_path": None}})
                 return
 
             yield _status("llm", f"已命中 {len(matches)} 个 Wiki 页面，正在调用大模型")
@@ -526,26 +531,22 @@ async def ask_wiki_stream(payload: WikiAskIn):
                     reason="empty_answer",
                 )
                 answer = "模型没有生成有效回答，已生成待学习记录。"
-                archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=matches)
                 message = await _save_wiki_turn(
                     conversation=conversation,
                     question=payload.question,
                     answer=answer,
                     citations=matches,
-                    archive_path=archive_path,
                 )
-                yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": archive_path}})
+                yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None}})
                 return
-            yield _status("archive", "正在保存问答记录")
-            archive_path = await wiki_builder.archive_query(question=payload.question, answer=answer, citations=matches)
+            yield _status("save", "正在保存问答记录")
             message = await _save_wiki_turn(
                 conversation=conversation,
                 question=payload.question,
                 answer=answer,
                 citations=matches,
-                archive_path=archive_path,
             )
-            yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": None, "archive_path": archive_path}})
+            yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": None, "archive_path": None}})
         except Exception as exc:
             yield _sse({"type": "error", "payload": {"message": str(exc) or "Wiki 问答失败"}})
 
@@ -601,3 +602,19 @@ async def list_admin_messages(page: int = 1, page_size: int = 10, keyword: str |
     total = await query.count()
     rows = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
     return SuccessExtra(data=[await _qa_record_row(row) for row in rows], total=total, page=page, page_size=page_size)
+
+
+@router.post("/admin/messages/archive", summary="Archive wiki Q&A record", dependencies=[DependAuth])
+async def archive_admin_message(message_id: int = Query(...)):
+    await _require_wiki_admin()
+    message = await WikiMessage.get(id=message_id)
+    if message.role != "assistant":
+        raise HTTPException(status_code=400, detail="Only assistant messages can be archived")
+    if not message.archive_path:
+        message.archive_path = await wiki_builder.archive_query(
+            question=await _message_question(message),
+            answer=message.content,
+            citations=message.citations or [],
+        )
+        await message.save()
+    return Success(data=await _qa_record_row(message))

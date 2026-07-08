@@ -148,6 +148,7 @@ def _wiki_edit_api_paths() -> list[str]:
 def _wiki_admin_api_paths() -> list[str]:
     return [
         "/api/v1/wiki/admin/messages",
+        "/api/v1/wiki/admin/messages/archive",
         "/api/v1/wiki/learning/list",
         "/api/v1/wiki/learning/approve",
         "/api/v1/wiki/learning/reject",

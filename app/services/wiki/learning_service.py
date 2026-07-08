@@ -5,7 +5,7 @@ from app.services.wiki.wiki_builder import content_hash, normalize_page_path, sl
 class WikiLearningService:
     async def create_candidate(self, *, question: str, answer: str | None, evidence_page_ids: list[int], reason: str) -> WikiLearningCandidate:
         path = normalize_page_path(f"concepts/{slugify(question, 'learning')}")
-        content = f"# {question.strip()}\n\nPending human-approved knowledge update."
+        content = f"# {question.strip()}\n\n请在这里整理需要写入知识库的内容，确认无误后点击“学习入库”。"
         candidate = await WikiLearningCandidate.filter(question=question.strip(), reason=reason, status="pending").first()
         if candidate:
             candidate.answer = answer

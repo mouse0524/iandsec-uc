@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -16,7 +17,7 @@ from app.services.wiki.learning_service import wiki_learning_service
 from app.services.wiki.search_service import search_terms
 from app.services.wiki.wiki_builder import content_hash, normalize_page_path, slugify, wiki_builder
 from app.api.v1.wiki.wiki import _message_preview, _safe_child, _sse
-from app.core.init_app import _old_ai_knowledge_menu_filter, _wiki_edit_api_paths, _wiki_read_api_paths
+from app.core.init_app import _old_ai_knowledge_menu_filter, _wiki_admin_api_paths, _wiki_edit_api_paths, _wiki_read_api_paths
 
 
 def test_wiki_text_and_csv_conversion(tmp_path: Path):
@@ -141,8 +142,9 @@ async def test_wiki_source_upload_has_no_size_limit(monkeypatch, tmp_path: Path)
     service = WikiImportService()
     service.root = tmp_path
 
-    source = await service.create_source(user_id=9, file=FakeUpload())
+    source, created = await service.create_source(user_id=9, file=FakeUpload())
 
+    assert created is True
     assert source.id == 7
     assert saved["source"]["file_size"] == 3
     assert saved["job"] == {"source_id": 7}
@@ -182,13 +184,88 @@ async def test_wiki_source_can_be_created_from_chunked_file(monkeypatch, tmp_pat
     chunked.parent.mkdir()
     chunked.write_bytes(b"abc")
 
-    source = await service.create_source_from_path(user_id=9, filename="big.txt", raw_path=chunked)
+    source, created = await service.create_source_from_path(user_id=9, filename="big.txt", raw_path=chunked)
 
+    assert created is True
     assert source.id == 8
     assert saved["source"]["file_size"] == 3
     assert saved["source"]["file_path"].endswith(".txt")
     assert saved["job"] == {"source_id": 8}
     assert not chunked.exists()
+
+
+@pytest.mark.anyio
+async def test_wiki_source_reuses_pending_duplicate(monkeypatch, tmp_path: Path):
+    saved = {}
+    existing = type("ExistingSource", (), {"id": 9, "status": "pending"})()
+
+    class FakeQuery:
+        async def first(self):
+            statuses = saved["filter"].get("status__in") or []
+            return existing if "pending" in statuses else None
+
+    class FakeSource:
+        @staticmethod
+        def filter(**kwargs):
+            saved["filter"] = kwargs
+            return FakeQuery()
+
+        @staticmethod
+        async def create(**kwargs):
+            raise AssertionError("duplicate pending source should be reused")
+
+    class FakeJob:
+        @staticmethod
+        async def create(**kwargs):
+            raise AssertionError("duplicate pending source should not create a job")
+
+    monkeypatch.setattr(import_module, "WikiSource", FakeSource)
+    monkeypatch.setattr(import_module, "WikiIngestJob", FakeJob)
+    service = WikiImportService()
+    service.root = tmp_path
+    duplicate = tmp_path / "uploading" / "merged.txt"
+    duplicate.parent.mkdir()
+    duplicate.write_bytes(b"abc")
+
+    source, created = await service.create_source_from_path(user_id=9, filename="big.txt", raw_path=duplicate)
+
+    assert created is False
+    assert source is existing
+    assert not duplicate.exists()
+
+
+@pytest.mark.anyio
+async def test_wiki_upload_does_not_process_reused_source(monkeypatch):
+    scheduled = []
+
+    class FakeSource:
+        id = 9
+        status = "pending"
+
+        async def to_dict(self):
+            return {"id": self.id, "status": self.status}
+
+    class FakeImportService:
+        async def create_source(self, **kwargs):
+            return FakeSource(), False
+
+        async def process(self, source_id):
+            scheduled.append(source_id)
+
+    async def fake_require_wiki_editor():
+        return type("User", (), {"id": 1})()
+
+    def fake_create_task(coro):
+        scheduled.append("task")
+        coro.close()
+
+    monkeypatch.setattr(wiki_module, "_require_wiki_editor", fake_require_wiki_editor)
+    monkeypatch.setattr(wiki_module, "wiki_import_service", FakeImportService())
+    monkeypatch.setattr(wiki_module.asyncio, "create_task", fake_create_task)
+
+    await wiki_module.upload_source(file=object())
+
+    assert scheduled == []
 
 
 @pytest.mark.anyio
@@ -293,6 +370,10 @@ def test_wiki_read_permissions_include_view_source_endpoints():
     assert "/api/v1/wiki/source/markdown" in paths
 
 
+def test_wiki_admin_permissions_include_manual_archive_endpoint():
+    assert "/api/v1/wiki/admin/messages/archive" in set(_wiki_admin_api_paths())
+
+
 def test_old_ai_knowledge_menu_cleanup_targets_legacy_menu():
     def filters(q):
         data = dict(q.filters)
@@ -336,6 +417,97 @@ def test_wiki_sse_status_event_is_readable_json():
 
 def test_wiki_message_preview_collapses_whitespace():
     assert _message_preview("  第一行\n第二行\t第三行  ", 8) == "第一行 第二行"
+
+
+@pytest.mark.anyio
+async def test_wiki_turn_does_not_archive_by_default(monkeypatch):
+    created = []
+
+    class FakeMessage:
+        @staticmethod
+        async def create(**kwargs):
+            created.append(kwargs)
+            return type("Message", (), kwargs)()
+
+    monkeypatch.setattr(wiki_module, "WikiMessage", FakeMessage)
+    conversation = type("Conversation", (), {"id": 1, "owner_id": 2})()
+
+    message = await wiki_module._save_wiki_turn(
+        conversation=conversation,
+        question="question",
+        answer="answer",
+        citations=[],
+    )
+
+    assert message.archive_path is None
+    assert created[-1]["archive_path"] is None
+
+
+@pytest.mark.anyio
+async def test_admin_can_archive_wiki_message(monkeypatch):
+    saved = {}
+
+    class FakeSavedMessage:
+        id = 2
+        conversation_id = 1
+        owner_id = 3
+        role = "assistant"
+        content = "answer"
+        citations = [{"title": "A"}]
+        archive_path = None
+
+        async def save(self):
+            saved["archive_path"] = self.archive_path
+
+        async def to_dict(self):
+            return {"id": self.id, "archive_path": self.archive_path}
+
+    message = FakeSavedMessage()
+    question = type("Question", (), {"content": "question"})()
+
+    class FakeQuestionQuery:
+        def order_by(self, *args):
+            return self
+
+        async def first(self):
+            return question
+
+    class FakeMessageModel:
+        @staticmethod
+        async def get(id):
+            return message
+
+        @staticmethod
+        def filter(**kwargs):
+            return FakeQuestionQuery()
+
+    class FakeUserQuery:
+        async def first(self):
+            return type("User", (), {"alias": "Admin", "username": "admin"})()
+
+    class FakeUser:
+        @staticmethod
+        def filter(**kwargs):
+            return FakeUserQuery()
+
+    async def fake_require_admin():
+        return object()
+
+    async def fake_archive_query(**kwargs):
+        saved["archive_args"] = kwargs
+        return "queries/manual.md"
+
+    monkeypatch.setattr(wiki_module, "_require_wiki_admin", fake_require_admin)
+    monkeypatch.setattr(wiki_module, "WikiMessage", FakeMessageModel)
+    monkeypatch.setattr(wiki_module, "User", FakeUser)
+    monkeypatch.setattr(wiki_module.wiki_builder, "archive_query", fake_archive_query)
+
+    result = await wiki_module.archive_admin_message(message_id=2)
+    body = json.loads(result.body)
+
+    assert body["data"]["archive_path"] == "queries/manual.md"
+    assert saved["archive_args"]["question"] == "question"
+    assert saved["archive_path"] == "queries/manual.md"
 
 
 def test_wiki_search_terms_support_chinese_without_spaces():
@@ -383,6 +555,39 @@ async def test_llm_client_reads_system_setting_config(monkeypatch):
     assert config["llm_chat_base_url"] == "http://127.0.0.1:11434"
     assert config["llm_chat_model"] == "qwen2.5"
     assert config["llm_timeout"] == 12
+
+
+@pytest.mark.anyio
+async def test_wiki_learning_candidate_uses_chinese_review_template(monkeypatch):
+    saved = {}
+
+    class FakeQuery:
+        async def first(self):
+            return None
+
+    class FakeModel:
+        @staticmethod
+        def filter(**kwargs):
+            return FakeQuery()
+
+        @staticmethod
+        async def create(**kwargs):
+            saved["create"] = kwargs
+            return type("Candidate", (), kwargs)()
+
+    monkeypatch.setattr(learning_module, "WikiLearningCandidate", FakeModel)
+
+    candidate = await wiki_learning_service.create_candidate(
+        question="linux服务器安装",
+        answer=None,
+        evidence_page_ids=[],
+        reason="admin_adjust",
+    )
+
+    assert candidate.proposed_content == (
+        "# linux服务器安装\n\n请在这里整理需要写入知识库的内容，确认无误后点击“学习入库”。"
+    )
+    assert "Pending human-approved knowledge update." not in saved["create"]["proposed_content"]
 
 
 @pytest.mark.anyio

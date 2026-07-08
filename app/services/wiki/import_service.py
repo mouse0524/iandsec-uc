@@ -20,7 +20,7 @@ class WikiImportService:
     def __init__(self):
         self.root = Path(settings.UPLOAD_DIR) / "wiki"
 
-    async def create_source(self, *, user_id: int, file: UploadFile) -> WikiSource:
+    async def create_source(self, *, user_id: int, file: UploadFile) -> tuple[WikiSource, bool]:
         filename = Path(file.filename or "").name
         ext = Path(filename).suffix.lower()
         if ext not in SUPPORTED_WIKI_EXTENSIONS:
@@ -38,17 +38,17 @@ class WikiImportService:
                 target.write(chunk)
         return await self.create_source_from_path(user_id=user_id, filename=filename or raw_name, raw_path=raw_path)
 
-    async def create_source_from_path(self, *, user_id: int, filename: str, raw_path: Path) -> WikiSource:
+    async def create_source_from_path(self, *, user_id: int, filename: str, raw_path: Path) -> tuple[WikiSource, bool]:
         filename = Path(filename or raw_path.name).name
         ext = Path(filename).suffix.lower()
         if ext not in SUPPORTED_WIKI_EXTENSIONS:
             raw_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
         digest, size = await anyio.to_thread.run_sync(self._file_digest, raw_path)
-        old = await WikiSource.filter(content_hash=digest, status="completed").first()
+        old = await WikiSource.filter(content_hash=digest, status__in=["pending", "building", "completed"]).first()
         if old:
             raw_path.unlink(missing_ok=True)
-            return old
+            return old, False
         raw_dir = self.root / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         final_path = raw_dir / f"{uuid.uuid4().hex}{ext}"
@@ -64,7 +64,7 @@ class WikiImportService:
             created_by=user_id,
         )
         await WikiIngestJob.create(source_id=source.id)
-        return source
+        return source, True
 
     @staticmethod
     def _file_digest(path: Path) -> tuple[str, int]:

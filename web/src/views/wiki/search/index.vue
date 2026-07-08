@@ -236,7 +236,7 @@ function handleInputKeydown(event) {
           <section v-if="!messages.length" class="welcome-panel">
             <div class="welcome-mark">WIKI</div>
             <h2>今天想了解什么？</h2>
-            <p>我会基于企业 Wiki 生成回答，流式输出，并把问答归档到 wiki/queries。</p>
+            <p>我会基于企业 Wiki 生成回答，流式输出。</p>
             <div class="prompt-grid">
               <button v-for="item in quickPrompts" :key="item" class="prompt-card" type="button" @click="sendSuggestion(item)">
                 {{ item }}
@@ -265,7 +265,7 @@ function handleInputKeydown(event) {
 
               <div v-if="msg.archivePath || msg.citations?.length" class="citations">
                 <button class="citations-toggle" type="button" @click="msg.citationsCollapsed = !msg.citationsCollapsed">
-                  <span>引用与归档</span>
+                  <span>引用</span>
                   <span>{{ msg.citationsCollapsed ? '展开' : '收起' }}</span>
                 </button>
                 <div v-if="!msg.citationsCollapsed" class="citation-list">

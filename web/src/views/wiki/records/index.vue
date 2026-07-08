@@ -1,6 +1,6 @@
 <script setup>
 import { h, onMounted, ref } from 'vue'
-import { NButton, NDataTable, NInput, NModal, NSpace, NTabPane, NTabs, NTag } from 'naive-ui'
+import { NButton, NDataTable, NInput, NModal, NPopconfirm, NSpace, NTabPane, NTabs, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import api from '@/api'
 
@@ -30,7 +30,36 @@ const recordColumns = [
   { title: '用户', key: 'owner_name', width: 120 },
   { title: '问题', key: 'question', minWidth: 220, ellipsis: { tooltip: true } },
   { title: '回答', key: 'content', minWidth: 280, ellipsis: { tooltip: true } },
-  { title: '归档', key: 'archive_path', minWidth: 180, ellipsis: { tooltip: true } },
+  {
+    title: '归档',
+    key: 'archive_path',
+    minWidth: 180,
+    render(row) {
+      return row.archive_path
+        ? h(NTag, { size: 'small', type: 'success' }, { default: () => row.archive_path })
+        : h(NTag, { size: 'small', type: 'warning' }, { default: () => '未归档' })
+    },
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 190,
+    render(row) {
+      return h(NSpace, { size: 8 }, {
+        default: () => [
+          h(
+            NPopconfirm,
+            { disabled: !!row.archive_path, onPositiveClick: () => archiveRecord(row) },
+            {
+              trigger: () => h(NButton, { size: 'small', disabled: !!row.archive_path }, { default: () => '归档' }),
+              default: () => '确认归档该条回答记录？',
+            }
+          ),
+          h(NButton, { size: 'small', type: 'primary', secondary: true, onClick: () => learnFromRecord(row) }, { default: () => '调整学习' }),
+        ],
+      })
+    },
+  },
 ]
 
 const feedbackColumns = [
@@ -79,6 +108,23 @@ async function loadFeedback() {
   } finally {
     feedbackLoading.value = false
   }
+}
+
+async function archiveRecord(row) {
+  await api.wikiArchiveMessage({ message_id: row.id })
+  window.$message?.success('已归档')
+  await loadRecords()
+}
+
+async function learnFromRecord(row) {
+  const res = await api.wikiMarkUnhelpful({
+    question: row.question || '',
+    answer: row.content || '',
+    evidence_page_ids: (row.citations || []).map((item) => Number(item.id)).filter(Boolean),
+  })
+  tab.value = 'feedback'
+  if (res?.data) openLearning(res.data)
+  await loadFeedback()
 }
 
 function openLearning(row) {
