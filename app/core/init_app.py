@@ -504,8 +504,8 @@ async def init_menus():
         partner_parent.redirect = "/partner/review"
         await partner_parent.save()
 
-    partner_review_menu = await Menu.filter(
-        Q(component="/partner/review") | Q(path="review", parent_id=partner_parent.id)
+    partner_review_menu = await Menu.filter(parent_id=partner_parent.id).filter(
+        Q(component="/partner/review") | Q(path="review")
     ).first()
     if partner_review_menu:
         partner_review_menu.menu_type = MenuType.MENU
