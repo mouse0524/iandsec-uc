@@ -1,5 +1,5 @@
 import asyncio
-import random
+import secrets
 import smtplib
 import time
 from email.mime.text import MIMEText
@@ -22,7 +22,11 @@ _LOCAL_EMAIL_CODE_CACHE: dict[str, dict] = {}
 class MailController:
     @staticmethod
     def _gen_code(length: int = 6) -> str:
-        return "".join(str(random.randint(0, 9)) for _ in range(length))
+        return "".join(secrets.choice("0123456789") for _ in range(length))
+
+    @staticmethod
+    def _sanitize_header(value) -> str:
+        return str(value or "").replace("\r", "").replace("\n", "").strip()
 
     @staticmethod
     async def _get_setting() -> dict:
@@ -42,7 +46,7 @@ class MailController:
     @staticmethod
     def _is_valid_email(to_email: str) -> bool:
         try:
-            validate_email(str(to_email or "").strip(), check_deliverability=True)
+            validate_email(str(to_email or "").strip(), check_deliverability=False)
             return True
         except EmailNotValidError:
             return False
@@ -60,7 +64,7 @@ class MailController:
         task.add_done_callback(_done_callback)
 
     async def _send_email(self, *, to_email: str, subject: str, content: str, is_html: bool = False) -> None:
-        to_email = str(to_email or "").strip()
+        to_email = self._sanitize_header(to_email)
         if not self._is_valid_email(to_email):
             logger.warning("[mail.send] invalid_email skip to_email={} subject={}", to_email, subject)
             return
@@ -70,24 +74,26 @@ class MailController:
             raise HTTPException(status_code=400, detail="系统未配置发件箱")
 
         msg = MIMEText(content, "html" if is_html else "plain", "utf-8")
-        msg["From"] = formataddr((setting.get("smtp_sender_name") or "系统通知", setting.get("smtp_sender")))
+        from_email = self._sanitize_header(setting.get("smtp_sender"))
+        from_name = self._sanitize_header(setting.get("smtp_sender_name") or "系统通知")
+        msg["From"] = formataddr((from_name, from_email))
         msg["To"] = to_email
-        msg["Subject"] = subject
+        msg["Subject"] = self._sanitize_header(subject)
 
-        username = setting.get("smtp_username") or setting.get("smtp_sender")
+        username = setting.get("smtp_username") or from_email
         try:
             if setting.get("smtp_use_ssl"):
                 with smtplib.SMTP_SSL(setting.get("smtp_host"), int(setting.get("smtp_port") or 465), timeout=10) as server:
                     if username and setting.get("smtp_password"):
                         server.login(username, setting.get("smtp_password"))
-                    server.sendmail(setting.get("smtp_sender"), [to_email], msg.as_string())
+                    server.sendmail(from_email, [to_email], msg.as_string())
             else:
                 with smtplib.SMTP(setting.get("smtp_host"), int(setting.get("smtp_port") or 465), timeout=10) as server:
                     if setting.get("smtp_use_tls"):
                         server.starttls()
                     if username and setting.get("smtp_password"):
                         server.login(username, setting.get("smtp_password"))
-                    server.sendmail(setting.get("smtp_sender"), [to_email], msg.as_string())
+                    server.sendmail(from_email, [to_email], msg.as_string())
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"发送邮件失败: {exc}")
 

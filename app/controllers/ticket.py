@@ -2,13 +2,13 @@ import asyncio
 import hashlib
 import json
 import os
-import re
 import shutil
 import uuid
 from datetime import datetime
 from mimetypes import guess_type
 from time import perf_counter
 
+import nh3
 from fastapi import HTTPException, UploadFile
 from tortoise.expressions import Q
 
@@ -113,19 +113,41 @@ class TicketController:
         text = str(value or "")
         if not text:
             return ""
-
-        # Strip dangerous tags first
-        text = re.sub(r"<\s*(script|iframe|object|embed|link|style)[^>]*>.*?<\s*/\s*\1\s*>", "", text, flags=re.I | re.S)
-        text = re.sub(r"<\s*(script|iframe|object|embed|link|style)[^>]*?/\s*>", "", text, flags=re.I | re.S)
-
-        # Remove event handlers like onclick/onerror
-        text = re.sub(r"\son[a-zA-Z]+\s*=\s*([\"']).*?\1", "", text, flags=re.I | re.S)
-        text = re.sub(r"\son[a-zA-Z]+\s*=\s*[^\s>]+", "", text, flags=re.I)
-
-        # Remove javascript: href/src
-        text = re.sub(r"\s(href|src)\s*=\s*([\"'])\s*javascript:[^\2]*\2", "", text, flags=re.I)
-        text = re.sub(r"\s(href|src)\s*=\s*javascript:[^\s>]+", "", text, flags=re.I)
-        return text
+        return nh3.clean(
+            text,
+            tags={
+                "a",
+                "blockquote",
+                "br",
+                "code",
+                "em",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "img",
+                "li",
+                "ol",
+                "p",
+                "pre",
+                "span",
+                "strong",
+                "table",
+                "tbody",
+                "td",
+                "th",
+                "thead",
+                "tr",
+                "ul",
+            },
+            clean_content_tags={"script", "style"},
+            attributes={
+                "*": {"class"},
+                "a": {"href", "target", "title"},
+                "img": {"alt", "data-secure-asset", "decoding", "loading", "src", "title"},
+            },
+            url_schemes={"data", "http", "https"},
+        )
 
     @staticmethod
     def _next_ticket_no() -> str:

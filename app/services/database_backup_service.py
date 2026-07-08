@@ -237,10 +237,10 @@ class DatabaseBackupService:
             raise HTTPException(status_code=400, detail="备份 NAS 账号或密码未配置")
 
         remote_path = self.remote_path(config["db_backup_directory"], filename)
-        await self.ensure_webdav_directory(config, config["db_backup_directory"])
         url = self.webdav_url(config["db_backup_webdav_base_url"], remote_path)
         try:
             async with httpx.AsyncClient(timeout=60 * 60, follow_redirects=True) as client:
+                await self.ensure_webdav_directory(config, config["db_backup_directory"], client=client)
                 response = await client.put(
                     url,
                     content=payload,
@@ -255,34 +255,54 @@ class DatabaseBackupService:
             raise HTTPException(status_code=502, detail=f"上传 NAS 远端失败，状态码 {response.status_code}")
         return {"remote_path": remote_path, "status_code": response.status_code}
 
-    async def ensure_webdav_directory(self, config: dict, directory_text: str) -> None:
+    async def ensure_webdav_directory(
+        self,
+        config: dict,
+        directory_text: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if client is None:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as created:
+                await self.ensure_webdav_directory(config, directory_text, client=created)
+            return
+
         directory = self.ensure_remote_directory(directory_text)
         parts = [part for part in directory.strip("/").split("/") if part]
         current = ""
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                for part in parts:
-                    current = f"{current}/{part}"
-                    response = await client.request(
-                        "MKCOL",
-                        self.webdav_url(config["db_backup_webdav_base_url"], current),
-                        auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+            for part in parts:
+                current = f"{current}/{part}"
+                response = await client.request(
+                    "MKCOL",
+                    self.webdav_url(config["db_backup_webdav_base_url"], current),
+                    auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+                )
+                if response.status_code not in {200, 201, 204, 405}:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"创建 NAS 远端目录失败，状态码 {response.status_code}",
                     )
-                    if response.status_code not in {200, 201, 204, 405}:
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"创建 NAS 远端目录失败，状态码 {response.status_code}",
-                        )
         except httpx.RequestError as exc:
             raise HTTPException(status_code=502, detail=f"创建 NAS 远端目录失败: {exc}") from exc
 
-    async def delete_from_webdav(self, config: dict, remote_path: str) -> None:
+    async def delete_from_webdav(
+        self,
+        config: dict,
+        remote_path: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if client is None:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as created:
+                await self.delete_from_webdav(config, remote_path, client=created)
+            return
+
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.delete(
-                    self.webdav_url(config["db_backup_webdav_base_url"], remote_path),
-                    auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
-                )
+            response = await client.delete(
+                self.webdav_url(config["db_backup_webdav_base_url"], remote_path),
+                auth=(config["db_backup_webdav_username"], config["db_backup_webdav_password"]),
+            )
         except httpx.RequestError:
             logger.warning("[database_backup] cleanup_test_file_failed path={}", remote_path)
             return
