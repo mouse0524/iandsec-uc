@@ -42,6 +42,8 @@ docker-compose -f docker-compose.dev.yml down
 ## Production
 
 ```sh
+docker build -f Dockerfile.base --target web-base -t iandsec-uc-web-base:latest .
+docker build -f Dockerfile.base --target app-base -t iandsec-uc-app-base:latest .
 docker-compose -f docker-compose.yml up -d --build
 ```
 

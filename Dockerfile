@@ -1,44 +1,29 @@
-FROM node:20-alpine AS web
+ARG WEB_BASE_IMAGE=iandsec-uc-web-base:latest
+ARG APP_BASE_IMAGE=iandsec-uc-app-base:latest
+FROM ${WEB_BASE_IMAGE} AS web
 
 WORKDIR /opt/iandsec-uc
 COPY /web ./web
 RUN cd /opt/iandsec-uc/web \
-    && corepack enable \
-    && corepack prepare pnpm@9.15.9 --activate \
-    && pnpm config set registry https://registry.npmmirror.com \
-    && pnpm install --frozen-lockfile \
+    && if [ ! -f .web-deps.sha256 ] || ! sha256sum -c .web-deps.sha256; then \
+        pnpm install --frozen-lockfile \
+        && sha256sum package.json pnpm-lock.yaml > .web-deps.sha256; \
+    fi \
     && pnpm run build
 
 
-FROM python:3.11-slim-bookworm
+FROM ${APP_BASE_IMAGE}
 
 WORKDIR /opt/iandsec-uc
 ENV TZ=Asia/Shanghai
 COPY requirements.txt pyproject.toml run.py ./
 COPY deploy/entrypoint.sh .
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked,id=core-apt \
-    set -eux; \
-    for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
-        if [ -f "$source_file" ]; then \
-            sed -i \
-                -e "s@http://deb.debian.org/debian-security@http://mirrors.ustc.edu.cn/debian-security@g" \
-                -e "s@http://security.debian.org/debian-security@http://mirrors.ustc.edu.cn/debian-security@g" \
-                -e "s@http://deb.debian.org/debian@http://mirrors.ustc.edu.cn/debian@g" \
-                "$source_file"; \
-        fi; \
-    done \
-    && rm -f /etc/apt/apt.conf.d/docker-clean \
-    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev bash nginx curl default-mysql-client redis-tools fonts-dejavu-core tzdata docker.io \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=core-pip \
-    pip install --disable-pip-version-check -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    && pip install --disable-pip-version-check --no-deps chinese-days==0.0.2 -i https://pypi.tuna.tsinghua.edu.cn/simple
+    if [ ! -f .requirements.sha256 ] || ! sha256sum -c .requirements.sha256; then \
+        pip install --disable-pip-version-check -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
+        && pip install --disable-pip-version-check --no-deps chinese-days==0.0.2 -i https://pypi.tuna.tsinghua.edu.cn/simple \
+        && sha256sum requirements.txt > .requirements.sha256; \
+    fi
 
 COPY app ./app
 COPY migrations ./migrations

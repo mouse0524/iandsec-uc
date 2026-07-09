@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-iandsec-uc-web-base:latest}
+        APP_BASE_IMAGE: ${APP_BASE_IMAGE:-iandsec-uc-app-base:latest}
     container_name: iandsec-uc-app
     depends_on:
       mysql:

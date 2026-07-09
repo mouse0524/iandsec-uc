@@ -194,6 +194,8 @@ aerich migrate --name your_migration_name
 ### 使用 docker-compose
 
 ```sh
+docker build -f Dockerfile.base --target web-base -t iandsec-uc-web-base:latest .
+docker build -f Dockerfile.base --target app-base -t iandsec-uc-app-base:latest .
 docker-compose -f docker-compose.yml up -d --build
 ```
 
@@ -212,9 +214,13 @@ docker-compose -f docker-compose.yml down
 ### 使用 Dockerfile 构建镜像
 
 ```sh
+docker build -f Dockerfile.base --target web-base -t iandsec-uc-web-base:latest .
+docker build -f Dockerfile.base --target app-base -t iandsec-uc-app-base:latest .
 docker build -t iandsec-uc .
 docker run -d --restart=always --name iandsec-uc -p 9999:80 iandsec-uc
 ```
+
+基础镜像只需要在 Node/Python 版本、系统包或大批量依赖预热需要更新时重建。普通 `requirements.txt`、`web/package.json` 或 `web/pnpm-lock.yaml` 变更后，直接重新构建业务镜像即可，Dockerfile 会在业务镜像层补装依赖。
 
 ## 常用命令
 
