@@ -12,6 +12,7 @@ const LEGACY_STORAGE_KEY = 'outbound_release_records'
 const formRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
+const editorVisible = ref(false)
 const activeRecordId = ref(null)
 const records = ref([])
 const form = ref(createEmptyForm())
@@ -158,8 +159,10 @@ async function loadRecords(selectedId = activeRecordId.value) {
       const retry = await api.releaseList()
       records.value = Array.isArray(retry.data) ? retry.data : []
     }
-    const current = records.value.find((item) => item.id === selectedId) || records.value[0]
-    if (current) viewRecord(current)
+    if (isViewMode.value) {
+      const current = records.value.find((item) => item.id === selectedId) || records.value[0]
+      if (current) viewRecord(current)
+    }
   } finally {
     loading.value = false
   }
@@ -216,6 +219,7 @@ function resetForm() {
 function newFromTemplate() {
   activeRecordId.value = null
   form.value = createTemplateForm()
+  editorVisible.value = true
 }
 
 function submitRelease() {
@@ -231,6 +235,7 @@ function submitRelease() {
       const savedId = res.data?.id || null
       form.value = { ...createEmptyForm(), ...res.data }
       await loadRecords(savedId)
+      editorVisible.value = false
       $message.success('发布记录已保存')
     } finally {
       saving.value = false
@@ -245,7 +250,7 @@ function viewRecord(row) {
 
 function editRecord(row) {
   viewRecord(row)
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  editorVisible.value = true
 }
 
 async function removeRecord(id) {
@@ -267,7 +272,16 @@ async function clearRecords() {
   <CommonPage :title="isViewMode ? '版本发布' : '版本发布记录'" :show-header="false" show-footer>
     <NSpin :show="loading">
     <div class="release-page" :class="{ 'view-mode': isViewMode }">
-      <section v-if="!isViewMode" class="editor">
+      <NModal
+        v-if="!isViewMode"
+        v-model:show="editorVisible"
+        preset="card"
+        :title="activeRecordId ? '编辑版本发布记录' : '新增版本发布记录'"
+        class="release-editor-modal"
+        :style="{ width: 'min(980px, 96vw)' }"
+        :bordered="false"
+      >
+      <section class="editor">
         <div class="page-head">
           <div>
             <p class="eyebrow">Outbound Release</p>
@@ -378,13 +392,13 @@ async function clearRecords() {
             <NButton type="primary" :loading="saving" @click="submitRelease">
               {{ activeRecordId ? '更新发布记录' : '保存发布记录' }}
             </NButton>
-            <NButton secondary @click="newFromTemplate">新建</NButton>
             <NButton tertiary @click="resetForm">清空</NButton>
           </div>
         </NForm>
       </section>
+      </NModal>
 
-      <section v-if="!isViewMode || records.length" class="preview">
+      <section v-if="isViewMode && records.length" class="preview">
         <article class="release-sheet">
           <header class="release-header">
             <h2><span>发布记录</span>{{ form.product }} {{ form.version }}</h2>
@@ -462,19 +476,22 @@ async function clearRecords() {
         </article>
       </section>
 
-      <section v-else class="empty-view">
+      <section v-else-if="isViewMode" class="empty-view">
         <NEmpty description="暂无版本发布记录" />
       </section>
 
       <section class="records" :class="{ 'pipeline-panel': isViewMode }">
         <div class="table-head">
           <div class="section-title">{{ isViewMode ? '历史版本' : '记录列表' }}</div>
-          <NPopconfirm v-if="!isViewMode" :disabled="!records.length" @positive-click="clearRecords">
-            <template #trigger>
-              <NButton size="small" tertiary type="error" :disabled="!records.length">清空</NButton>
-            </template>
-            确认清空所有发布记录？
-          </NPopconfirm>
+          <div v-if="!isViewMode" class="table-actions">
+            <NButton size="small" type="primary" @click="newFromTemplate">新增</NButton>
+            <NPopconfirm :disabled="!records.length" @positive-click="clearRecords">
+              <template #trigger>
+                <NButton size="small" tertiary type="error" :disabled="!records.length">清空</NButton>
+              </template>
+              确认清空所有发布记录？
+            </NPopconfirm>
+          </div>
         </div>
         <div v-if="isViewMode" class="pipeline">
           <button
@@ -511,7 +528,7 @@ async function clearRecords() {
 <style scoped>
 .release-page {
   display: grid;
-  grid-template-columns: minmax(380px, 520px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: 20px;
   background: #eef3f8;
@@ -632,6 +649,7 @@ async function clearRecords() {
 
 .actions,
 .table-head,
+.table-actions,
 :deep(.row-actions) {
   display: flex;
   align-items: center;

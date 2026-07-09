@@ -235,37 +235,37 @@ const columns = [
       v-model:visible="modalVisible"
       :title="readonly ? '项目日志详情' : editingId ? '编辑项目日志' : '新增项目日志'"
       :show-footer="!readonly"
-      width="760px"
+      width="860px"
       @save="submitActivity"
     >
       <div class="activity-modal-head">
         <div>
-          <div class="modal-eyebrow">{{ readonly ? 'OPS DETAIL' : editingId ? 'OPS EDIT' : 'OPS CREATE' }}</div>
-          <div class="modal-activity-name">{{ form.title || '未命名项目日志' }}</div>
+          <div class="modal-eyebrow">{{ readonly ? '日志详情' : editingId ? '编辑日志' : '新增日志' }}</div>
+          <div class="modal-activity-name">{{ form.title || '填写项目日志标题' }}</div>
         </div>
         <div class="modal-tags">
           <NTag v-if="form.activity_type" size="small" round type="info">{{ form.activity_type }}</NTag>
         </div>
       </div>
       <NForm class="activity-form" label-placement="top">
-        <div class="form-section">
+        <div class="form-section primary-section">
           <div class="section-title"><span>基础信息</span></div>
           <div class="form-grid">
-            <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" :disabled="readonly" filterable remote @focus="loadProjectOptions" @search="loadProjectOptions" /></NFormItem>
-            <NFormItem label="运维类型"><NSelect v-model:value="form.activity_type" :options="activityTypeOptions" :disabled="readonly" /></NFormItem>
-            <NFormItem label="标题" class="span-2"><NInput v-model:value="form.title" :disabled="readonly" /></NFormItem>
+            <NFormItem label="项目"><NSelect v-model:value="form.project_id" :options="projectOptions" placeholder="搜索项目" :disabled="readonly" filterable remote @focus="loadProjectOptions" @search="loadProjectOptions" /></NFormItem>
+            <NFormItem label="运维类型"><NSelect v-model:value="form.activity_type" :options="activityTypeOptions" placeholder="选择类型" :disabled="readonly" /></NFormItem>
+            <NFormItem label="标题" class="span-2 activity-title-field"><NInput v-model:value="form.title" placeholder="请输入日志标题" :disabled="readonly" /></NFormItem>
           </div>
         </div>
         <div class="form-section">
           <div class="section-title"><span>处理信息</span></div>
           <div class="form-grid">
-            <NFormItem label="处理人"><NSelect v-model:value="form.operator_id" :options="userOptions" :disabled="readonly" clearable filterable remote @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
+            <NFormItem label="处理人"><NSelect v-model:value="form.operator_id" :options="userOptions" placeholder="搜索处理人" :disabled="readonly" clearable filterable remote @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
             <NFormItem label="处理时间"><NDatePicker v-model:value="form.started_at" type="datetime" :disabled="readonly" clearable style="width: 100%" /></NFormItem>
           </div>
         </div>
-        <div class="form-section">
+        <div class="form-section content-section">
           <div class="section-title"><span>项目日志内容</span></div>
-          <NFormItem label="内容"><NInput v-model:value="form.content" type="textarea" :disabled="readonly" :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
+          <NFormItem label="内容"><NInput v-model:value="form.content" type="textarea" placeholder="记录处理过程、结论或后续事项" :disabled="readonly" :autosize="{ minRows: 5, maxRows: 10 }" /></NFormItem>
         </div>
       </NForm>
     </CrudModal>
@@ -278,25 +278,30 @@ const columns = [
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin: -4px 0 18px;
-  padding: 16px 18px;
-  border: 1px solid #e6edf7;
+  margin: -4px 0 16px;
+  padding: 18px 20px;
+  border: 1px solid #cfe3ff;
   border-radius: 8px;
-  background: linear-gradient(135deg, #f7fbff 0%, #ffffff 58%, #f7fff9 100%);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 
 .modal-eyebrow {
-  margin-bottom: 6px;
-  color: #64748b;
+  margin-bottom: 8px;
+  color: #2563eb;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
 .modal-activity-name {
   color: #0f172a;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.3;
+  word-break: break-word;
 }
 
 .modal-tags {
@@ -308,16 +313,27 @@ const columns = [
 }
 
 .activity-form {
-  max-height: 68vh;
+  max-height: 72vh;
   overflow-y: auto;
   padding: 0 4px 2px 0;
 }
 
 .form-section {
-  padding: 14px 16px 2px;
+  padding: 16px 18px 4px;
   border: 1px solid #edf1f7;
   border-radius: 8px;
   background: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.03);
+}
+
+.primary-section {
+  border-color: #cfe3ff;
+  background: #fbfdff;
+}
+
+.content-section {
+  border-color: #99d5cc;
+  background: #f8fffd;
 }
 
 .form-section + .form-section {
@@ -338,8 +354,12 @@ const columns = [
   width: 4px;
   height: 14px;
   border-radius: 999px;
-  background: #18a058;
+  background: #2563eb;
   content: '';
+}
+
+.content-section .section-title::before {
+  background: #0f766e;
 }
 
 .form-grid {
@@ -351,6 +371,25 @@ const columns = [
 
 .span-2 {
   grid-column: 1 / -1;
+}
+
+.activity-title-field :deep(.n-input__input-el) {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.content-section :deep(.n-input) {
+  background: #fff;
+}
+
+@media (max-width: 640px) {
+  .activity-modal-head {
+    flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 </style>

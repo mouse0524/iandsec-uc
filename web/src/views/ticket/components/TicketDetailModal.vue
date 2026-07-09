@@ -503,6 +503,23 @@ function getActionIconClass(action) {
   background: #fbfcfe;
 }
 
+.issue-section {
+  border-color: #99d5cc;
+  background: linear-gradient(180deg, #effdf9 0%, #ffffff 82%);
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.08);
+}
+
+.issue-section .section-title {
+  color: #0f766e;
+  font-size: 16px;
+}
+
+.issue-section .section-title::before {
+  width: 6px;
+  height: 18px;
+  background: #0f766e;
+}
+
 .detail-card {
   min-height: 42px;
   padding: 6px 8px;
@@ -568,15 +585,18 @@ function getActionIconClass(action) {
 
 .description-content {
   margin-top: 12px;
-  padding: 14px 16px;
-  border: 1px solid #eef2f7;
+  padding: 18px 20px;
+  border: 1px solid #99d5cc;
+  border-left-width: 6px;
   border-radius: 8px;
-  background: #fbfdff;
-  color: #374151;
-  line-height: 1.8;
+  background: #f8fffd;
+  color: #1f2937;
+  font-size: 15px;
+  line-height: 1.9;
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
+  box-shadow: 0 8px 22px rgba(15, 118, 110, 0.08);
 }
 
 .description-content :deep(img) {

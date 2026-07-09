@@ -3,10 +3,10 @@ import re
 from tortoise.expressions import Q
 
 LEGAL_COMPANY_NAME_RE = re.compile(
-    r"^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$",
+    r"^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|\(有限合伙\)|（特殊普通合伙）|\(特殊普通合伙\)|分公司)$",
     re.IGNORECASE,
 )
-LEGAL_COMPANY_NAME_MESSAGE = "公司名称必须填写完整，并以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾"
+LEGAL_COMPANY_NAME_MESSAGE = "公司名称必须填写完整，并以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）/(有限合伙)、（特殊普通合伙）/(特殊普通合伙)或分公司结尾"
 
 
 COMPANY_SUFFIXES = (

@@ -304,7 +304,7 @@ async function submitRemarkTimeline() {
     operator_id: userStore.userId || null,
     started_at: new Date().toISOString(),
   })
-  $message.success('备注流水已添加')
+  $message.success('项目日志已添加')
   remarkForm.value.content = ''
   await loadRemarkTimeline()
   if (workOrderVisible.value && workOrderProject.value?.id === editingId.value) {
@@ -724,112 +724,118 @@ const columns = [
     <CrudModal
       v-model:visible="modalVisible"
       :title="readonly ? '项目详情' : editingId ? '编辑项目' : '新增项目'"
-      width="760px"
+      width="min(1280px, 96vw)"
       :show-footer="!readonly"
       @save="submitProject"
     >
       <div class="project-modal-head">
         <div>
-          <div class="modal-eyebrow">{{ readonly ? 'PROJECT DETAIL' : editingId ? 'PROJECT EDIT' : 'PROJECT CREATE' }}</div>
-          <div class="modal-project-name">{{ form.project_name || '未命名项目' }}</div>
+          <div class="modal-eyebrow">{{ readonly ? '项目详情' : editingId ? '编辑项目' : '创建项目' }}</div>
+          <div class="modal-project-name">{{ form.project_name || '填写项目名称' }}</div>
         </div>
         <div class="modal-tags">
           <NTag v-if="form.region" size="small" round>{{ form.region }}</NTag>
           <NTag v-if="form.status" size="small" round type="info">{{ form.status }}</NTag>
         </div>
       </div>
-      <NForm class="project-form" label-placement="top">
-        <div class="form-section">
-          <div class="section-title"><span>基础信息</span></div>
-          <div class="form-grid">
-            <NFormItem label="项目名称" class="span-2"><NInput v-model:value="form.project_name" :disabled="readonly" /></NFormItem>
-            <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
-            <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable :disabled="readonly" /></NFormItem>
-            <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote :disabled="readonly" @search="loadAgentOptions" /></NFormItem>
-            <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" :disabled="readonly" /></NFormItem>
-            <NFormItem label="服务器版本"><NSelect v-model:value="form.server_version" :options="serverVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
-            <NFormItem label="客户端版本"><NSelect v-model:value="form.client_version" :options="clientVersionOptions" clearable filterable :disabled="readonly" /></NFormItem>
-            <NFormItem label="开始时间"><NDatePicker v-model:value="form.start_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
-            <NFormItem label="结束时间"><NDatePicker v-model:value="form.end_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
-            <NFormItem label="维保时间"><NDatePicker v-model:value="form.maintenance_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="section-title"><span>产品点数</span></div>
-          <NFormItem label="使用产品">
-            <NSelect v-model:value="selectedProducts" :options="productOptions" multiple clearable :disabled="readonly" />
-          </NFormItem>
-          <div v-if="form.product_points.length" class="points-grid">
-            <NFormItem v-for="item in form.product_points" :key="item.product_name" :label="`${item.product_name}点数`">
-              <NInputNumber v-model:value="item.points" :min="0" style="width: 100%" :disabled="readonly" />
-            </NFormItem>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="section-title"><span>对接信息</span></div>
-          <div class="form-grid">
-            <NFormItem label="负责人"><NSelect v-model:value="form.assignee_id" :options="userOptions" clearable filterable remote :disabled="readonly" @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
-            <NFormItem label="客户对接人"><NInput v-model:value="form.customer_contact" :disabled="readonly" /></NFormItem>
-            <NFormItem label="联系电话"><NInput v-model:value="form.customer_phone" :disabled="readonly" /></NFormItem>
-            <NFormItem label="联系邮箱"><NInput v-model:value="form.customer_email" :disabled="readonly" /></NFormItem>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="section-title"><span>项目日志</span></div>
-          <div v-if="editingId" class="remark-timeline">
-            <div v-if="!readonly" class="remark-add">
-              <NInput
-                v-model:value="remarkForm.content"
-                class="remark-input"
-                type="textarea"
-                placeholder="填写本次项目日志"
-                :autosize="{ minRows: 2, maxRows: 4 }"
-              />
-              <NButton class="remark-submit" type="primary" @click="submitRemarkTimeline">添加日志</NButton>
+      <NForm class="project-form project-editor-form" label-placement="top">
+        <div class="project-editor-body">
+          <div class="form-section primary-section">
+            <div class="section-title"><span>基础信息</span></div>
+            <div class="form-grid">
+              <NFormItem label="项目名称" class="span-full project-name-field"><NInput v-model:value="form.project_name" placeholder="请输入完整项目名称" :disabled="readonly" /></NFormItem>
+              <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
+              <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable placeholder="选择区域" :disabled="readonly" /></NFormItem>
+              <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote placeholder="搜索代理商" :disabled="readonly" @search="loadAgentOptions" /></NFormItem>
+              <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" placeholder="选择状态" :disabled="readonly" /></NFormItem>
+              <NFormItem label="服务器版本"><NSelect v-model:value="form.server_version" :options="serverVersionOptions" clearable filterable placeholder="选择服务器版本" :disabled="readonly" /></NFormItem>
+              <NFormItem label="客户端版本"><NSelect v-model:value="form.client_version" :options="clientVersionOptions" clearable filterable placeholder="选择客户端版本" :disabled="readonly" /></NFormItem>
+              <NFormItem label="开始时间"><NDatePicker v-model:value="form.start_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
+              <NFormItem label="结束时间"><NDatePicker v-model:value="form.end_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
+              <NFormItem label="维保时间"><NDatePicker v-model:value="form.maintenance_time" type="date" clearable style="width: 100%" :disabled="readonly" /></NFormItem>
             </div>
-            <div v-if="remarkTimelineRows.length" class="remark-list">
-              <div v-for="item in remarkTimelineRows" :key="item.id" class="remark-item">
-                <div class="remark-meta">
-                  <NTag size="small" type="info">{{ item.activity_type || '-' }}</NTag>
-                  <span>{{ item.started_at || item.created_at || '-' }}</span>
-                  <span>{{ item.operator_name || item.creator_name || '-' }}</span>
-                </div>
-                <div class="remark-content">{{ item.content || item.title || '-' }}</div>
+          </div>
+
+          <div class="project-editor-main">
+            <div class="form-section product-section">
+              <div class="section-title"><span>产品点数</span></div>
+              <NFormItem label="使用产品">
+                <NSelect v-model:value="selectedProducts" :options="productOptions" multiple clearable placeholder="选择使用产品" :disabled="readonly" />
+              </NFormItem>
+              <div v-if="form.product_points.length" class="points-grid">
+                <NFormItem v-for="item in form.product_points" :key="item.product_name" :label="`${item.product_name}点数`">
+                  <NInputNumber v-model:value="item.points" :min="0" style="width: 100%" :disabled="readonly" />
+                </NFormItem>
               </div>
             </div>
-            <div v-else class="remark-empty">暂无项目日志流水</div>
-          </div>
-          <NFormItem v-else label="项目日志">
-            <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" />
-          </NFormItem>
-        </div>
 
-        <div class="form-section">
-          <div class="section-title"><span>附件</span></div>
-          <NFormItem label="项目附件">
-            <NUpload
-              v-model:file-list="fileList"
-              :custom-request="customUpload"
-              :disabled="readonly"
-              :show-remove-button="!readonly"
-              @remove="handleRemove"
-            >
-              <NButton :loading="uploadLoading" :disabled="readonly">上传附件</NButton>
-            </NUpload>
-          </NFormItem>
-          <div v-if="fileList.length" class="attachment-list">
-            <NButton
-              v-for="file in fileList"
-              :key="file.id"
-              text
-              type="primary"
-              @click="downloadAttachment(file)"
-            >
-              {{ file.name }}
-            </NButton>
+            <div class="form-section contact-section">
+              <div class="section-title"><span>对接信息</span></div>
+              <div class="form-grid contact-grid">
+                <NFormItem label="负责人"><NSelect v-model:value="form.assignee_id" :options="userOptions" clearable filterable remote placeholder="搜索负责人" :disabled="readonly" @focus="loadUserOptions" @search="loadUserOptions" /></NFormItem>
+                <NFormItem label="客户对接人"><NInput v-model:value="form.customer_contact" placeholder="请输入客户对接人" :disabled="readonly" /></NFormItem>
+                <NFormItem label="联系电话"><NInput v-model:value="form.customer_phone" placeholder="请输入联系电话" :disabled="readonly" /></NFormItem>
+                <NFormItem label="联系邮箱"><NInput v-model:value="form.customer_email" placeholder="请输入联系邮箱" :disabled="readonly" /></NFormItem>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-editor-side">
+            <div class="form-section remark-section">
+              <div class="section-title"><span>项目日志</span></div>
+              <div v-if="editingId" class="remark-timeline">
+                <div v-if="!readonly" class="remark-add">
+                  <NInput
+                    v-model:value="remarkForm.content"
+                    class="remark-input"
+                    type="textarea"
+                    placeholder="填写本次项目日志"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                  />
+                  <NButton class="remark-submit" type="primary" @click="submitRemarkTimeline">添加日志</NButton>
+                </div>
+                <div v-if="remarkTimelineRows.length" class="remark-list">
+                  <div v-for="item in remarkTimelineRows" :key="item.id" class="remark-item">
+                    <div class="remark-meta">
+                      <NTag size="small" type="info">{{ item.activity_type || '-' }}</NTag>
+                      <span>{{ item.started_at || item.created_at || '-' }}</span>
+                      <span>{{ item.operator_name || item.creator_name || '-' }}</span>
+                    </div>
+                    <div class="remark-content">{{ item.content || item.title || '-' }}</div>
+                  </div>
+                </div>
+                <div v-else class="remark-empty">暂无项目日志</div>
+              </div>
+              <NFormItem v-else label="项目日志">
+                <NInput v-model:value="form.remark" type="textarea" placeholder="记录项目背景、当前进展或注意事项" :autosize="{ minRows: 2, maxRows: 4 }" />
+              </NFormItem>
+            </div>
+
+            <div class="form-section attachment-section">
+              <div class="section-title"><span>附件</span></div>
+              <NFormItem label="项目附件">
+                <NUpload
+                  v-model:file-list="fileList"
+                  :custom-request="customUpload"
+                  :disabled="readonly"
+                  :show-remove-button="!readonly"
+                  @remove="handleRemove"
+                >
+                  <NButton :loading="uploadLoading" :disabled="readonly">上传附件</NButton>
+                </NUpload>
+              </NFormItem>
+              <div v-if="fileList.length" class="attachment-list">
+                <NButton
+                  v-for="file in fileList"
+                  :key="file.id"
+                  text
+                  type="primary"
+                  @click="downloadAttachment(file)"
+                >
+                  {{ file.name }}
+                </NButton>
+              </div>
+            </div>
           </div>
         </div>
       </NForm>
@@ -939,25 +945,30 @@ const columns = [
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin: -4px 0 18px;
-  padding: 16px 18px;
-  border: 1px solid #e6edf7;
+  margin: -4px 0 16px;
+  padding: 18px 20px;
+  border: 1px solid #cfe3ff;
   border-radius: 8px;
-  background: linear-gradient(135deg, #f7fbff 0%, #ffffff 58%, #f7fff9 100%);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 
 .modal-eyebrow {
-  margin-bottom: 6px;
-  color: #64748b;
+  margin-bottom: 8px;
+  color: #2563eb;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
 .modal-project-name {
   color: #0f172a;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.3;
+  word-break: break-word;
 }
 
 .modal-tags {
@@ -969,16 +980,93 @@ const columns = [
 }
 
 .project-form {
-  max-height: 68vh;
+  max-height: 72vh;
   overflow-y: auto;
   padding: 0 4px 2px 0;
 }
 
+.project-editor-form {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.project-editor-form .form-section {
+  padding: 14px;
+}
+
+.project-editor-form .form-section + .form-section {
+  margin-top: 0;
+}
+
+.project-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.project-editor-main,
+.project-editor-side {
+  display: contents;
+}
+
+.project-editor-form .section-title {
+  margin-bottom: 12px;
+}
+
+.project-editor-form .form-grid,
+.project-editor-form .points-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 14px;
+  row-gap: 12px;
+}
+
+.project-editor-form .span-2 {
+  grid-column: span 2;
+}
+
+.project-editor-form .span-full {
+  grid-column: 1 / -1;
+}
+
+.project-editor-form :deep(.n-form-item-feedback-wrapper) {
+  min-height: 0;
+}
+
 .form-section {
-  padding: 14px 16px 2px;
+  padding: 16px 18px 4px;
   border: 1px solid #edf1f7;
   border-radius: 8px;
   background: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.03);
+}
+
+.primary-section {
+  border-color: #cfe3ff;
+  background: #fbfdff;
+}
+
+.product-section {
+  border-color: #d9e8ff;
+  background: #fbfdff;
+}
+
+.contact-section {
+  border-color: #e1e7f0;
+  background: #fff;
+}
+
+.remark-section {
+  border-color: #d5eadf;
+  background: #fbfffd;
+}
+
+.attachment-section {
+  border-color: #e1e7f0;
+  background: #fcfdff;
+}
+
+.project-editor-side .section-title {
+  margin-bottom: 8px;
 }
 
 .form-section + .form-section {
@@ -999,7 +1087,7 @@ const columns = [
   width: 4px;
   height: 14px;
   border-radius: 999px;
-  background: #18a058;
+  background: #2563eb;
   content: '';
 }
 
@@ -1009,6 +1097,15 @@ const columns = [
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 16px;
   row-gap: 2px;
+}
+
+.project-name-field :deep(.n-input) {
+  background: #fff;
+}
+
+.project-name-field :deep(.n-input__input-el) {
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .span-2 {
@@ -1024,10 +1121,10 @@ const columns = [
   grid-template-columns: minmax(0, 1fr) 96px;
   gap: 8px;
   align-items: flex-start;
-  padding: 10px;
-  border: 1px solid #e6edf7;
+  padding: 12px;
+  border: 1px solid #d5eadf;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #f6fffa;
 }
 
 .remark-input :deep(.n-input) {
@@ -1050,7 +1147,7 @@ const columns = [
   padding: 10px 12px;
   border: 1px solid #edf1f7;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #fbfdff;
 }
 
 .remark-meta {
@@ -1073,6 +1170,16 @@ const columns = [
   margin-top: 10px;
   color: #94a3b8;
   font-size: 13px;
+}
+
+.attachment-section :deep(.n-upload-file-list) {
+  margin-top: 6px;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .summary-grid {
@@ -1180,7 +1287,45 @@ const columns = [
   background: #fff1f2;
 }
 
+@media (max-width: 900px) {
+  .project-editor-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .product-section {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 640px) {
+  .project-modal-head {
+    flex-direction: column;
+  }
+
+  .form-grid,
+  .points-grid,
+  .project-editor-form .form-grid,
+  .project-editor-form .points-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-editor-form .span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .project-editor-form .span-full {
+    grid-column: 1 / -1;
+  }
+
+  .remark-add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remark-submit {
+    width: 100%;
+    min-height: 40px;
+  }
+
   .product-summary {
     align-items: flex-start;
     flex-direction: column;
