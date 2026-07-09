@@ -1,18 +1,20 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NSpace, NTag, NTooltip } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import RichTextEditor from '@/components/editor/RichTextEditor.vue'
-import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import TicketEditModal from '@/views/ticket/components/TicketEditModal.vue'
 import api from '@/api'
+import { openAuthRouteInNewTab } from '@/utils'
 import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
 defineOptions({ name: '技术处理' })
 
 const $table = ref(null)
+const router = useRouter()
 const queryItems = ref({ status: 'tech_processing' })
 const tableData = ref([])
 const summaryStats = ref({
@@ -22,9 +24,6 @@ const summaryStats = ref({
   done: 0,
   tech_rejected: 0,
 })
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const currentTicket = ref({})
 const editVisible = ref(false)
 const editingTicket = ref({})
 const commentVisible = ref(false)
@@ -207,22 +206,13 @@ async function takeAction(row, action) {
   $table.value?.handleSearch()
 }
 
-async function openDetail(row) {
-  currentTicket.value = row
-  detailLoading.value = true
-  detailVisible.value = true
-  try {
-    const res = await api.getTicketById({ ticket_id: row.id })
-    if (currentTicket.value?.id === row.id) {
-      currentTicket.value = res.data
-    }
-  } catch (error) {
-    $message.error('加载工单详情失败')
-  } finally {
-    if (currentTicket.value?.id === row.id) {
-      detailLoading.value = false
-    }
-  }
+function getDetailHref(row) {
+  return router.resolve({ path: '/ticket/detail', query: { ticket_id: row.id } }).href
+}
+
+function openDetail(row) {
+  if (!row?.id) return
+  openAuthRouteInNewTab(getDetailHref(row))
 }
 
 function applyQuickFilter(status) {
@@ -437,9 +427,6 @@ async function pushRedmine(row, payload = {}) {
     const res = await api.pushTicketRedmine({ ticket_id: row.id, ...payload })
     $message.success(res?.msg || 'Redmine同步成功')
     $table.value?.handleSearch()
-    if (currentTicket.value?.id === row.id) {
-      currentTicket.value = res?.data || currentTicket.value
-    }
   } finally {
     setRedmineLoading(row.id, false)
   }
@@ -499,10 +486,6 @@ async function pullRedmine(row) {
     const res = await api.pullTicketRedmine({ ticket_id: row.id })
     $message.success(res?.msg || 'Redmine状态已更新')
     $table.value?.handleSearch()
-    if (currentTicket.value?.id === row.id) {
-      const detailRes = await api.getTicketById({ ticket_id: row.id })
-      currentTicket.value = detailRes?.data || res?.data || currentTicket.value
-    }
   } finally {
     setRedmineLoading(row.id, false)
   }
@@ -606,8 +589,13 @@ const columns = [
         'a',
         {
           class: 'ticket-title-link',
-          href: 'javascript:void(0)',
-          onClick: () => openDetail(row),
+          href: getDetailHref(row),
+          target: '_blank',
+          rel: 'noopener',
+          onClick: (event) => {
+            event.preventDefault()
+            openDetail(row)
+          },
         },
         row.title || '-'
       )
@@ -706,7 +694,7 @@ const columns = [
 </script>
 
 <template>
-  <CommonPage title="技术处理" show-footer>
+  <CommonPage title="技术处理" :show-header="false" show-footer>
     <div class="ticket-tech-page">
       <div class="summary-grid tech-grid">
         <div v-for="item in summaryCards" :key="item.label" class="summary-item" :data-tone="item.tone">
@@ -793,7 +781,6 @@ const columns = [
         </CrudTable>
       </NCard>
 
-      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
       <TicketEditModal
         v-model:visible="editVisible"
         :ticket="editingTicket"

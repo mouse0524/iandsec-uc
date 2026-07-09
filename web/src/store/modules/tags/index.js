@@ -67,7 +67,6 @@ export const useTagsStore = defineStore('tag', {
       if (!filtered.find((item) => item.path === this.activeTag)) {
         const nextPath = filtered[filtered.length - 1]?.path || getRoleDefaultPath()
         this.setActiveTag(nextPath)
-        router.push(nextPath)
       }
     },
     removeOther(curPath = this.activeTag) {

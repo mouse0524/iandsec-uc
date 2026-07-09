@@ -155,6 +155,19 @@ def _wiki_admin_api_paths() -> list[str]:
     ]
 
 
+def _release_view_api_paths() -> list[str]:
+    return ["/api/v1/release/view-list"]
+
+
+def _release_admin_api_paths() -> list[str]:
+    return [
+        "/api/v1/release/list",
+        "/api/v1/release/save",
+        "/api/v1/release/delete",
+        "/api/v1/release/clear",
+    ]
+
+
 def make_middlewares():
     middleware = [
         Middleware(
@@ -453,7 +466,7 @@ async def init_menus():
             "component": "/project/list",
         },
         {
-            "name": "运维记录",
+            "name": "项目日志",
             "path": "activity",
             "order": 2,
             "icon": "material-symbols:fact-check-outline-rounded",
@@ -614,7 +627,7 @@ async def init_menus():
             is_hidden=False,
             component="Layout",
             keepalive=False,
-            redirect="/outbound/webdav",
+            redirect="/outbound/release-view",
         )
     else:
         outbound_parent.menu_type = MenuType.CATALOG
@@ -625,7 +638,7 @@ async def init_menus():
         outbound_parent.is_hidden = False
         outbound_parent.component = "Layout"
         outbound_parent.keepalive = False
-        outbound_parent.redirect = "/outbound/webdav"
+        outbound_parent.redirect = "/outbound/release-view"
         await outbound_parent.save()
 
     webdav_menu = await Menu.filter(
@@ -734,6 +747,60 @@ async def init_menus():
             icon="material-symbols:key-outline-rounded",
             is_hidden=False,
             component="/system/webdav-password",
+            keepalive=False,
+            redirect="",
+        )
+
+    release_view_menu = await Menu.filter(path="release-view", parent_id=outbound_parent.id).first()
+    if release_view_menu:
+        release_view_menu.menu_type = MenuType.MENU
+        release_view_menu.name = "版本发布"
+        release_view_menu.path = "release-view"
+        release_view_menu.order = 5
+        release_view_menu.parent_id = outbound_parent.id
+        release_view_menu.icon = "material-symbols:notifications-active-outline-rounded"
+        release_view_menu.is_hidden = False
+        release_view_menu.component = "/system/release-records"
+        release_view_menu.keepalive = False
+        release_view_menu.redirect = ""
+        await release_view_menu.save()
+    else:
+        await Menu.create(
+            menu_type=MenuType.MENU,
+            name="版本发布",
+            path="release-view",
+            order=5,
+            parent_id=outbound_parent.id,
+            icon="material-symbols:notifications-active-outline-rounded",
+            is_hidden=False,
+            component="/system/release-records",
+            keepalive=False,
+            redirect="",
+        )
+
+    release_records_menu = await Menu.filter(path="release-records", parent_id=outbound_parent.id).first()
+    if release_records_menu:
+        release_records_menu.menu_type = MenuType.MENU
+        release_records_menu.name = "版本发布记录"
+        release_records_menu.path = "release-records"
+        release_records_menu.order = 6
+        release_records_menu.parent_id = outbound_parent.id
+        release_records_menu.icon = "material-symbols:list-alt-outline"
+        release_records_menu.is_hidden = False
+        release_records_menu.component = "/system/release-records"
+        release_records_menu.keepalive = False
+        release_records_menu.redirect = ""
+        await release_records_menu.save()
+    else:
+        await Menu.create(
+            menu_type=MenuType.MENU,
+            name="版本发布记录",
+            path="release-records",
+            order=6,
+            parent_id=outbound_parent.id,
+            icon="material-symbols:list-alt-outline",
+            is_hidden=False,
+            component="/system/release-records",
             keepalive=False,
             redirect="",
         )
@@ -1158,6 +1225,17 @@ async def init_roles():
                     api_paths=_wiki_read_api_paths(),
                     component_paths=["/wiki", "/wiki/search", "/wiki/view"],
                 )
+            for role_name in ["用户", "渠道商", "客服", "技术"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_release_view_api_paths(),
+                    component_paths=["/outbound", "release-view"],
+                )
+            await _remove_existing_role_permissions(
+                role_names=["用户", "渠道商", "客服", "技术"],
+                api_paths=_release_admin_api_paths(),
+                component_paths=["release-records"],
+            )
             await _remove_existing_role_permissions(
                 role_names=["用户", "渠道商", "客服", "技术"],
                 api_paths=[*_wiki_edit_api_paths(), *_wiki_admin_api_paths()],
@@ -1236,6 +1314,8 @@ async def init_roles():
     wiki_read_apis = await Api.filter(path__in=_wiki_read_api_paths())
     wiki_edit_apis = await Api.filter(path__in=_wiki_edit_api_paths())
     wiki_admin_apis = await Api.filter(path__in=_wiki_admin_api_paths())
+    release_view_apis = await Api.filter(path__in=_release_view_api_paths())
+    release_admin_apis = await Api.filter(path__in=_release_admin_api_paths())
     notice_user_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/inbox",
@@ -1258,11 +1338,13 @@ async def init_roles():
     wiki_read_menus = await Menu.filter(Q(path="/wiki") | Q(component__in=["/wiki/search", "/wiki/view"]))
     wiki_edit_menus = await Menu.filter(Q(component="/wiki/sources"))
     wiki_admin_menus = await Menu.filter(Q(component="/wiki/records"))
+    release_view_menus = await Menu.filter(Q(path="/outbound") | Q(path="release-view"))
     webdav_menus = await Menu.filter(
         Q(path="/outbound")
         | Q(component="/system/webdav")
         | Q(component="/system/webdav-share")
         | Q(component="/system/webdav-download-log")
+        | Q(path="release-records")
     )
     webdav_password_menus = await Menu.filter(Q(component="/system/webdav-password"))
 
@@ -1271,7 +1353,9 @@ async def init_roles():
         await role_obj.apis.add(*basic_apis)
         await role_obj.apis.add(*notice_user_apis)
         await role_obj.apis.add(*wiki_read_apis)
+        await role_obj.apis.add(*release_view_apis)
         await role_obj.menus.add(*wiki_read_menus)
+        await role_obj.menus.add(*release_view_menus)
 
     await role_map["用户"].apis.add(*ticket_submit_apis)
     await role_map["用户"].menus.add(*submit_menus)
@@ -1304,6 +1388,7 @@ async def init_roles():
     await role_map["管理员"].apis.add(*project_apis)
     await role_map["管理员"].apis.add(*wiki_edit_apis)
     await role_map["管理员"].apis.add(*wiki_admin_apis)
+    await role_map["管理员"].apis.add(*release_admin_apis)
     await role_map["管理员"].apis.add(*webdav_apis)
     await role_map["管理员"].apis.add(*webdav_password_apis)
     await role_map["管理员"].apis.add(*notice_apis)

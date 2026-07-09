@@ -9,7 +9,7 @@ import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import { useUserStore } from '@/store'
 import api from '@/api'
 
-defineOptions({ name: '运维记录' })
+defineOptions({ name: '项目日志' })
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -137,10 +137,10 @@ async function submitActivity() {
   delete payload.finished_at
   if (editingId.value) {
     await api.projectActivityUpdate({ ...payload, activity_id: editingId.value })
-    $message.success('运维记录已更新')
+    $message.success('项目日志已更新')
   } else {
     await api.projectActivityCreate(payload)
-    $message.success('运维记录已创建')
+    $message.success('项目日志已创建')
   }
   modalVisible.value = false
   $table.value?.handleSearch()
@@ -148,7 +148,7 @@ async function submitActivity() {
 
 async function deleteActivity(row) {
   await api.projectActivityDelete({ activity_id: row.id })
-  $message.success('运维记录已删除')
+  $message.success('项目日志已删除')
   $table.value?.handleSearch()
 }
 
@@ -189,7 +189,7 @@ const columns = [
 </script>
 
 <template>
-  <CommonPage title="运维记录">
+  <CommonPage title="项目日志" :show-header="false">
     <CrudTable
       ref="$table"
       v-model:query-items="queryItems"
@@ -226,14 +226,14 @@ const columns = [
           />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
-          <NButton type="primary" @click="openCreate">新增运维</NButton>
+          <NButton type="primary" @click="openCreate">新增项目日志</NButton>
         </QueryBarItem>
       </template>
     </CrudTable>
 
     <CrudModal
       v-model:visible="modalVisible"
-      :title="readonly ? '运维详情' : editingId ? '编辑运维' : '新增运维'"
+      :title="readonly ? '项目日志详情' : editingId ? '编辑项目日志' : '新增项目日志'"
       :show-footer="!readonly"
       width="760px"
       @save="submitActivity"
@@ -241,7 +241,7 @@ const columns = [
       <div class="activity-modal-head">
         <div>
           <div class="modal-eyebrow">{{ readonly ? 'OPS DETAIL' : editingId ? 'OPS EDIT' : 'OPS CREATE' }}</div>
-          <div class="modal-activity-name">{{ form.title || '未命名运维' }}</div>
+          <div class="modal-activity-name">{{ form.title || '未命名项目日志' }}</div>
         </div>
         <div class="modal-tags">
           <NTag v-if="form.activity_type" size="small" round type="info">{{ form.activity_type }}</NTag>
@@ -264,7 +264,7 @@ const columns = [
           </div>
         </div>
         <div class="form-section">
-          <div class="section-title"><span>运维内容</span></div>
+          <div class="section-title"><span>项目日志内容</span></div>
           <NFormItem label="内容"><NInput v-model:value="form.content" type="textarea" :disabled="readonly" :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
         </div>
       </NForm>
@@ -354,4 +354,3 @@ const columns = [
 }
 
 </style>
-

@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.enums import RegisterType
+from app.utils.company_name import validate_legal_company_name
 
 
 class PartnerRegisterIn(BaseModel):
@@ -19,12 +20,7 @@ class PartnerRegisterIn(BaseModel):
     @field_validator("company_name")
     @classmethod
     def validate_company_name(cls, value: str) -> str:
-        name = str(value or "").strip()
-        if not name:
-            raise ValueError("请输入公司名称")
-        if "公司" not in name:
-            raise ValueError("公司名称必须包含“公司”，请填写完整公司名称")
-        return name
+        return validate_legal_company_name(value)
 
 
 class UserRegisterIn(PartnerRegisterIn):

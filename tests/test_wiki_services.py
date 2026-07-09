@@ -11,10 +11,11 @@ from app.api.v1.wiki import wiki as wiki_module
 from app.services.wiki.markdown_converter import _save_docling_images, convert_to_markdown
 from app.services.wiki import learning_service as learning_module
 from app.services.wiki import import_service as import_module
+from app.services.wiki import search_service as search_module
 from app.services.llm import LLMOpenAIClient
 from app.services.wiki.import_service import WikiImportService
 from app.services.wiki.learning_service import wiki_learning_service
-from app.services.wiki.search_service import search_terms
+from app.services.wiki.search_service import WikiSearchService, score_wiki_page, search_terms
 from app.services.wiki.wiki_builder import content_hash, normalize_page_path, slugify, wiki_builder
 from app.api.v1.wiki.wiki import _message_preview, _safe_child, _sse
 from app.core.init_app import _old_ai_knowledge_menu_filter, _wiki_admin_api_paths, _wiki_edit_api_paths, _wiki_read_api_paths
@@ -519,18 +520,375 @@ def test_wiki_search_terms_support_chinese_without_spaces():
     assert "怎么" not in terms
 
 
-def test_wiki_search_terms_prioritize_domain_dictionary():
+def test_wiki_search_terms_use_jieba_for_mixed_text():
     terms = search_terms("WebDAV同步失败如何处理")
 
-    assert terms[:2] == ["webdav", "同步"]
+    assert terms == ["webdav", "同步", "失败"]
     assert "如何" not in terms
+    assert "处理" not in terms
 
 
-def test_wiki_search_terms_accept_custom_dictionary():
-    terms = search_terms("质保延期怎么办", domain_terms={"质保", "延期"}, stop_words={"怎么", "怎么办"})
+def test_wiki_search_terms_accept_custom_stop_words():
+    terms = search_terms("质保延期怎么办", stop_words={"怎么", "怎么办"})
 
-    assert terms[:2] == ["质保", "延期"]
+    assert terms == ["质保", "延期"]
     assert "怎么办" not in terms
+
+
+def test_wiki_search_terms_keep_only_jieba_tokens():
+    terms = search_terms(
+        "win10系统上打开数据沙盒系统蓝屏怎么办",
+        stop_words={"怎么", "怎么办"},
+    )
+
+    assert terms == ["win10", "系统", "打开", "数据", "沙盒", "蓝屏"]
+    assert "win10" in terms
+    assert "win10系统" not in terms
+    assert "数据沙盒" not in terms
+    assert "系统蓝屏" not in terms
+    assert "蓝屏" in terms
+    assert "系统上" not in terms
+    assert "上打开" not in terms
+    assert "怎么办" not in terms
+
+
+def test_wiki_search_normalizes_windows_aliases():
+    terms = search_terms("Ｗｉｎ １０ 系统蓝屏")
+    page = type(
+        "Page",
+        (),
+        {
+            "title": "Windows 10 系统蓝屏",
+            "summary": "",
+            "content": "处理步骤",
+            "page_type": "practice",
+        },
+    )()
+
+    assert "win10" in terms
+    assert score_wiki_page(page, terms, query_text="win10系统蓝屏") is not None
+
+
+def test_wiki_search_scores_title_summary_coverage_and_heading_block():
+    terms = ["win10", "系统", "蓝屏"]
+    exact_page = type(
+        "Page",
+        (),
+        {
+            "title": "win10系统蓝屏处理",
+            "summary": "系统蓝屏排查",
+            "content": "## 蓝屏处理\n先检查驱动。\n\n## 无关章节\n只有系统说明。",
+        },
+    )()
+    weak_page = type(
+        "Page",
+        (),
+        {
+            "title": "系统说明",
+            "summary": "",
+            "content": "这里只出现一个词。",
+        },
+    )()
+
+    result = score_wiki_page(exact_page, terms, query_text="win10系统蓝屏")
+
+    assert result is not None
+    assert result.hit_count == 3
+    assert result.coverage == 1
+    assert result.excerpt.startswith("## 蓝屏处理")
+    assert score_wiki_page(weak_page, terms, query_text="win10系统蓝屏") is None
+
+
+def test_wiki_search_rejects_low_coverage_matches():
+    page = type(
+        "Page",
+        (),
+        {
+            "title": "系统说明",
+            "summary": "",
+            "content": "这里只提到系统和蓝屏，没有足够上下文。",
+            "page_type": "concept",
+        },
+    )()
+
+    assert score_wiki_page(page, ["win10", "系统", "数据", "沙盒", "蓝屏"], query_text="win10数据沙盒蓝屏") is None
+
+
+def test_wiki_search_splits_long_blocks_without_headings():
+    page = type(
+        "Page",
+        (),
+        {
+            "title": "故障说明",
+            "summary": "",
+            "content": ("无关内容。" * 260) + "\n\nwin10 数据 沙盒 蓝屏 处理步骤：重装驱动。",
+            "page_type": "concept",
+        },
+    )()
+
+    result = score_wiki_page(page, ["win10", "数据", "沙盒", "蓝屏"], query_text="win10数据沙盒蓝屏")
+
+    assert result is not None
+    assert result.excerpt.startswith("win10 数据 沙盒 蓝屏")
+
+
+def test_wiki_search_weights_curated_page_types_over_source():
+    source = type(
+        "Page",
+        (),
+        {"title": "蓝屏处理", "summary": "win10 数据 沙盒 蓝屏", "content": "处理步骤", "page_type": "source"},
+    )()
+    practice = type(
+        "Page",
+        (),
+        {"title": "蓝屏处理", "summary": "win10 数据 沙盒 蓝屏", "content": "处理步骤", "page_type": "practice"},
+    )()
+
+    source_score = score_wiki_page(source, ["win10", "数据", "沙盒", "蓝屏"], query_text="win10数据沙盒蓝屏")
+    practice_score = score_wiki_page(practice, ["win10", "数据", "沙盒", "蓝屏"], query_text="win10数据沙盒蓝屏")
+
+    assert source_score is not None
+    assert practice_score is not None
+    assert practice_score.score > source_score.score
+
+
+@pytest.mark.anyio
+async def test_wiki_search_rough_filters_candidates_without_fixed_limit(monkeypatch):
+    calls = {}
+
+    class FakePage:
+        id = 1
+        title = "蓝屏处理"
+        summary = "win10 数据 沙盒 蓝屏"
+        content = "处理步骤"
+        page_type = "practice"
+        updated_at = None
+
+        async def to_dict(self):
+            return {"id": self.id, "title": self.title, "content": self.content}
+
+    class FakeQuery:
+        def __await__(self):
+            async def resolve():
+                return [FakePage()]
+
+            return resolve().__await__()
+
+    class FakePageModel:
+        @staticmethod
+        def all():
+            raise AssertionError("should rough filter instead of scanning a fixed all().limit() window")
+
+        @staticmethod
+        def filter(*args, **kwargs):
+            calls["filter"] = (args, kwargs)
+            return FakeQuery()
+
+    service = WikiSearchService()
+
+    async def fake_dictionary():
+        return {"stop_words": []}
+
+    service.dictionary = fake_dictionary
+    monkeypatch.setattr(search_module, "WikiPage", FakePageModel)
+
+    rows = await service.search("win10数据沙盒蓝屏", limit=5)
+
+    assert calls["filter"]
+    assert rows[0]["title"] == "蓝屏处理"
+
+
+@pytest.mark.anyio
+async def test_wiki_search_limits_same_source_matches(monkeypatch):
+    class FakePage:
+        updated_at = None
+
+        def __init__(self, page_id, source_id):
+            self.id = page_id
+            self.source_id = source_id
+            self.title = f"蓝屏处理 {page_id}"
+            self.summary = "win10 数据 沙盒 蓝屏"
+            self.content = "处理步骤"
+            self.page_type = "practice"
+
+        async def to_dict(self):
+            return {"id": self.id, "title": self.title, "source_id": self.source_id, "content": self.content}
+
+    class FakeQuery:
+        def __await__(self):
+            async def resolve():
+                return [FakePage(1, 10), FakePage(2, 10), FakePage(3, 10), FakePage(4, 20)]
+
+            return resolve().__await__()
+
+    class FakePageModel:
+        @staticmethod
+        def filter(*args, **kwargs):
+            return FakeQuery()
+
+    service = WikiSearchService()
+
+    async def fake_dictionary():
+        return {"stop_words": []}
+
+    service.dictionary = fake_dictionary
+    monkeypatch.setattr(search_module, "WikiPage", FakePageModel)
+
+    rows = await service.search("win10数据沙盒蓝屏", limit=4)
+
+    assert [row["id"] for row in rows] == [1, 2, 4]
+
+
+@pytest.mark.anyio
+async def test_wiki_search_limit_zero_returns_empty(monkeypatch):
+    class FakePage:
+        id = 1
+        title = "蓝屏处理"
+        summary = "win10 数据 沙盒 蓝屏"
+        content = "处理步骤"
+        page_type = "practice"
+        updated_at = None
+
+        async def to_dict(self):
+            return {"id": self.id, "title": self.title, "content": self.content}
+
+    class FakeQuery:
+        def __await__(self):
+            async def resolve():
+                return [FakePage()]
+
+            return resolve().__await__()
+
+    class FakePageModel:
+        @staticmethod
+        def filter(*args, **kwargs):
+            return FakeQuery()
+
+    service = WikiSearchService()
+
+    async def fake_dictionary():
+        return {"stop_words": []}
+
+    service.dictionary = fake_dictionary
+    monkeypatch.setattr(search_module, "WikiPage", FakePageModel)
+
+    assert await service.search("win10数据沙盒蓝屏", limit=0) == []
+
+
+def test_wiki_answer_messages_use_matched_blocks_and_strict_prompt():
+    messages = wiki_module._wiki_answer_messages(
+        "win10系统蓝屏怎么办",
+        [
+            {
+                "id": 1,
+                "title": "蓝屏处理",
+                "content": "整页正文不应该直接进入上下文",
+                "matched_content": "## win10蓝屏\n检查驱动并重启。",
+            }
+        ],
+    )
+
+    assert "未在知识库中找到明确答案" in messages[0]["content"]
+    assert "不要使用常识" in messages[0]["content"]
+    assert "## win10蓝屏" in messages[1]["content"]
+    assert "整页正文不应该直接进入上下文" not in messages[1]["content"]
+
+
+def test_wiki_answer_messages_limit_context_budget():
+    messages = wiki_module._wiki_answer_messages(
+        "问题",
+        [
+            {"id": 1, "title": "第一条", "matched_content": "第一段" * 80},
+            {"id": 2, "title": "第二条", "matched_content": "第二段" * 80},
+        ],
+        budget=120,
+    )
+
+    assert "第一段" in messages[1]["content"]
+    assert "第二段" not in messages[1]["content"]
+
+
+def test_wiki_answer_requires_page_reference():
+    matches = [{"id": 1, "title": "蓝屏处理"}]
+
+    assert wiki_module._wiki_answer_has_citation("参考 [1] 蓝屏处理。", matches)
+    assert not wiki_module._wiki_answer_has_citation("重启即可。", matches)
+
+
+@pytest.mark.anyio
+async def test_wiki_ask_rejects_uncited_answer(monkeypatch):
+    saved = {}
+    match = {"id": 1, "title": "蓝屏处理", "matched_content": "## 蓝屏处理\n检查驱动。"}
+
+    class FakeSearch:
+        async def search(self, keyword, limit=5):
+            return [match]
+
+    class FakeLLM:
+        async def chat(self, messages):
+            return {"choices": [{"message": {"content": "重启即可。"}}]}
+
+    class FakeLearning:
+        async def create_candidate(self, **kwargs):
+            saved.update(kwargs)
+            return type("Candidate", (), {"id": 9})()
+
+    monkeypatch.setattr(wiki_module, "wiki_search_service", FakeSearch())
+    monkeypatch.setattr(wiki_module, "llm_openai_client", FakeLLM())
+    monkeypatch.setattr(wiki_module, "wiki_learning_service", FakeLearning())
+
+    result = await wiki_module.ask_wiki(wiki_module.WikiAskIn(question="win10蓝屏怎么办"))
+    body = json.loads(result.body)
+
+    assert body["data"]["answer"] == "未在知识库中找到明确答案，已生成待学习记录。"
+    assert body["data"]["candidate_id"] == 9
+    assert saved["reason"] == "uncited_answer"
+
+
+@pytest.mark.anyio
+async def test_wiki_stream_rejects_uncited_answer_without_delta(monkeypatch):
+    saved = {}
+    match = {"id": 1, "title": "蓝屏处理", "matched_content": "## 蓝屏处理\n检查驱动。"}
+
+    class FakeSearch:
+        async def search(self, keyword, limit=5):
+            return [match]
+
+    class FakeLLM:
+        async def stream_chat(self, messages):
+            yield {"choices": [{"delta": {"content": "重启"}}]}
+            yield {"choices": [{"delta": {"content": "即可。"}}]}
+
+    class FakeLearning:
+        async def create_candidate(self, **kwargs):
+            saved.update(kwargs)
+            return type("Candidate", (), {"id": 9})()
+
+    async def fake_current_user():
+        return type("User", (), {"id": 2})()
+
+    async def fake_conversation(*args, **kwargs):
+        return type("Conversation", (), {"id": 3, "owner_id": 2})()
+
+    async def fake_save_wiki_turn(**kwargs):
+        return type("Message", (), {"id": 4})()
+
+    monkeypatch.setattr(wiki_module, "wiki_search_service", FakeSearch())
+    monkeypatch.setattr(wiki_module, "llm_openai_client", FakeLLM())
+    monkeypatch.setattr(wiki_module, "wiki_learning_service", FakeLearning())
+    monkeypatch.setattr(wiki_module, "_current_user", fake_current_user)
+    monkeypatch.setattr(wiki_module, "_wiki_conversation", fake_conversation)
+    monkeypatch.setattr(wiki_module, "_save_wiki_turn", fake_save_wiki_turn)
+
+    response = await wiki_module.ask_wiki_stream(wiki_module.WikiAskIn(question="win10蓝屏怎么办"))
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+    stream = "".join(chunks)
+
+    assert '"type": "assistant.delta"' not in stream
+    assert "未在知识库中找到明确答案，已生成待学习记录。" in stream
+    assert saved["reason"] == "uncited_answer"
 
 
 @pytest.mark.anyio
@@ -585,7 +943,12 @@ async def test_wiki_learning_candidate_uses_chinese_review_template(monkeypatch)
     )
 
     assert candidate.proposed_content == (
-        "# linux服务器安装\n\n请在这里整理需要写入知识库的内容，确认无误后点击“学习入库”。"
+        "# linux服务器安装\n\n"
+        "## 问题现象\n请描述用户看到的现象。\n\n"
+        "## 适用版本/系统\n请填写适用版本、系统或环境。\n\n"
+        "## 原因\n请整理已确认的原因。\n\n"
+        "## 处理步骤\n1. 请填写处理步骤。\n\n"
+        "## 关键词/别名\nlinux服务器安装\n"
     )
     assert "Pending human-approved knowledge update." not in saved["create"]["proposed_content"]
 

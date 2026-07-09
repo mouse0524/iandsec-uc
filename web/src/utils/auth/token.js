@@ -26,6 +26,18 @@ export function removeToken() {
   sStorage.remove(TOKEN_CODE)
 }
 
+export function openAuthRouteInNewTab(href) {
+  const targetUrl = new URL(href, window.location.href)
+  if (targetUrl.origin !== window.location.origin) {
+    window.open(targetUrl.href, '_blank', 'noopener')
+    return
+  }
+
+  const newTab = window.open(targetUrl.href, '_blank')
+  if (!newTab) return
+  newTab.opener = null
+}
+
 // export async function refreshAccessToken() {
 //   const tokenItem = lStorage.getItem(TOKEN_CODE)
 //   if (!tokenItem) {

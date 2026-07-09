@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NForm, NFormItem, NInput, NSelect, NUpload, NAlert, NSpace, NTag } from 'naive-ui'
+import { NButton, NForm, NFormItem, NInput, NSelect, NUpload, NAlert, NSpace } from 'naive-ui'
 import { isImageName } from '@/utils'
 import api from '@/api'
 import { useAppStore } from '@/store'
@@ -61,6 +61,8 @@ const form = ref({
   captcha_code: '',
   turnstile_token: '',
 })
+const companyNamePattern = /^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$/i
+const companyNameMessage = '请输入完整公司名称，需以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾'
 
 const categoryOptions = ref([
   { label: '登录问题', value: '登录问题' },
@@ -70,7 +72,15 @@ const categoryOptions = ref([
 ])
 
 const rules = {
-  company_name: { required: true, message: '请输入公司名称', trigger: ['blur', 'input'] },
+  company_name: {
+    validator: (_, value) => {
+      const name = String(value || '').trim()
+      if (!name) return new Error('请输入公司名称')
+      if (!companyNamePattern.test(name)) return new Error(companyNameMessage)
+      return true
+    },
+    trigger: ['blur', 'input'],
+  },
   contact_name: { required: true, message: '请输入联系人', trigger: ['blur', 'input'] },
   email: { required: true, message: '请输入邮箱', trigger: ['blur', 'input'] },
   phone: { required: true, message: '请输入手机号', trigger: ['blur', 'input'] },
@@ -312,7 +322,7 @@ async function refreshChallenge() {
             <div class="form-grid two-col">
               <NFormItem label="项目名称" path="company_name">
                 <div class="field-stack">
-                  <NInput v-model:value="form.company_name" placeholder="请输入客户公司名称" />
+                  <NInput v-model:value="form.company_name" placeholder="请输入客户完整公司名称" />
                   <div class="field-note">备注：请填写客户公司名称，不是自己公司。</div>
                 </div>
               </NFormItem>
@@ -424,51 +434,6 @@ async function refreshChallenge() {
         </NForm>
       </div>
 
-      <aside class="side-panel">
-        <div class="panel-card highlight">
-          <div class="panel-kicker">填写建议</div>
-          <h3>提高处理效率的 3 个关键点</h3>
-          <ul>
-            <li>写清问题现象，例如报错提示、出现频率、是否必现。</li>
-            <li>补充复现步骤，例如谁操作、在哪个页面、点了什么按钮。</li>
-            <li>说明影响范围，例如是否影响全部用户、是否阻塞业务。</li>
-          </ul>
-        </div>
-
-        <div class="panel-card process-card">
-          <div class="panel-kicker">处理流程</div>
-          <div class="step-item">
-            <span class="step-index">01</span>
-            <div>
-              <strong>提交工单</strong>
-              <p>提交问题内容与附件，系统立即生成编号。</p>
-            </div>
-          </div>
-          <div class="step-item">
-            <span class="step-index">02</span>
-            <div>
-              <strong>客服审核</strong>
-              <p>确认问题归类与信息完整度，不完整会回退补充。</p>
-            </div>
-          </div>
-          <div class="step-item">
-            <span class="step-index">03</span>
-            <div>
-              <strong>技术处理</strong>
-              <p>技术同学跟进分析与修复，状态全程可追踪。</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-card checklist-card">
-          <div class="panel-kicker">提交前确认</div>
-          <NSpace vertical size="small">
-            <NTag class="check-tag" :bordered="false">联系方式可用</NTag>
-            <NTag class="check-tag" :bordered="false">问题标题明确</NTag>
-            <NTag class="check-tag" :bordered="false">附件已补充</NTag>
-          </NSpace>
-        </div>
-      </aside>
     </div>
   </div>
 </template>
@@ -523,8 +488,7 @@ async function refreshChallenge() {
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
@@ -624,87 +588,6 @@ async function refreshChallenge() {
   flex-wrap: wrap;
 }
 
-.side-panel {
-  position: sticky;
-  top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.panel-card {
-  padding: 18px;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid #eef2f7;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.panel-card h3 {
-  margin: 0 0 12px;
-  font-size: 18px;
-  color: #111827;
-}
-
-.panel-kicker {
-  margin-bottom: 8px;
-  color: #c2410c;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.highlight {
-  background:
-    radial-gradient(circle at top right, rgba(251, 146, 60, 0.14), transparent 35%),
-    linear-gradient(180deg, #fffaf5 0%, #ffffff 100%);
-}
-
-.highlight ul {
-  margin: 0;
-  padding-left: 18px;
-  color: #4b5563;
-  line-height: 1.8;
-}
-
-.step-item {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.step-item:last-child {
-  margin-bottom: 0;
-}
-
-.step-item p {
-  margin: 4px 0 0;
-  color: #6b7280;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.step-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  background: #fef2f2;
-  color: #c2410c;
-  font-size: 12px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.check-tag {
-  width: fit-content;
-  color: #374151;
-  background: #f3f4f6;
-}
-
 .field-stack {
   width: 100%;
   display: flex;
@@ -725,10 +608,6 @@ async function refreshChallenge() {
 
   .content-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .side-panel {
-    position: static;
   }
 
   .form-shell {

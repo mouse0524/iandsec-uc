@@ -1,19 +1,20 @@
 <script setup>
 import { computed, h, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
-import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import TicketEditModal from '@/views/ticket/components/TicketEditModal.vue'
 import api from '@/api'
+import { openAuthRouteInNewTab } from '@/utils'
 import { ticketStatusOptions, ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 
 defineOptions({ name: '我的工单' })
 
 const $table = ref(null)
 const route = useRoute()
+const router = useRouter()
 const queryItems = ref({
   company_name: route.query.company_name || undefined,
   submitter_name: route.query.submitter_name || undefined,
@@ -42,9 +43,6 @@ watch(
     $table.value?.handleSearch()
   }
 )
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const currentTicket = ref({})
 const tableData = ref([])
 const summaryStats = ref({
   total: 0,
@@ -175,22 +173,13 @@ async function loadTicketMetaOptions() {
   return ticketMetaPromise
 }
 
-async function openDetail(row) {
-  currentTicket.value = row
-  detailLoading.value = true
-  detailVisible.value = true
-  try {
-    const res = await api.getTicketById({ ticket_id: row.id })
-    if (currentTicket.value?.id === row.id) {
-      currentTicket.value = res.data
-    }
-  } catch (error) {
-    $message.error('加载工单详情失败')
-  } finally {
-    if (currentTicket.value?.id === row.id) {
-      detailLoading.value = false
-    }
-  }
+function getDetailHref(row) {
+  return router.resolve({ path: '/ticket/detail', query: { ticket_id: row.id } }).href
+}
+
+function openDetail(row) {
+  if (!row?.id) return
+  openAuthRouteInNewTab(getDetailHref(row))
 }
 
 async function openEdit(row) {
@@ -292,8 +281,13 @@ const columns = [
         'a',
         {
           class: 'ticket-title-link',
-          href: 'javascript:void(0)',
-          onClick: () => openDetail(row),
+          href: getDetailHref(row),
+          target: '_blank',
+          rel: 'noopener',
+          onClick: (event) => {
+            event.preventDefault()
+            openDetail(row)
+          },
         },
         row.title || '-'
       )
@@ -366,7 +360,7 @@ const columns = [
 </script>
 
 <template>
-  <CommonPage title="我的工单" show-footer>
+  <CommonPage title="我的工单" :show-header="false" show-footer>
     <div class="ticket-my-page">
       <div class="summary-grid">
         <div v-for="item in summaryCards" :key="item.label" class="summary-item" :data-tone="item.tone">
@@ -445,8 +439,6 @@ const columns = [
           </template>
         </CrudTable>
       </NCard>
-
-      <TicketDetailModal v-model:visible="detailVisible" :ticket="currentTicket" :loading="detailLoading" />
 
       <TicketEditModal
         v-model:visible="editVisible"

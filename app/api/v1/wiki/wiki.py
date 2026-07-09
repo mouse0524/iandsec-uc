@@ -30,6 +30,8 @@ from app.settings import settings
 router = APIRouter()
 WIKI_STORAGE_ROOT = Path(settings.UPLOAD_DIR) / "wiki"
 WIKI_UPLOADING_ROOT = WIKI_STORAGE_ROOT / "uploading"
+WIKI_ANSWER_CONTEXT_BUDGET = 12000
+WIKI_ANSWER_MATCH_BUDGET = 4000
 
 
 def _safe_child(root: Path, rel_path: str) -> Path:
@@ -115,6 +117,46 @@ async def _require_wiki_admin() -> User:
 def _message_preview(content: str, limit: int = 80) -> str:
     text = " ".join(str(content or "").split())
     return text[:limit].rstrip()
+
+
+def _wiki_answer_messages(question: str, matches: list[dict], *, budget: int = WIKI_ANSWER_CONTEXT_BUDGET) -> list[dict]:
+    remaining = max(0, budget)
+    context_items: list[str] = []
+    for item in matches:
+        content = str(item.get("matched_content") or item.get("excerpt") or item.get("content") or "").strip()
+        chunk = f"[{item['id']}] {item['title']}\n{content[:WIKI_ANSWER_MATCH_BUDGET]}"
+        separator_size = 2 if context_items else 0
+        if len(chunk) + separator_size > remaining:
+            if context_items:
+                continue
+            chunk = chunk[:remaining]
+        context_items.append(chunk)
+        remaining -= len(chunk) + separator_size
+        if remaining <= 0:
+            break
+    context = "\n\n".join(context_items)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "只基于给定的企业 Wiki 上下文用中文回答。"
+                "上下文没有明确答案时，直接回答“未在知识库中找到明确答案”。"
+                "不要使用常识或猜测补充。必须引用页面 ID 或标题，优先使用标题最匹配、命中词最多的页面。"
+            ),
+        },
+        {"role": "user", "content": f"Question: {question}\n\nContext:\n{context}"},
+    ]
+
+
+def _wiki_answer_has_citation(answer: str, matches: list[dict]) -> bool:
+    text = str(answer or "")
+    for item in matches:
+        if f"[{item['id']}]" in text:
+            return True
+        title = str(item.get("title") or "").strip()
+        if title and title in text:
+            return True
+    return False
 
 
 def _status(stage: str, label: str) -> str:
@@ -442,10 +484,7 @@ async def get_dictionary():
 @router.post("/dictionary", summary="Save wiki dictionary", dependencies=[DependAuth])
 async def save_dictionary(payload: WikiDictionaryIn):
     await _require_wiki_editor()
-    data = await wiki_search_service.save_dictionary(
-        domain_terms=payload.domain_terms,
-        stop_words=payload.stop_words,
-    )
+    data = await wiki_search_service.save_dictionary(stop_words=payload.stop_words)
     return Success(data=data)
 
 
@@ -461,13 +500,7 @@ async def ask_wiki(payload: WikiAskIn):
         )
         answer = "Wiki 中还没有匹配的知识，已生成待学习记录。"
         return Success(data={"answer": answer, "citations": [], "candidate_id": candidate.id, "archive_path": None})
-    context = "\n\n".join(f"[{item['id']}] {item['title']}\n{item['content'][:4000]}" for item in matches)
-    result = await llm_openai_client.chat(
-        [
-            {"role": "system", "content": "只基于给定的企业 Wiki 上下文用中文回答，并引用页面 ID。"},
-            {"role": "user", "content": f"Question: {payload.question}\n\nContext:\n{context}"},
-        ]
-    )
+    result = await llm_openai_client.chat(_wiki_answer_messages(payload.question, matches))
     answer = LLMOpenAIClient._message_content(result).strip()
     if not answer:
         candidate = await wiki_learning_service.create_candidate(
@@ -477,6 +510,15 @@ async def ask_wiki(payload: WikiAskIn):
             reason="empty_answer",
         )
         answer = "模型没有生成有效回答，已生成待学习记录。"
+        return Success(data={"answer": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None})
+    if not _wiki_answer_has_citation(answer, matches):
+        candidate = await wiki_learning_service.create_candidate(
+            question=payload.question,
+            answer=answer,
+            evidence_page_ids=[item["id"] for item in matches],
+            reason="uncited_answer",
+        )
+        answer = "未在知识库中找到明确答案，已生成待学习记录。"
         return Success(data={"answer": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None})
     return Success(data={"answer": answer, "citations": matches, "candidate_id": None, "archive_path": None})
 
@@ -509,19 +551,16 @@ async def ask_wiki_stream(payload: WikiAskIn):
                 return
 
             yield _status("llm", f"已命中 {len(matches)} 个 Wiki 页面，正在调用大模型")
-            context = "\n\n".join(f"[{item['id']}] {item['title']}\n{item['content'][:4000]}" for item in matches)
-            messages = [
-                {"role": "system", "content": "只基于给定的企业 Wiki 上下文用中文回答，并引用页面 ID。"},
-                {"role": "user", "content": f"Question: {payload.question}\n\nContext:\n{context}"},
-            ]
+            messages = _wiki_answer_messages(payload.question, matches)
             answer = ""
+            deltas = []
             async for chunk in llm_openai_client.stream_chat(messages):
                 choices = chunk.get("choices") if isinstance(chunk, dict) else None
                 delta = ((choices or [{}])[0].get("delta") or {}).get("content") if choices else ""
                 if not delta:
                     continue
                 answer += delta
-                yield _sse({"type": "assistant.delta", "payload": {"content": delta}})
+                deltas.append(delta)
             if not answer.strip():
                 yield _status("learn", "模型未返回有效内容，正在生成待学习记录")
                 candidate = await wiki_learning_service.create_candidate(
@@ -539,6 +578,25 @@ async def ask_wiki_stream(payload: WikiAskIn):
                 )
                 yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None}})
                 return
+            if not _wiki_answer_has_citation(answer, matches):
+                yield _status("learn", "回答未引用命中页面，正在生成待学习记录")
+                candidate = await wiki_learning_service.create_candidate(
+                    question=payload.question,
+                    answer=answer,
+                    evidence_page_ids=[item["id"] for item in matches],
+                    reason="uncited_answer",
+                )
+                answer = "未在知识库中找到明确答案，已生成待学习记录。"
+                message = await _save_wiki_turn(
+                    conversation=conversation,
+                    question=payload.question,
+                    answer=answer,
+                    citations=matches,
+                )
+                yield _sse({"type": "final", "payload": {"conversation_id": conversation.id, "message_id": message.id, "content": answer, "citations": matches, "candidate_id": candidate.id, "archive_path": None}})
+                return
+            for delta in deltas:
+                yield _sse({"type": "assistant.delta", "payload": {"content": delta}})
             yield _status("save", "正在保存问答记录")
             message = await _save_wiki_turn(
                 conversation=conversation,

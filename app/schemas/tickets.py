@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.enums import TicketActionType, TicketStatus
+from app.utils.company_name import validate_legal_company_name
 
 
 class TicketCreate(BaseModel):
@@ -21,6 +22,11 @@ class TicketCreate(BaseModel):
     captcha_id: str | None = Field(default=None, description="验证码ID")
     captcha_code: str | None = Field(default=None, description="验证码")
     turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, value: str) -> str:
+        return validate_legal_company_name(value)
 
 
 class TicketReviewIn(BaseModel):
@@ -90,6 +96,11 @@ class TicketUpdateIn(BaseModel):
     captcha_id: str | None = Field(default=None, description="验证码ID")
     captcha_code: str | None = Field(default=None, description="验证码")
     turnstile_token: str | None = Field(default=None, description="Cloudflare Turnstile Token")
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, value: str) -> str:
+        return validate_legal_company_name(value)
 
 
 class TicketUploadOut(BaseModel):

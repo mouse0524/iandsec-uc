@@ -153,7 +153,7 @@
             </div>
           </n-form-item>
           <n-form-item label="公司名称" path="company_name">
-            <n-input v-model:value="partnerForm.company_name" placeholder="请输入完整公司名称，需包含“公司”" />
+            <n-input v-model:value="partnerForm.company_name" placeholder="请输入完整公司名称" />
           </n-form-item>
           <n-form-item label="联系人" path="contact_name">
             <n-input v-model:value="partnerForm.contact_name" placeholder="请输入联系人" />
@@ -387,13 +387,15 @@ const partnerForm = ref({
   turnstile_token: '',
   agree_protocol: false,
 })
+const companyNamePattern = /^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$/i
+const companyNameMessage = '请输入完整公司名称，需以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾'
 
 const partnerRules = {
   company_name: {
     validator: (_, value) => {
       const name = String(value || '').trim()
       if (!name) return new Error('请输入公司名称')
-      if (!name.includes('公司')) return new Error('公司名称必须包含“公司”，请填写完整公司名称')
+      if (!companyNamePattern.test(name)) return new Error(companyNameMessage)
       return true
     },
     trigger: ['blur', 'input'],

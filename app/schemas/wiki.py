@@ -31,7 +31,6 @@ class WikiPageSaveIn(BaseModel):
 
 
 class WikiDictionaryIn(BaseModel):
-    domain_terms: list[str] = Field(default_factory=list)
     stop_words: list[str] = Field(default_factory=list)
 
 

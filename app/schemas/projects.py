@@ -23,7 +23,7 @@ class ProjectCreateIn(BaseModel):
     customer_email: str | None = Field(default=None, description="客户联系邮箱")
     status: str | None = Field(default=None, description="项目状态")
     assignee_id: int | None = Field(default=None, description="负责人ID")
-    remark: str | None = Field(default=None, description="备注")
+    remark: str | None = Field(default=None, description="项目日志")
     attachment_ids: list[int] = Field(default_factory=list, description="附件ID列表")
 
 

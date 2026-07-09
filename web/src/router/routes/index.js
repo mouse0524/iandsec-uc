@@ -55,6 +55,16 @@ export const basicRoutes = [
     meta: { order: 99 },
   },
   {
+    name: 'TicketDetail',
+    path: '/ticket/detail',
+    component: () => import('@/views/ticket/detail/index.vue'),
+    isHidden: true,
+    meta: {
+      title: '工单详情',
+      order: 99,
+    },
+  },
+  {
     name: 'ErrorPage',
     path: '/error-page',
     component: Layout,

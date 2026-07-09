@@ -1,5 +1,6 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton,
   NDataTable,
@@ -21,15 +22,16 @@ import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
-import TicketDetailModal from '@/views/ticket/components/TicketDetailModal.vue'
 import { ticketStatusTextMap, ticketStatusTypeMap } from '@/views/ticket/components/ticket-meta'
 import { useUserStore } from '@/store'
 import api from '@/api'
+import { openAuthRouteInNewTab } from '@/utils'
 
 defineOptions({ name: '项目列表' })
 
 const remarkActivityType = '备注'
 const userStore = useUserStore()
+const router = useRouter()
 const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
@@ -56,9 +58,6 @@ const workOrders = ref({ issues: [], requirements: [], activities: [] })
 const workOrderTotals = ref({ issues: 0, requirements: 0, activities: 0 })
 const workOrderPages = ref({ issues: 1, requirements: 1, activities: 1 })
 const workOrderPageSize = 10
-const ticketDetailVisible = ref(false)
-const ticketDetailLoading = ref(false)
-const currentTicket = ref({})
 const activityDetailVisible = ref(false)
 const currentActivity = ref({})
 const remarkTimeline = ref([])
@@ -276,7 +275,7 @@ function openActivityDetail(row) {
 
 async function deleteActivity(row) {
   await api.projectActivityDelete({ activity_id: row.id })
-  $message.success('运维记录已删除')
+  $message.success('项目日志已删除')
   await loadWorkOrders(workOrderProject.value, 'activities')
   $table.value?.handleSearch()
 }
@@ -497,16 +496,13 @@ function workOrderPagination(type) {
   }
 }
 
-async function openTicketDetail(row) {
-  currentTicket.value = row
-  ticketDetailVisible.value = true
-  ticketDetailLoading.value = true
-  try {
-    const res = await api.getTicketById({ ticket_id: row.id })
-    if (currentTicket.value?.id === row.id) currentTicket.value = res.data
-  } finally {
-    ticketDetailLoading.value = false
-  }
+function getTicketDetailHref(row) {
+  return router.resolve({ path: '/ticket/detail', query: { ticket_id: row.id } }).href
+}
+
+function openTicketDetail(row) {
+  if (!row?.id) return
+  openAuthRouteInNewTab(getTicketDetailHref(row))
 }
 
 const ticketColumns = [
@@ -616,7 +612,7 @@ const columns = [
 </script>
 
 <template>
-  <CommonPage title="项目管理">
+  <CommonPage title="项目管理" :show-header="false">
     <div class="summary-grid">
       <div class="summary-row product-summary">
         <span class="summary-label product-summary-title">使用产品/点数汇总</span>
@@ -782,17 +778,17 @@ const columns = [
         </div>
 
         <div class="form-section">
-          <div class="section-title"><span>备注</span></div>
+          <div class="section-title"><span>项目日志</span></div>
           <div v-if="editingId" class="remark-timeline">
             <div v-if="!readonly" class="remark-add">
               <NInput
                 v-model:value="remarkForm.content"
                 class="remark-input"
                 type="textarea"
-                placeholder="填写本次备注"
+                placeholder="填写本次项目日志"
                 :autosize="{ minRows: 2, maxRows: 4 }"
               />
-              <NButton class="remark-submit" type="primary" @click="submitRemarkTimeline">添加备注</NButton>
+              <NButton class="remark-submit" type="primary" @click="submitRemarkTimeline">添加日志</NButton>
             </div>
             <div v-if="remarkTimelineRows.length" class="remark-list">
               <div v-for="item in remarkTimelineRows" :key="item.id" class="remark-item">
@@ -804,9 +800,9 @@ const columns = [
                 <div class="remark-content">{{ item.content || item.title || '-' }}</div>
               </div>
             </div>
-            <div v-else class="remark-empty">暂无备注流水</div>
+            <div v-else class="remark-empty">暂无项目日志流水</div>
           </div>
-          <NFormItem v-else label="备注">
+          <NFormItem v-else label="项目日志">
             <NInput v-model:value="form.remark" type="textarea" :autosize="{ minRows: 3, maxRows: 5 }" />
           </NFormItem>
         </div>
@@ -875,7 +871,7 @@ const columns = [
               size="small"
             />
           </NTabPane>
-          <NTabPane name="activities" :tab="`运维单 (${workOrderTotals.activities})`">
+          <NTabPane name="activities" :tab="`项目日志 (${workOrderTotals.activities})`">
             <NDataTable
               :columns="activityColumns"
               :data="workOrders.activities"
@@ -889,13 +885,11 @@ const columns = [
       </NDrawerContent>
     </NDrawer>
 
-    <TicketDetailModal v-model:visible="ticketDetailVisible" :ticket="currentTicket" :loading="ticketDetailLoading" />
-
-    <CrudModal v-model:visible="activityDetailVisible" title="运维详情" :show-footer="false" width="760px">
+    <CrudModal v-model:visible="activityDetailVisible" title="项目日志详情" :show-footer="false" width="760px">
       <div class="project-modal-head">
         <div>
           <div class="modal-eyebrow">OPS DETAIL</div>
-          <div class="modal-project-name">{{ currentActivity.title || '未命名运维' }}</div>
+          <div class="modal-project-name">{{ currentActivity.title || '未命名项目日志' }}</div>
         </div>
         <div class="modal-tags">
           <NTag v-if="currentActivity.activity_type" size="small" round type="info">{{ currentActivity.activity_type }}</NTag>
@@ -918,7 +912,7 @@ const columns = [
           </div>
         </div>
         <div class="form-section">
-          <div class="section-title"><span>运维内容</span></div>
+          <div class="section-title"><span>项目日志内容</span></div>
           <NFormItem label="内容"><NInput :value="currentActivity.content || '-'" type="textarea" disabled :autosize="{ minRows: 4, maxRows: 8 }" /></NFormItem>
         </div>
       </NForm>
@@ -1194,4 +1188,3 @@ const columns = [
   }
 }
 </style>
-

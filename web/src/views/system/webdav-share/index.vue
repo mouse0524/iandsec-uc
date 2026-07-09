@@ -137,7 +137,7 @@ async function deleteShare(id) {
 </script>
 
 <template>
-  <CommonPage title="分享记录" show-footer>
+  <CommonPage title="分享记录" :show-header="false" show-footer>
     <CrudTable
       ref="shareTable"
       v-model:query-items="shareQuery"

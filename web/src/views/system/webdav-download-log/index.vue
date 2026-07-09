@@ -50,7 +50,7 @@ const columns = [
 </script>
 
 <template>
-  <CommonPage title="下载日志" show-footer>
+  <CommonPage title="下载日志" :show-header="false" show-footer>
     <CrudTable
       ref="logTable"
       v-model:query-items="queryItems"

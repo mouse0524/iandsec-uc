@@ -11,6 +11,7 @@ from .monitor import monitor_router
 from .notices import notices_router
 from .partner import partner_router
 from .projects import projects_router
+from .release import release_router
 from .roles import roles_router
 from .settings import settings_router
 from .terminal import terminal_public_router, terminal_router
@@ -24,6 +25,7 @@ v1_router = APIRouter()
 v1_router.include_router(base_router, prefix="/base")
 v1_router.include_router(partner_router, prefix="/partner")
 v1_router.include_router(projects_router, prefix="/project", dependencies=[DependPermission])
+v1_router.include_router(release_router, prefix="/release", dependencies=[DependPermission])
 v1_router.include_router(terminal_public_router, prefix="/public/terminal")
 v1_router.include_router(webdav_public_router, prefix="/public/webdav")
 v1_router.include_router(users_router, prefix="/user", dependencies=[DependPermission])

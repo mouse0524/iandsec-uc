@@ -195,6 +195,12 @@ export default {
   webdavShareList: (params = {}) => request.get('/webdav/share/list', { params }),
   webdavShareDelete: (data = {}) => request.post('/webdav/share/delete', data),
   webdavDownloadLogList: (params = {}) => request.get('/webdav/download-log/list', { params }),
+  // release records
+  releaseViewList: () => request.get('/release/view-list'),
+  releaseList: () => request.get('/release/list'),
+  releaseSave: (data = {}) => request.post('/release/save', data),
+  releaseDelete: (data = {}) => request.post('/release/delete', data),
+  releaseClear: () => request.post('/release/clear'),
   // wiki
   wikiUploadSource: (file) => {
     const formData = new FormData()

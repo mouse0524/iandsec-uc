@@ -23,6 +23,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const attachments = computed(() => props.ticket?.attachments || [])
@@ -45,6 +49,11 @@ const redmineStatusTextMap = {
 const redmineDisplayStatus = computed(() => {
   return props.ticket?.redmine_status_name || redmineStatusTextMap[props.ticket?.redmine_sync_status] || '-'
 })
+const detailWrapper = computed(() => props.embedded ? 'div' : CrudModal)
+const detailWrapperProps = computed(() => props.embedded
+  ? { class: 'ticket-detail-content' }
+  : { visible: props.visible, title: '工单详情', width: 'min(96vw, 1280px)', showFooter: false }
+)
 
 function revokeImagePreviewUrls() {
   Object.values(imagePreviewMap.value || {}).forEach((url) => {
@@ -250,146 +259,142 @@ function getActionIconClass(action) {
 </script>
 
 <template>
-  <CrudModal :visible="visible" title="工单详情" width="min(96vw, 1280px)" :show-footer="false" @update:visible="$emit('update:visible', $event)">
+  <component :is="detailWrapper" v-bind="detailWrapperProps" @update:visible="$emit('update:visible', $event)">
     <div class="detail-header">
       <div>
         <div class="detail-no">{{ ticket.ticket_no }}</div>
         <div class="detail-title">{{ ticket.title }}</div>
       </div>
-      <NTag :type="ticketStatusTypeMap[ticket.status] || 'default'">{{ ticketStatusTextMap[ticket.status] || '-' }}</NTag>
+      <NTag class="status-tag" :type="ticketStatusTypeMap[ticket.status] || 'default'">{{ ticketStatusTextMap[ticket.status] || '-' }}</NTag>
     </div>
 
-    <div class="detail-grid">
-      <div class="detail-card">
-        <span>项目名称</span>
-        <strong>{{ ticket.company_name || '-' }}</strong>
+    <section class="detail-section basic-section">
+      <div class="section-title">基本信息</div>
+      <div class="detail-grid">
+        <div class="detail-card">
+          <span>项目名称</span>
+          <strong>{{ ticket.company_name || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>联系人</span>
+          <strong>{{ ticket.contact_name || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>联系方式</span>
+          <strong>{{ ticket.phone || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>项目阶段</span>
+          <strong>{{ ticket.project_phase || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>跟踪</span>
+          <strong>{{ ticket.issue_type || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>影响范围</span>
+          <strong>{{ ticket.impact_scope || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>问题分类</span>
+          <strong>{{ ticket.category || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>创建时间</span>
+          <strong>{{ ticket.created_at || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>提交人</span>
+          <strong>{{ ticket.submitter_name || ticket.submitter_id || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>附件数量</span>
+          <strong>{{ ticket.attachment_count ?? attachments.length }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>客服审核人</span>
+          <strong>{{ ticket.reviewer_name || ticket.reviewer_id || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>指派技术</span>
+          <strong>{{ ticket.tech_name || ticket.tech_id || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>问题根因</span>
+          <strong>{{ ticket.root_cause || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>完成时间</span>
+          <strong>{{ ticket.finished_at || '-' }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>Redmine工单</span>
+          <strong>
+            <a v-if="ticket.redmine_issue_url" :href="ticket.redmine_issue_url" target="_blank" rel="noopener">
+              #{{ ticket.redmine_issue_id }}
+            </a>
+            <template v-else>{{ ticket.redmine_issue_id ? `#${ticket.redmine_issue_id}` : '-' }}</template>
+          </strong>
+        </div>
+        <div class="detail-card">
+          <span>Redmine状态</span>
+          <strong>{{ redmineDisplayStatus }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>Redmine同步时间</span>
+          <strong>{{ ticket.redmine_synced_at || '-' }}</strong>
+        </div>
       </div>
-      <div class="detail-card">
-        <span>联系人</span>
-        <strong>{{ ticket.contact_name || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>联系方式</span>
-        <strong>{{ ticket.phone || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>项目阶段</span>
-        <strong>{{ ticket.project_phase || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>跟踪</span>
-        <strong>{{ ticket.issue_type || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>影响范围</span>
-        <strong>{{ ticket.impact_scope || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>问题分类</span>
-        <strong>{{ ticket.category || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>创建时间</span>
-        <strong>{{ ticket.created_at || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>提交人</span>
-        <strong>{{ ticket.submitter_name || ticket.submitter_id || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>附件数量</span>
-        <strong>{{ ticket.attachment_count ?? attachments.length }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>客服审核人</span>
-        <strong>{{ ticket.reviewer_name || ticket.reviewer_id || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>指派技术</span>
-        <strong>{{ ticket.tech_name || ticket.tech_id || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>问题根因</span>
-        <strong>{{ ticket.root_cause || '-' }}</strong>
-      </div>
-      <div class="detail-card detail-card-wide">
-        <span>完成时间</span>
-        <strong>{{ ticket.finished_at || '-' }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>Redmine工单</span>
-        <strong>
-          <a v-if="ticket.redmine_issue_url" :href="ticket.redmine_issue_url" target="_blank" rel="noopener">
-            #{{ ticket.redmine_issue_id }}
-          </a>
-          <template v-else>{{ ticket.redmine_issue_id ? `#${ticket.redmine_issue_id}` : '-' }}</template>
-        </strong>
-      </div>
-      <div class="detail-card">
-        <span>Redmine状态</span>
-        <strong>{{ redmineDisplayStatus }}</strong>
-      </div>
-      <div class="detail-card">
-        <span>Redmine同步时间</span>
-        <strong>{{ ticket.redmine_synced_at || '-' }}</strong>
-      </div>
+    </section>
 
-    </div>
-
-    <div class="description-card">
+    <section class="detail-section issue-section">
       <div class="section-title">问题描述</div>
       <div v-if="loading" class="detail-loading">
         <NSpin size="small" />
         <span>详情加载中...</span>
       </div>
-      <div v-else class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
-    </div>
-
-    <div class="detail-secondary-grid">
-    <div class="attachment-card">
-      <div class="section-title">附件列表</div>
-      <div v-if="loading" class="detail-loading">
-        <NSpin size="small" />
-        <span>附件加载中...</span>
-      </div>
-      <div v-else-if="imageAttachments.length" class="image-preview-grid">
-        <a
-          v-for="item in imageAttachments"
-          :key="`img-${item.id}`"
-          :href="getImagePreviewUrl(item)"
-          target="_blank"
-          rel="noopener"
-          class="image-preview-item"
-        >
-          <img :src="getImagePreviewUrl(item)" :alt="item.origin_name || `image-${item.id}`" />
-        </a>
-      </div>
-      <div v-if="!loading && attachments.length" class="attachment-list">
-        <div v-for="item in attachments" :key="item.id" class="attachment-item">
-          <div>
-            <div class="attachment-name">{{ item.origin_name || item.file_path }}</div>
-            <div class="attachment-meta">{{ item.mime_type || 'application/octet-stream' }} / {{ item.file_size || 0 }} bytes</div>
-          </div>
-          <div class="attachment-actions">
-            <NButton v-if="isImageName(item.origin_name || item.file_path || '')" size="small" type="info" quaternary @click="copyImage(item)">复制图片</NButton>
-            <NButton
-              v-if="isPreviewableAttachment(item)"
-              size="small"
-              type="info"
-              quaternary
-              :loading="previewingAttachmentId === item.id"
-              @click="previewAttachment(item)"
-            >
-              预览
-            </NButton>
-            <NButton size="small" type="primary" quaternary @click="openAttachment(item)">下载</NButton>
+      <template v-else>
+        <div class="description-content" @click="openDescriptionImagePreview" v-html="safeDescription"></div>
+        <div class="subsection-title">附件列表</div>
+        <div v-if="imageAttachments.length" class="image-preview-grid">
+          <a
+            v-for="item in imageAttachments"
+            :key="`img-${item.id}`"
+            :href="getImagePreviewUrl(item)"
+            target="_blank"
+            rel="noopener"
+            class="image-preview-item"
+          >
+            <img :src="getImagePreviewUrl(item)" :alt="item.origin_name || `image-${item.id}`" />
+          </a>
+        </div>
+        <div v-if="attachments.length" class="attachment-list">
+          <div v-for="item in attachments" :key="item.id" class="attachment-item">
+            <div>
+              <div class="attachment-name">{{ item.origin_name || item.file_path }}</div>
+              <div class="attachment-meta">{{ item.mime_type || 'application/octet-stream' }} / {{ item.file_size || 0 }} bytes</div>
+            </div>
+            <div class="attachment-actions">
+              <NButton v-if="isImageName(item.origin_name || item.file_path || '')" size="small" type="info" quaternary @click="copyImage(item)">复制图片</NButton>
+              <NButton
+                v-if="isPreviewableAttachment(item)"
+                size="small"
+                type="info"
+                quaternary
+                :loading="previewingAttachmentId === item.id"
+                @click="previewAttachment(item)"
+              >
+                预览
+              </NButton>
+              <NButton size="small" type="primary" quaternary @click="openAttachment(item)">下载</NButton>
+            </div>
           </div>
         </div>
-      </div>
-      <NEmpty v-else-if="!loading" description="暂无附件" size="small" />
-    </div>
+        <NEmpty v-else description="暂无附件" size="small" />
+      </template>
+    </section>
 
-    <div class="timeline-card">
+    <section class="detail-section timeline-card">
       <div class="section-title">流转日志</div>
       <div v-if="loading" class="detail-loading">
         <NSpin size="small" />
@@ -432,9 +437,8 @@ function getActionIconClass(action) {
         </n-timeline-item>
       </n-timeline>
       <NEmpty v-else description="暂无流转日志" size="small" />
-    </div>
-    </div>
-  </CrudModal>
+    </section>
+  </component>
   <NModal v-model:show="descriptionImagePreviewVisible" preset="card" title="图片预览" class="description-image-modal">
     <div class="description-image-preview">
       <img :src="descriptionImagePreviewSrc" :alt="descriptionImagePreviewAlt" />
@@ -448,70 +452,108 @@ function getActionIconClass(action) {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 16px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  border: 1px solid #e5edf8;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
 
 .detail-no {
-  color: #9ca3af;
-  font-size: 13px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .detail-title {
-  margin-top: 6px;
-  font-size: 22px;
+  margin-top: 8px;
+  color: #0f172a;
+  font-size: 24px;
   font-weight: 700;
-  color: #111827;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.status-tag {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
 }
 
-.detail-card,
-.description-card,
-.attachment-card,
-.timeline-card {
+.detail-section {
   padding: 16px;
   border: 1px solid #eceff5;
-  border-radius: 18px;
-  background: #fafbfd;
+  border-radius: 8px;
+  background: #fff;
+  margin-top: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+}
+
+.basic-section {
+  padding: 12px;
+  background: #fbfcfe;
+}
+
+.detail-card {
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid #eceff5;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 3px 0 0 rgba(15, 118, 110, 0.18);
 }
 
 .detail-card span,
-.section-title {
+.section-title,
+.subsection-title {
   display: block;
   color: #6b7280;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 14px;
+}
+
+.section-title::before {
+  content: '';
+  width: 4px;
+  height: 14px;
+  border-radius: 999px;
+  background: #0f766e;
+}
+
+.subsection-title {
+  color: #374151;
+  font-size: 13px;
 }
 
 .detail-card strong {
   display: block;
-  margin-top: 8px;
+  margin-top: 4px;
   color: #111827;
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
-.detail-card-wide {
-  grid-column: span 1;
-}
-
-.description-card,
-.attachment-card,
-.timeline-card {
-  margin-top: 10px;
-}
-
-.detail-secondary-grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
-  gap: 12px;
-  align-items: start;
+.subsection-title {
+  margin-top: 18px;
 }
 
 .detail-loading {
@@ -525,7 +567,11 @@ function getActionIconClass(action) {
 }
 
 .description-content {
-  margin-top: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #fbfdff;
   color: #374151;
   line-height: 1.8;
   white-space: pre-wrap;
@@ -580,13 +626,17 @@ function getActionIconClass(action) {
 }
 
 .ticket-timeline {
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .timeline-content {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  background: #fbfdff;
 }
 
 .timeline-comment {
@@ -741,10 +791,16 @@ function getActionIconClass(action) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-radius: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
   background: #fff;
   border: 1px solid #e5e7eb;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.attachment-item:hover {
+  border-color: #99d5cc;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.08);
 }
 
 .attachment-actions {
@@ -762,7 +818,7 @@ function getActionIconClass(action) {
 
 .image-preview-item {
   display: block;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   background: #fff;
@@ -786,17 +842,15 @@ function getActionIconClass(action) {
   font-size: 12px;
 }
 
+@media (max-width: 1200px) {
+  .detail-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 960px) {
   .detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .detail-secondary-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .detail-card-wide {
-    grid-column: span 1;
   }
 }
 

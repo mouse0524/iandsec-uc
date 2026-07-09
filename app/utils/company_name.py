@@ -2,6 +2,12 @@ import re
 
 from tortoise.expressions import Q
 
+LEGAL_COMPANY_NAME_RE = re.compile(
+    r"^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$",
+    re.IGNORECASE,
+)
+LEGAL_COMPANY_NAME_MESSAGE = "公司名称必须填写完整，并以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾"
+
 
 COMPANY_SUFFIXES = (
     "集团股份有限公司",
@@ -50,6 +56,15 @@ REGION_PREFIXES = (
     "香港",
     "澳门",
 )
+
+
+def validate_legal_company_name(value: str) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("请输入公司名称")
+    if not LEGAL_COMPANY_NAME_RE.fullmatch(name):
+        raise ValueError(LEGAL_COMPANY_NAME_MESSAGE)
+    return name
 
 
 def _strip_suffix(text: str, suffixes: tuple[str, ...]) -> str:

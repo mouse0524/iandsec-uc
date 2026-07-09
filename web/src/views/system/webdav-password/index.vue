@@ -32,7 +32,7 @@ const passwordItems = computed(() => [
     key: 'serverOps',
     title: '服务器运维工具密码',
     cycleLabel: '每日更新',
-    cycleDescription: '工具地址：https://IP:12580, 账号admin',
+    cycleDescription: '工具地址：https://127.0.0.1:12580, 账号admin',
     periodLabel: '生效日期',
     periodValue: todayText.value,
     value: passwords.serverOps,

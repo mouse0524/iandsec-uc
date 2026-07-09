@@ -236,7 +236,7 @@ const columns = computed(() => {
 </script>
 
 <template>
-  <CommonPage title="注册审核" show-footer>
+  <CommonPage title="注册审核" :show-header="false" show-footer>
     <NTabs type="line" :value="activeTab" @update:value="handleTabChange" mb-12>
       <NTabPane name="pending" tab="待审核" />
       <NTabPane name="reviewed" tab="已审核" />

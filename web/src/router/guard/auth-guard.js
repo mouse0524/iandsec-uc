@@ -3,7 +3,7 @@ import { usePermissionStore, useUserStore } from '@/store'
 import { EMPTY_ROUTE, NOT_FOUND_ROUTE } from '../routes'
 
 export const WHITE_LIST = ['/login', '/404', '/403', '/public/webdav/share/download', '/public/webdav/preview']
-const BASIC_AUTH_PATHS = ['/profile', '/webdav/preview']
+const BASIC_AUTH_PATHS = ['/profile', '/webdav/preview', '/ticket/detail']
 const WORKBENCH_REDIRECTS = [
   { role: '客服', path: '/ticket/review' },
   { role: '技术', path: '/ticket/tech' },

@@ -5,7 +5,14 @@ from app.services.wiki.wiki_builder import content_hash, normalize_page_path, sl
 class WikiLearningService:
     async def create_candidate(self, *, question: str, answer: str | None, evidence_page_ids: list[int], reason: str) -> WikiLearningCandidate:
         path = normalize_page_path(f"concepts/{slugify(question, 'learning')}")
-        content = f"# {question.strip()}\n\n请在这里整理需要写入知识库的内容，确认无误后点击“学习入库”。"
+        content = (
+            f"# {question.strip()}\n\n"
+            "## 问题现象\n请描述用户看到的现象。\n\n"
+            "## 适用版本/系统\n请填写适用版本、系统或环境。\n\n"
+            "## 原因\n请整理已确认的原因。\n\n"
+            "## 处理步骤\n1. 请填写处理步骤。\n\n"
+            f"## 关键词/别名\n{question.strip()}\n"
+        )
         candidate = await WikiLearningCandidate.filter(question=question.strip(), reason=reason, status="pending").first()
         if candidate:
             candidate.answer = answer
