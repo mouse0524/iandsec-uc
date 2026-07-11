@@ -15,10 +15,7 @@ function collectPaths(routes = [], bucket = []) {
 function getRoleDefaultPath() {
   const userStore = useUserStore()
   if (userStore.isSuperUser) return '/workbench'
-  const roleNames = (userStore.role || []).map((item) => item?.name).filter(Boolean)
-  if (roleNames.includes('客服')) return '/ticket/review'
-  if (roleNames.includes('技术')) return '/ticket/tech'
-  return '/ticket/my'
+  return '/ticket/issues'
 }
 
 export const useTagsStore = defineStore('tag', {

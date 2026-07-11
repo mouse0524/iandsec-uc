@@ -1,0 +1,563 @@
+import json
+from types import SimpleNamespace
+
+import pytest
+
+
+def _response_body(response):
+    return json.loads(response.body.decode("utf-8"))
+
+
+def test_issue_router_is_mounted():
+    from app.api.v1 import v1_router
+
+    paths = {route.path for route in v1_router.routes}
+
+    assert "/issue/create" in paths
+    assert "/issue/list" in paths
+    assert "/issue/get" in paths
+    assert "/issue/metadata" in paths
+    assert "/issue/status-options" in paths
+    assert "/issue/update" in paths
+    assert "/issue/watchers" in paths
+    assert "/issue/watcher/add" in paths
+    assert "/issue/watcher/delete" in paths
+    assert "/issue/relations" in paths
+    assert "/issue/relation/create" in paths
+    assert "/issue/relation/delete" in paths
+    assert "/issue/time-entries" in paths
+    assert "/issue/time-entry/create" in paths
+    assert "/issue/time-entry/delete" in paths
+    assert "/issue/queries" in paths
+    assert "/issue/query/create" in paths
+    assert "/issue/query/update" in paths
+    assert "/issue/query/delete" in paths
+    assert "/issue/admin/config" in paths
+    assert "/issue/admin/tracker/save" in paths
+    assert "/issue/admin/status/save" in paths
+    assert "/issue/admin/priority/save" in paths
+    assert "/issue/admin/workflow/save" in paths
+    assert "/issue/admin/custom-field/save" in paths
+
+
+def test_rd_task_router_is_not_mounted():
+    from app.api.v1 import v1_router
+
+    paths = {route.path for route in v1_router.routes}
+
+    assert not any(path.startswith("/rd-task/") for path in paths)
+
+
+def test_issue_admin_api_paths_are_registered_for_init_permissions():
+    from app.core.init_app import _issue_admin_api_paths, _issue_create_api_paths, _issue_update_api_paths
+
+    paths = set(_issue_admin_api_paths())
+
+    assert "/api/v1/issue/admin/config" in paths
+    assert "/api/v1/issue/admin/tracker/save" in paths
+    assert "/api/v1/issue/admin/status/save" in paths
+    assert "/api/v1/issue/admin/priority/save" in paths
+    assert "/api/v1/issue/admin/workflow/save" in paths
+    assert "/api/v1/issue/admin/custom-field/save" in paths
+    assert _issue_create_api_paths() == ["/api/v1/issue/create"]
+    assert "/api/v1/issue/create" not in _issue_update_api_paths()
+
+
+def test_issue_attachment_file_exists_rejects_missing_and_escaped_paths(monkeypatch, tmp_path):
+    from app.api.v1.issues import issues as issue_api
+
+    existing = tmp_path / "tickets" / "shot.png"
+    existing.parent.mkdir()
+    existing.write_bytes(b"ok")
+    monkeypatch.setattr(issue_api.settings, "UPLOAD_DIR", str(tmp_path))
+
+    assert issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="tickets/shot.png"))
+    assert not issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="tickets/missing.png"))
+    assert not issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="../outside.png"))
+
+
+@pytest.mark.anyio
+async def test_get_issue_returns_404_when_issue_is_missing(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    user = SimpleNamespace(id=3, is_superuser=True, roles=[])
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["管理员"]
+
+    class MissingTicketQuery:
+        async def first(self):
+            return None
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api.Ticket, "filter", lambda **kwargs: MissingTicketQuery())
+
+    response = await issue_api.get_issue(issue_id=404)
+
+    body = _response_body(response)
+    assert body["code"] == 404
+
+
+@pytest.mark.anyio
+async def test_issue_admin_tracker_save_rejects_non_admin(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueAdminTrackerSaveIn
+
+    role = SimpleNamespace(id=5, name="研发")
+    user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["研发"]
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+
+    response = await issue_api.save_issue_tracker(IssueAdminTrackerSaveIn(name="现网问题"))
+
+    body = _response_body(response)
+    assert body["code"] == 403
+
+
+@pytest.mark.anyio
+async def test_issue_admin_workflow_save_accepts_multiple_targets(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueAdminWorkflowSaveIn
+
+    calls = []
+    user = SimpleNamespace(id=1, is_superuser=True, roles=[])
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return []
+
+    class WorkflowQuery:
+        def exclude(self, **kwargs):
+            calls.append(("exclude", kwargs))
+            return self
+
+        async def delete(self):
+            calls.append(("delete", None))
+            return 1
+
+    class WorkflowRow:
+        def __init__(self, new_status_id):
+            self.new_status_id = new_status_id
+            self.assignee_required = False
+            self.author_allowed = False
+            self.assignee_allowed = True
+
+        async def save(self):
+            calls.append(("save", self.new_status_id))
+
+        async def to_dict(self):
+            return {"new_status_id": self.new_status_id}
+
+    class WorkflowModel:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("filter", kwargs))
+            return WorkflowQuery()
+
+        @staticmethod
+        async def get_or_create(**kwargs):
+            calls.append(("get_or_create", kwargs))
+            return WorkflowRow(kwargs["new_status_id"]), False
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "IssueWorkflowTransition", WorkflowModel)
+
+    response = await issue_api.save_issue_workflow(
+        IssueAdminWorkflowSaveIn(
+            role_id=1,
+            tracker_id=2,
+            old_status_id=3,
+            new_status_ids=[4, 5],
+            assignee_required=True,
+        )
+    )
+
+    body = _response_body(response)
+    assert body["data"] == [{"new_status_id": 4}, {"new_status_id": 5}]
+    assert ("filter", {"role_id": 1, "tracker_id": 2, "old_status_id": 3}) in calls
+    assert ("exclude", {"new_status_id__in": [4, 5]}) in calls
+    assert [call[1]["new_status_id"] for call in calls if call[0] == "get_or_create"] == [4, 5]
+
+
+@pytest.mark.anyio
+async def test_create_issue_api_saves_custom_values(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueCreateIn
+
+    role = SimpleNamespace(id=9, name="用户")
+    user = SimpleNamespace(
+        id=3,
+        is_superuser=False,
+        roles=[role],
+        company_name="客户A",
+        alias="张三",
+        username="zhangsan",
+        email="a@example.com",
+        phone="13800000000",
+    )
+    ticket = SimpleNamespace(id=7, to_dict=lambda: {"id": 7, "title": "自定义字段工单"})
+    saved = []
+    created = []
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["用户"]
+
+    async def fake_create_ticket(**kwargs):
+        created.append(kwargs)
+        return ticket
+
+    async def fake_apply_defaults(current_ticket):
+        return current_ticket
+
+    async def fake_save_custom_values(issue_id, values, *, validate_required=False):
+        saved.append((issue_id, values, validate_required))
+        return []
+
+    async def fake_decorate(rows):
+        rows[0]["custom_values"] = {"12": "高危"}
+        return rows
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api.ticket_controller, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(issue_api.issue_default_service, "apply_defaults", fake_apply_defaults)
+    monkeypatch.setattr(issue_api, "_save_issue_custom_values", fake_save_custom_values)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", fake_decorate)
+
+    response = await issue_api.create_issue(
+        IssueCreateIn(
+            title="自定义字段工单",
+            company_name="客户A",
+            issue_type="现网问题",
+            issue_priority_id=1,
+            description="desc",
+            custom_values={"12": "高危"},
+        )
+    )
+
+    body = _response_body(response)
+    assert body["data"]["custom_values"] == {"12": "高危"}
+    assert created[0]["payload"]["assigned_to_id"] == 3
+    assert saved == [(7, {"12": "高危"}, True)]
+
+
+def test_validate_create_issue_uses_chinese_required_labels():
+    from fastapi import HTTPException
+
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueCreateIn
+
+    with pytest.raises(HTTPException) as exc_info:
+        issue_api._validate_create_issue(
+            IssueCreateIn(
+                title="标题",
+                company_name="",
+                issue_type="现网问题",
+                issue_priority_id=1,
+                description="描述",
+            )
+        )
+
+    assert exc_info.value.detail == "项目名称不能为空"
+
+
+def test_validate_create_issue_rejects_empty_rich_text_description():
+    from fastapi import HTTPException
+
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueCreateIn
+
+    with pytest.raises(HTTPException) as exc_info:
+        issue_api._validate_create_issue(
+            IssueCreateIn(
+                title="标题",
+                company_name="项目",
+                issue_type="现网问题",
+                issue_priority_id=1,
+                description="<p><br></p>",
+            )
+        )
+
+    assert exc_info.value.detail == "描述不能为空"
+
+
+def test_create_issue_payload_drops_client_controlled_workflow_fields():
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueCreateIn
+
+    payload = IssueCreateIn(
+        title="越权创建",
+        company_name="客户A",
+        issue_type="现网问题",
+        issue_priority_id=1,
+        issue_status_id=99,
+        assigned_to_id=88,
+        done_ratio=100,
+        is_private=True,
+        description="desc",
+    )
+
+    data = issue_api._create_issue_payload(payload, SimpleNamespace(id=3, alias="用户", email="", phone=""))
+
+    assert data["assigned_to_id"] == 3
+    assert "issue_status_id" not in data
+    assert "done_ratio" not in data
+    assert "is_private" not in data
+
+
+@pytest.mark.anyio
+async def test_get_issue_api_returns_ticket_attachments(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    class AwaitableRows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def order_by(self, *args):
+            return self
+
+        def __await__(self):
+            async def _result():
+                return self.rows
+
+            return _result().__await__()
+
+    user = SimpleNamespace(id=3, is_superuser=True, roles=[])
+    ticket = SimpleNamespace(
+        id=7,
+        to_dict=lambda: {"id": 7, "title": "附件工单", "issue_status_id": 20},
+    )
+    attachment = SimpleNamespace(
+        id=11,
+        to_dict=lambda: {
+            "id": 11,
+            "ticket_id": 7,
+            "origin_name": "error.log",
+            "file_path": "tickets/error.log",
+            "file_size": 42,
+            "mime_type": "text/plain",
+        },
+    )
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["admin"]
+
+    async def fake_access(current_ticket, current_user, role_names):
+        return True
+
+    async def fake_decorate(rows):
+        return rows
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", fake_decorate)
+    monkeypatch.setattr(issue_api, "_ticket_attachment_file_exists", lambda item: True)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api.TicketAttachment, "filter", lambda **kwargs: AwaitableRows([attachment]))
+    monkeypatch.setattr(issue_api.IssueJournal, "filter", lambda **kwargs: AwaitableRows([]))
+
+    response = await issue_api.get_issue(issue_id=7)
+
+    body = _response_body(response)
+    assert body["data"]["attachment_count"] == 1
+    assert body["data"]["attachments"] == [
+        {
+            "id": 11,
+            "ticket_id": 7,
+            "origin_name": "error.log",
+            "file_path": "tickets/error.log",
+            "file_size": 42,
+            "mime_type": "text/plain",
+            "file_exists": True,
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_update_issue_api_records_notes_and_changes(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueUpdateIn
+
+    role = SimpleNamespace(id=5, name="研发")
+    user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
+    ticket = SimpleNamespace(id=7)
+    calls = []
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["研发"]
+
+    async def fake_access(current_ticket, current_user, role_names):
+        return True
+
+    async def fake_update_issue(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(to_dict=lambda: {"id": 7, "issue_status_id": 30})
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
+
+    response = await issue_api.update_issue(
+        IssueUpdateIn(
+            issue_id=7,
+            changes={"issue_status_id": 30, "assigned_to_id": 4},
+            notes="推进处理",
+        )
+    )
+
+    body = _response_body(response)
+    assert body["data"] == {"id": 7, "issue_status_id": 30}
+    assert calls == [
+        {
+            "issue_id": 7,
+            "user_id": 3,
+            "role_ids": [5],
+            "changes": {"issue_status_id": 30, "assigned_to_id": 4},
+            "notes": "推进处理",
+            "private_notes": False,
+            "bypass_workflow": False,
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_update_issue_api_rejects_external_user_role(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueUpdateIn
+
+    role = SimpleNamespace(id=9, name="用户")
+    user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
+    ticket = SimpleNamespace(id=7)
+    calls = []
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["用户"]
+
+    async def fake_access(current_ticket, current_user, role_names):
+        return True
+
+    async def fake_update_issue(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(to_dict=lambda: {"id": 7})
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+
+    response = await issue_api.update_issue(
+        IssueUpdateIn(issue_id=7, changes={"issue_status_id": 30}, notes="尝试推进")
+    )
+
+    body = _response_body(response)
+    assert body["code"] == 403
+    assert calls == []
+
+
+@pytest.mark.anyio
+async def test_create_issue_api_reuses_ticket_creation_and_current_user_defaults(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueCreateIn
+
+    role = SimpleNamespace(id=5, name="用户")
+    user = SimpleNamespace(
+        id=3,
+        is_superuser=False,
+        roles=[role],
+        alias="用户同学",
+        username="user01",
+        company_name="安得内部",
+        email="user@example.com",
+        phone="13800000000",
+    )
+    calls = []
+    ticket = SimpleNamespace(
+        id=9,
+        to_dict=lambda: {"id": 9, "title": "内部Issue", "issue_status_id": 20},
+    )
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["用户"]
+
+    async def fake_create_ticket(**kwargs):
+        calls.append(kwargs)
+        return ticket
+
+    async def fake_apply_defaults(current_ticket):
+        current_ticket.defaulted = True
+        return current_ticket
+
+    async def fake_save_custom_values(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api.ticket_controller, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(issue_api.issue_default_service, "apply_defaults", fake_apply_defaults)
+    monkeypatch.setattr(issue_api, "_save_issue_custom_values", fake_save_custom_values)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
+
+    response = await issue_api.create_issue(
+        IssueCreateIn(
+            title="内部Issue",
+            company_name="安得内部",
+            description="需要从Issue直接新建",
+            project_phase="现网",
+            issue_type="现网需求",
+            category="需求",
+            issue_priority_id=1,
+        )
+    )
+
+    body = _response_body(response)
+    assert body["data"]["id"] == 9
+    assert calls[0]["submitter_id"] == 3
+    assert calls[0]["payload"]["company_name"] == "安得内部"
+    assert calls[0]["payload"]["contact_name"] == "用户同学"
+    assert calls[0]["payload"]["email"] == "user@example.com"
+    assert calls[0]["payload"]["phone"] == "13800000000"
+    assert calls[0]["payload"]["title"] == "内部Issue"
+    assert calls[0]["payload"]["assigned_to_id"] == 3

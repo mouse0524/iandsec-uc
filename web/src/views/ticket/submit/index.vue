@@ -61,8 +61,10 @@ const form = ref({
   captcha_code: '',
   turnstile_token: '',
 })
-const companyNamePattern = /^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$/i
-const companyNameMessage = '请输入完整公司名称，需以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾'
+const companyNamePattern =
+  /^.+?(?:有限责任公司|有限公司|股份有限公司|股份公司|合伙企业|（有限合伙）|（特殊普通合伙）|分公司)$/i
+const companyNameMessage =
+  '请输入完整公司名称，需以有限公司、有限责任公司、股份有限公司、股份公司、合伙企业、（有限合伙）、（特殊普通合伙）或分公司结尾'
 
 const categoryOptions = ref([
   { label: '登录问题', value: '登录问题' },
@@ -70,6 +72,12 @@ const categoryOptions = ref([
   { label: '系统异常', value: '系统异常' },
   { label: '其他', value: '其他' },
 ])
+
+function hasRichText(value) {
+  const div = document.createElement('div')
+  div.innerHTML = value || ''
+  return (div.textContent || '').replace(/\s+/g, ' ').trim()
+}
 
 const rules = {
   company_name: {
@@ -87,9 +95,12 @@ const rules = {
   project_phase: { required: true, message: '请选择项目阶段', trigger: ['change'] },
   issue_type: { required: true, message: '请选择跟踪', trigger: ['change'] },
   impact_scope: { required: true, message: '请选择影响范围', trigger: ['change'] },
-  category: { required: true, message: '请选择分类', trigger: ['change'] },
+  category: { required: true, message: '请选择问题分类', trigger: ['change'] },
   title: { required: true, message: '请输入标题', trigger: ['blur', 'input'] },
-  description: { required: true, message: '请输入问题描述', trigger: ['blur', 'input'] },
+  description: {
+    validator: () => (hasRichText(form.value.description) ? true : new Error('请输入问题描述')),
+    trigger: ['blur', 'input'],
+  },
   captcha_code: {
     validator: () => validateChallenge(),
     trigger: ['blur', 'input', 'change'],
@@ -97,12 +108,24 @@ const rules = {
 }
 
 const challengeEnabled = computed(() => appStore.loginChallengeEnabled !== false)
-const requiresCaptcha = computed(() => challengeEnabled.value && ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'))
-const requiresTurnstile = computed(() => challengeEnabled.value && ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'))
+const requiresCaptcha = computed(
+  () =>
+    challengeEnabled.value &&
+    ['captcha', 'both'].includes(appStore.loginChallengeType || 'captcha'),
+)
+const requiresTurnstile = computed(
+  () =>
+    challengeEnabled.value &&
+    ['turnstile', 'both'].includes(appStore.loginChallengeType || 'captcha'),
+)
 
 watch(descriptionTemplateOptions, (options) => {
   if (!options.length) return
-  if (!form.value.description || !form.value.description.trim() || options.every((item) => item.value !== form.value.description)) {
+  if (
+    !form.value.description ||
+    !form.value.description.trim() ||
+    options.every((item) => item.value !== form.value.description)
+  ) {
     form.value.description = options[0].value
   }
 })
@@ -155,7 +178,9 @@ async function fetchPublicConfig() {
       value: item,
     }))
     if (attachmentExtensions.length > 0) {
-      attachmentAccept.value = attachmentExtensions.map((item) => `.${String(item).replace(/^\./, '')}`).join(',')
+      attachmentAccept.value = attachmentExtensions
+        .map((item) => `.${String(item).replace(/^\./, '')}`)
+        .join(',')
     }
   } catch (error) {
     // ignore config fetch errors
@@ -181,7 +206,7 @@ function quickFill() {
 }
 
 function isCsReviewPhase(phase) {
-  const reviewSet = new Set((appStore.ticketCsReviewProjectPhases || []))
+  const reviewSet = new Set(appStore.ticketCsReviewProjectPhases || [])
   if (!reviewSet.size) {
     return ['实施', '售后'].includes(phase)
   }
@@ -346,20 +371,40 @@ async function refreshChallenge() {
               </div>
             </div>
             <NAlert v-if="form.project_phase" type="info" class="mb-12">
-              {{ isCsReviewPhase(form.project_phase) ? '当前项目阶段会先进入客服审核。' : '当前项目阶段会直接进入技术处理。' }}
+              {{
+                isCsReviewPhase(form.project_phase)
+                  ? '当前项目阶段会先进入客服审核。'
+                  : '当前项目阶段会直接进入技术处理。'
+              }}
             </NAlert>
             <div class="form-grid single-col">
               <NFormItem label="项目阶段" path="project_phase">
-                <NSelect v-model:value="form.project_phase" :options="projectPhaseOptions" placeholder="请选择项目阶段" />
+                <NSelect
+                  v-model:value="form.project_phase"
+                  :options="projectPhaseOptions"
+                  placeholder="请选择项目阶段"
+                />
               </NFormItem>
               <NFormItem label="跟踪" path="issue_type">
-                <NSelect v-model:value="form.issue_type" :options="issueTypeOptions" placeholder="请选择跟踪" />
+                <NSelect
+                  v-model:value="form.issue_type"
+                  :options="issueTypeOptions"
+                  placeholder="请选择跟踪"
+                />
               </NFormItem>
               <NFormItem label="影响范围" path="impact_scope">
-                <NSelect v-model:value="form.impact_scope" :options="impactScopeOptions" placeholder="请选择影响范围" />
+                <NSelect
+                  v-model:value="form.impact_scope"
+                  :options="impactScopeOptions"
+                  placeholder="请选择影响范围"
+                />
               </NFormItem>
               <NFormItem label="问题分类" path="category">
-                <NSelect v-model:value="form.category" :options="categoryOptions" placeholder="请选择分类" />
+                <NSelect
+                  v-model:value="form.category"
+                  :options="categoryOptions"
+                  placeholder="请选择问题分类"
+                />
               </NFormItem>
               <NFormItem label="问题标题" path="title">
                 <NInput v-model:value="form.title" placeholder="例如：用户导入报错 500" />
@@ -411,7 +456,11 @@ async function refreshChallenge() {
                   >
                     <NButton class="upload-btn" :loading="uploadLoading">上传附件</NButton>
                   </NUpload>
-                  <span class="upload-tip">支持最多 5 个附件，单个最大 50M，支持粘贴图片上传，当前允许类型：{{ attachmentAccept }}。</span>
+                  <span class="upload-tip"
+                    >支持最多 5 个附件，单个最大 50M，支持粘贴图片上传，当前允许类型：{{
+                      attachmentAccept
+                    }}。</span
+                  >
                 </div>
               </NFormItem>
               <NFormItem v-if="challengeEnabled" label="安全校验" path="captcha_code">
@@ -427,13 +476,14 @@ async function refreshChallenge() {
 
           <NFormItem>
             <div class="submit-row">
-              <NButton class="submit-btn" type="primary" :loading="submitting" @click="submit">提交工单</NButton>
+              <NButton class="submit-btn" type="primary" :loading="submitting" @click="submit"
+                >提交工单</NButton
+              >
               <span class="submit-tip">提交后将进入客服审核流程，处理进度可在工单中心查看。</span>
             </div>
           </NFormItem>
         </NForm>
       </div>
-
     </div>
   </div>
 </template>
@@ -619,4 +669,3 @@ async function refreshChallenge() {
   }
 }
 </style>
-

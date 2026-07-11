@@ -85,8 +85,6 @@ export default {
   reviewTicket: (data = {}) => request.post('/ticket/review', data),
   techActionTicket: (data = {}) => request.post('/ticket/tech/action', data),
   assignTicketTech: (data = {}) => request.post('/ticket/assign-tech', data),
-  pushTicketRedmine: (data = {}) => request.post('/ticket/redmine/push', data),
-  pullTicketRedmine: (data = {}) => request.post('/ticket/redmine/pull', data),
   downloadTicketAttachment: (params = {}) =>
     request.get('/ticket/attachment/download', {
       params,
@@ -95,6 +93,31 @@ export default {
   previewTicketAttachment: (params = {}) => request.get('/ticket/attachment/preview-cache', { params, timeout: 300000 }),
   resubmitTicket: (data = {}) => request.post('/ticket/resubmit', data),
   getTicketActions: (params = {}) => request.get('/ticket/actions', { params }),
+  createIssue: (data = {}) => request.post('/issue/create', data),
+  getIssueList: (params = {}) => request.get('/issue/list', { params }),
+  getIssueById: (params = {}) => request.get('/issue/get', { params }),
+  getIssueMetadata: () => request.get('/issue/metadata'),
+  getIssueStatusOptions: (params = {}) => request.get('/issue/status-options', { params }),
+  updateIssue: (data = {}) => request.post('/issue/update', data),
+  getIssueWatchers: (params = {}) => request.get('/issue/watchers', { params }),
+  addIssueWatcher: (data = {}) => request.post('/issue/watcher/add', data),
+  deleteIssueWatcher: (data = {}) => request.post('/issue/watcher/delete', data),
+  getIssueRelations: (params = {}) => request.get('/issue/relations', { params }),
+  createIssueRelation: (data = {}) => request.post('/issue/relation/create', data),
+  deleteIssueRelation: (params = {}) => request.delete('/issue/relation/delete', { params }),
+  getIssueTimeEntries: (params = {}) => request.get('/issue/time-entries', { params }),
+  createIssueTimeEntry: (data = {}) => request.post('/issue/time-entry/create', data),
+  deleteIssueTimeEntry: (params = {}) => request.delete('/issue/time-entry/delete', { params }),
+  getIssueQueries: () => request.get('/issue/queries'),
+  createIssueQuery: (data = {}) => request.post('/issue/query/create', data),
+  updateIssueQuery: (data = {}) => request.post('/issue/query/update', data),
+  deleteIssueQuery: (params = {}) => request.delete('/issue/query/delete', { params }),
+  getIssueAdminConfig: () => request.get('/issue/admin/config'),
+  saveIssueTrackerConfig: (data = {}) => request.post('/issue/admin/tracker/save', data),
+  saveIssueStatusConfig: (data = {}) => request.post('/issue/admin/status/save', data),
+  saveIssuePriorityConfig: (data = {}) => request.post('/issue/admin/priority/save', data),
+  saveIssueWorkflowConfig: (data = {}) => request.post('/issue/admin/workflow/save', data),
+  saveIssueCustomFieldConfig: (data = {}) => request.post('/issue/admin/custom-field/save', data),
   // project
   projectList: (params = {}) => request.get('/project/list', { params }),
   projectGet: (params = {}) => request.get('/project/get', { params }),
@@ -176,7 +199,6 @@ export default {
   getDatabaseBackupStatus: () => request.get('/settings/database-backup/status'),
   testDatabaseBackupDirectory: (data = {}) => request.post('/settings/database-backup/test', data),
   runDatabaseBackup: (data = {}) => request.post('/settings/database-backup/run', data, { timeout: 300000 }),
-  getRedmineMetadata: (data = {}) => request.post('/settings/redmine/metadata', data),
   uploadSiteLogo: (file) => {
     const formData = new FormData()
     formData.append('file', file)

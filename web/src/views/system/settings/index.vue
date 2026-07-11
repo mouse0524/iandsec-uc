@@ -7,7 +7,6 @@ import {
   NCheckbox,
   NCheckboxGroup,
   NDivider,
-  NDynamicTags,
   NForm,
   NFormItem,
   NInput,
@@ -31,24 +30,13 @@ const formRef = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const webdavTesting = ref(false)
-const redmineMetadataLoading = ref(false)
 const dbBackupTesting = ref(false)
 const dbBackupRunning = ref(false)
 const dbBackupStatus = ref(null)
-const timeSyncChecking = ref(false)
-const timeSyncSyncing = ref(false)
-const timeSyncStatus = ref(null)
 const logoUploading = ref(false)
 const previewVisible = ref(false)
 const appStore = useAppStore()
 const MASKED_SECRET = '******'
-const redmineProjectOptions = ref([])
-const redmineTrackerOptions = ref([])
-const redminePriorityOptions = ref([])
-const redmineUserOptions = ref([])
-const redmineStatusOptions = ref([])
-const redmineCustomFieldOptions = ref([])
-const redmineOsValueOptions = ref([])
 const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
@@ -145,22 +133,6 @@ const form = ref({
   db_backup_webdav_password: '',
   db_backup_run_at: '02:30',
   db_backup_retention_days: 7,
-  redmine_enabled: false,
-  redmine_base_url: '',
-  redmine_api_key: '',
-  redmine_project_id: '',
-  redmine_tracker_id: null,
-  redmine_priority_id: null,
-  redmine_assigned_to_id: null,
-  redmine_project_phase_field_id: null,
-  redmine_os_field_id: null,
-  redmine_server_version_field_id: null,
-  redmine_client_version_field_id: null,
-  redmine_sync_visible_fields: [],
-  redmine_sync_options: {},
-  redmine_auto_pull_enabled: false,
-  redmine_auto_pull_interval_minutes: 120,
-  redmine_auto_pull_ticket_statuses: ['tech_processing', 'field_verification', 'pending_close'],
   llm_chat_provider: 'openai',
   llm_chat_base_url: 'https://api.openai.com/v1',
   llm_chat_api_key: '',
@@ -237,6 +209,12 @@ const ticketNotifyRoleOptions = {
     { label: '通过后待技术处理', value: 'tech_processing' },
     { label: '现场验证', value: 'field_verification' },
   ],
+  产品: [{ label: '产品评估', value: 'product_evaluation' }],
+  测试: [
+    { label: '测试过滤', value: 'test_filtering' },
+    { label: '测试验证', value: 'test_verification' },
+  ],
+  研发: [{ label: '研发处理', value: 'rd_processing' }],
 }
 
 const passwordCategoryOptions = [
@@ -256,17 +234,7 @@ const llmProviderOptions = [
   { label: 'Ollama本地模型', value: 'ollama' },
 ]
 
-const ticketNotifyRoles = ['用户', '代理商', '客服', '技术']
-
-const ticketStatusOptions = [
-  { label: '待客服审核', value: 'pending_review' },
-  { label: '客服驳回', value: 'cs_rejected' },
-  { label: '待技术处理', value: 'tech_processing' },
-  { label: '现场验证', value: 'field_verification' },
-  { label: '待关闭', value: 'pending_close' },
-  { label: '技术驳回', value: 'tech_rejected' },
-  { label: '已关闭', value: 'done' },
-]
+const ticketNotifyRoles = ['用户', '代理商', '客服', '技术', '产品', '测试', '研发']
 
 function normalizeTicketNotifyByRole(raw = {}) {
   const normalized = {}
@@ -303,11 +271,16 @@ const rules = {
   ticket_cs_review_project_phases: {
     required: true,
     validator: () => {
-      if (!form.value.ticket_cs_review_project_phases || form.value.ticket_cs_review_project_phases.length === 0) {
+      if (
+        !form.value.ticket_cs_review_project_phases ||
+        form.value.ticket_cs_review_project_phases.length === 0
+      ) {
         return new Error('请至少配置一个客服审核阶段')
       }
       const projectPhaseSet = new Set(form.value.ticket_project_phases || [])
-      const invalid = (form.value.ticket_cs_review_project_phases || []).filter((item) => !projectPhaseSet.has(item))
+      const invalid = (form.value.ticket_cs_review_project_phases || []).filter(
+        (item) => !projectPhaseSet.has(item),
+      )
       if (invalid.length) {
         return new Error('客服审核阶段必须包含在项目阶段中')
       }
@@ -521,48 +494,6 @@ const rules = {
     message: '请输入 1-365 天',
     trigger: ['blur', 'change'],
   },
-  redmine_base_url: {
-    validator: () => {
-      if (!form.value.redmine_enabled) return true
-      if (!String(form.value.redmine_base_url || '').trim()) return new Error('请输入 Redmine 地址')
-      return true
-    },
-    trigger: ['input', 'blur'],
-  },
-  redmine_api_key: {
-    validator: () => {
-      if (!form.value.redmine_enabled) return true
-      if (!String(form.value.redmine_api_key || '').trim()) return new Error('请输入 Redmine API Key')
-      return true
-    },
-    trigger: ['input', 'blur'],
-  },
-  redmine_project_id: {
-    validator: () => {
-      if (!form.value.redmine_enabled) return true
-      if (!String(form.value.redmine_project_id || '').trim()) return new Error('请输入 Redmine 项目标识')
-      return true
-    },
-    trigger: ['blur', 'change'],
-  },
-  redmine_auto_pull_interval_minutes: {
-    trigger: ['input', 'blur'],
-    validator() {
-      const value = Number(form.value.redmine_auto_pull_interval_minutes || 0)
-      if (value < 1 || value > 1440) return new Error('定时拉取间隔需在1到1440分钟之间')
-      return true
-    },
-  },
-  redmine_auto_pull_ticket_statuses: {
-    trigger: ['change', 'blur'],
-    validator() {
-      if (!form.value.redmine_auto_pull_enabled) return true
-      if (!form.value.redmine_auto_pull_ticket_statuses?.length) {
-        return new Error('请至少选择一个定时拉取状态')
-      }
-      return true
-    },
-  },
 }
 
 onMounted(() => {
@@ -583,7 +514,9 @@ async function loadData() {
           ? res.data.allow_channel_register
           : legacyRegisterEnabled,
       allow_user_register:
-        typeof res.data?.allow_user_register === 'boolean' ? res.data.allow_user_register : legacyRegisterEnabled,
+        typeof res.data?.allow_user_register === 'boolean'
+          ? res.data.allow_user_register
+          : legacyRegisterEnabled,
       ticket_attachment_extensions: res.data?.ticket_attachment_extensions?.length
         ? res.data.ticket_attachment_extensions
         : form.value.ticket_attachment_extensions,
@@ -605,9 +538,15 @@ async function loadData() {
       ticket_description_templates: Array.isArray(res.data?.ticket_description_templates)
         ? res.data.ticket_description_templates
         : form.value.ticket_description_templates,
-      project_products: res.data?.project_products?.length ? res.data.project_products : form.value.project_products,
-      project_statuses: res.data?.project_statuses?.length ? res.data.project_statuses : form.value.project_statuses,
-      project_regions: res.data?.project_regions?.length ? res.data.project_regions : form.value.project_regions,
+      project_products: res.data?.project_products?.length
+        ? res.data.project_products
+        : form.value.project_products,
+      project_statuses: res.data?.project_statuses?.length
+        ? res.data.project_statuses
+        : form.value.project_statuses,
+      project_regions: res.data?.project_regions?.length
+        ? res.data.project_regions
+        : form.value.project_regions,
       project_activity_types: res.data?.project_activity_types?.length
         ? res.data.project_activity_types
         : form.value.project_activity_types,
@@ -628,8 +567,6 @@ async function loadData() {
       turnstile_site_key: res.data?.turnstile_site_key || '',
       turnstile_secret_key: res.data?.turnstile_secret_key || '',
     }
-    await loadCachedRedmineMetadata()
-    ensureRedmineSelectedOptions()
     await loadDatabaseBackupStatus()
     const publicRes = await api.getAppConfig()
     appStore.setSiteConfig(publicRes.data || {})
@@ -648,9 +585,6 @@ function save() {
         allow_partner_register: form.value.allow_channel_register || form.value.allow_user_register,
         ticket_notify_by_role: normalizeTicketNotifyByRole(form.value.ticket_notify_by_role),
       }
-      if (payload.redmine_api_key === MASKED_SECRET) {
-        delete payload.redmine_api_key
-      }
       if (payload.turnstile_secret_key === MASKED_SECRET) {
         delete payload.turnstile_secret_key
       }
@@ -668,21 +602,6 @@ function save() {
   })
 }
 
-function redmineSyncOptionValue(field) {
-  return selectedRedmineSyncOptions(field)
-}
-
-function updateRedmineSyncOptionValue(field, values) {
-  setSelectedRedmineSyncOptions(field, values)
-}
-
-function redmineSyncSelectOptions(options) {
-  return (Array.isArray(options) ? options : []).map((item) => ({
-    ...item,
-    value: String(item.value),
-  }))
-}
-
 async function testWebdavConnection() {
   try {
     webdavTesting.value = true
@@ -695,185 +614,6 @@ async function testWebdavConnection() {
     $message.success(res?.msg || 'WebDAV连接成功')
   } finally {
     webdavTesting.value = false
-  }
-}
-
-function redmineMetadataPayload() {
-  const payload = {
-    redmine_base_url: form.value.redmine_base_url,
-    redmine_api_key: form.value.redmine_api_key,
-  }
-  if (payload.redmine_api_key === MASKED_SECRET) {
-    delete payload.redmine_api_key
-  }
-  return payload
-}
-
-function normalizeRedmineOptions(items = [], numeric = false) {
-  return (Array.isArray(items) ? items : [])
-    .map((item) => {
-      const rawValue = numeric ? (item.id ?? item.value) : (item.value ?? item.id)
-      const value = numeric ? Number(rawValue) : String(rawValue || '')
-      if (numeric && (!value || Number.isNaN(value))) return null
-      if (!numeric && !value) return null
-      const label = item.label || item.name || item.login || String(value)
-      return {
-        label,
-        value,
-      }
-    })
-    .filter(Boolean)
-}
-
-function mergeRedmineOption(options, value, labelPrefix) {
-  if (value === null || value === undefined || value === '') return options
-  const normalizedValue = typeof value === 'number' ? value : String(value)
-  if (options.some((item) => item.value === normalizedValue)) return options
-  return [{ label: `${labelPrefix || '已保存'}：${normalizedValue}`, value: normalizedValue }, ...options]
-}
-
-function ensureRedmineSelectedOptions() {
-  redmineProjectOptions.value = mergeRedmineOption(
-    redmineProjectOptions.value,
-    form.value.redmine_project_id,
-    '已保存项目',
-  )
-  redmineTrackerOptions.value = mergeRedmineOption(
-    redmineTrackerOptions.value,
-    form.value.redmine_tracker_id,
-    '已保存跟踪',
-  )
-  redminePriorityOptions.value = mergeRedmineOption(
-    redminePriorityOptions.value,
-    form.value.redmine_priority_id,
-    '已保存优先级',
-  )
-  redmineUserOptions.value = mergeRedmineOption(
-    redmineUserOptions.value,
-    form.value.redmine_assigned_to_id,
-    '已保存指派人',
-  )
-  redmineStatusOptions.value = mergeRedmineOption(
-    redmineStatusOptions.value,
-    form.value.redmine_closed_status_id,
-    '已保存状态',
-  )
-  redmineCustomFieldOptions.value = mergeRedmineOption(
-    redmineCustomFieldOptions.value,
-    form.value.redmine_project_phase_field_id,
-    '已保存自定义字段',
-  )
-  redmineCustomFieldOptions.value = mergeRedmineOption(
-    redmineCustomFieldOptions.value,
-    form.value.redmine_os_field_id,
-    '已保存自定义字段',
-  )
-  redmineCustomFieldOptions.value = mergeRedmineOption(
-    redmineCustomFieldOptions.value,
-    form.value.redmine_server_version_field_id,
-    '已保存自定义字段',
-  )
-  redmineCustomFieldOptions.value = mergeRedmineOption(
-    redmineCustomFieldOptions.value,
-    form.value.redmine_client_version_field_id,
-    '已保存自定义字段',
-  )
-}
-
-function selectedRedmineSyncOptions(field) {
-  return Array.isArray(form.value.redmine_sync_options?.[field])
-    ? form.value.redmine_sync_options[field]
-    : []
-}
-
-function setSelectedRedmineSyncOptions(field, values) {
-  form.value.redmine_sync_options = {
-    ...(form.value.redmine_sync_options || {}),
-    [field]: Array.isArray(values) ? values.map((item) => String(item)) : [],
-  }
-}
-
-function redmineOsValueOptionsFromCustomFields(fields = []) {
-  const fieldId = Number(form.value.redmine_os_field_id)
-  const osField = (fields || []).find((item) => Number(item.id) === fieldId)
-    || (fields || []).find((item) => String(item.label || item.name || '').includes('操作系统'))
-  return Array.isArray(osField?.possible_values) ? osField.possible_values : []
-}
-
-function applyRedmineMetadata(data = {}) {
-  redmineProjectOptions.value = normalizeRedmineOptions(data.projects)
-  redmineTrackerOptions.value = normalizeRedmineOptions(data.trackers, true)
-  redminePriorityOptions.value = normalizeRedmineOptions(data.priorities, true)
-  redmineUserOptions.value = normalizeRedmineOptions(data.users, true)
-  redmineStatusOptions.value = normalizeRedmineOptions(data.statuses, true)
-  redmineCustomFieldOptions.value = normalizeRedmineOptions(data.custom_fields, true)
-  redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
-  ensureRedmineSelectedOptions()
-}
-
-async function loadCachedRedmineMetadata() {
-  try {
-    const res = await api.getRedmineMetadata({})
-    applyRedmineMetadata(res?.data || {})
-  } catch (error) {
-    ensureRedmineSelectedOptions()
-  }
-}
-
-async function loadRedmineMetadata() {
-  if (!form.value.redmine_base_url) {
-    $message.warning('请先填写Redmine地址')
-    return
-  }
-  if (!form.value.redmine_api_key) {
-    $message.warning('请先填写Redmine API Key')
-    return
-  }
-  try {
-    redmineMetadataLoading.value = true
-    const res = await api.getRedmineMetadata(redmineMetadataPayload())
-    const data = res?.data || {}
-    applyRedmineMetadata(data)
-    if (!form.value.redmine_project_id && redmineProjectOptions.value.length) {
-      form.value.redmine_project_id = redmineProjectOptions.value[0].value
-    }
-    if (!form.value.redmine_tracker_id && redmineTrackerOptions.value.length) {
-      form.value.redmine_tracker_id = redmineTrackerOptions.value[0].value
-    }
-    if (!form.value.redmine_priority_id && redminePriorityOptions.value.length) {
-      form.value.redmine_priority_id = redminePriorityOptions.value[0].value
-    }
-    if (!form.value.redmine_assigned_to_id && redmineUserOptions.value.length) {
-      form.value.redmine_assigned_to_id = redmineUserOptions.value[0].value
-    }
-    if (!form.value.redmine_project_phase_field_id && redmineCustomFieldOptions.value.length) {
-      const item = redmineCustomFieldOptions.value.find((option) =>
-        String(option.label || '').includes('项目阶段'),
-      )
-      form.value.redmine_project_phase_field_id = item?.value || null
-    }
-    if (!form.value.redmine_os_field_id && redmineCustomFieldOptions.value.length) {
-      const item = redmineCustomFieldOptions.value.find((option) =>
-        String(option.label || '').includes('操作系统'),
-      )
-      form.value.redmine_os_field_id = item?.value || null
-    }
-    if (!form.value.redmine_server_version_field_id && redmineCustomFieldOptions.value.length) {
-      const item = redmineCustomFieldOptions.value.find((option) =>
-        String(option.label || '').includes('服务端版本号') || String(option.label || '').includes('服务器版本'),
-      )
-      form.value.redmine_server_version_field_id = item?.value || null
-    }
-    if (!form.value.redmine_client_version_field_id && redmineCustomFieldOptions.value.length) {
-      const item = redmineCustomFieldOptions.value.find((option) =>
-        String(option.label || '').includes('客户端版本号') || String(option.label || '').includes('客户端版本'),
-      )
-      form.value.redmine_client_version_field_id = item?.value || null
-    }
-    redmineOsValueOptions.value = redmineOsValueOptionsFromCustomFields(data.custom_fields)
-    $message.success('Redmine配置选项已更新')
-  } finally {
-    redmineMetadataLoading.value = false
   }
 }
 
@@ -921,32 +661,6 @@ async function runDatabaseBackup() {
   }
 }
 
-async function checkTimeSyncStatus() {
-  try {
-    timeSyncChecking.value = true
-    const res = await api.getTimeSyncStatus()
-    timeSyncStatus.value = res?.data || null
-    if (timeSyncStatus.value?.within_tolerance) {
-      $message.success('时间偏差在允许范围内')
-    } else {
-      $message.warning('时间偏差超过允许范围')
-    }
-  } finally {
-    timeSyncChecking.value = false
-  }
-}
-
-async function syncSystemTime() {
-  try {
-    timeSyncSyncing.value = true
-    const res = await api.syncSystemTime()
-    timeSyncStatus.value = res?.data || null
-    $message.success(res?.msg || '时间同步完成')
-  } finally {
-    timeSyncSyncing.value = false
-  }
-}
-
 async function uploadLogo({ file, onFinish, onError }) {
   try {
     logoUploading.value = true
@@ -978,18 +692,6 @@ function renderSafeTemplate(template, params) {
 
 function openPreview() {
   previewVisible.value = true
-}
-
-function addDescriptionTemplate() {
-  form.value.ticket_description_templates.push('')
-}
-
-function removeDescriptionTemplate(index) {
-  if ((form.value.ticket_description_templates || []).length <= 1) {
-    $message.warning('至少保留一个问题描述模板')
-    return
-  }
-  form.value.ticket_description_templates.splice(index, 1)
 }
 
 function applyPresetHtmlTemplates() {
@@ -1061,112 +763,11 @@ function applyPresetHtmlTemplates() {
             </NCard>
           </NTabPane>
 
-          <NTabPane name="ticket" tab="工单配置">
-            <NCard size="small" title="工单分类">
-              <NFormItem label="客服自动审批工单">
-                <NSwitch v-model:value="form.customer_service_auto_approve_ticket" />
-              </NFormItem>
-              <NFormItem label="附件类型" path="ticket_attachment_extensions">
-                <NDynamicTags v-model:value="form.ticket_attachment_extensions" />
-              </NFormItem>
-              <NFormItem label="项目阶段" path="ticket_project_phases">
-                <NDynamicTags v-model:value="form.ticket_project_phases" />
-              </NFormItem>
-              <NFormItem label="客服审核阶段" path="ticket_cs_review_project_phases">
-                <NSelect
-                  v-model:value="form.ticket_cs_review_project_phases"
-                  multiple
-                  filterable
-                  clearable
-                  :options="form.ticket_project_phases.map((item) => ({ label: item, value: item }))"
-                  placeholder="从项目阶段中选择需要客服审核的阶段"
-                />
-              </NFormItem>
-              <NFormItem label="跟踪" path="ticket_issue_types">
-                <NDynamicTags v-model:value="form.ticket_issue_types" />
-              </NFormItem>
-              <NFormItem label="影响范围" path="ticket_impact_scopes">
-                <NDynamicTags v-model:value="form.ticket_impact_scopes" />
-              </NFormItem>
-              <NFormItem label="问题分类" path="ticket_categories">
-                <NDynamicTags v-model:value="form.ticket_categories" />
-              </NFormItem>
-              <NFormItem label="问题根因" path="ticket_root_causes">
-                <NDynamicTags v-model:value="form.ticket_root_causes" />
-              </NFormItem>
-              <NFormItem label="问题描述模板" path="ticket_description_templates">
-                <div class="template-editor">
-                  <div
-                    v-for="(item, index) in form.ticket_description_templates"
-                    :key="index"
-                    class="template-item"
-                  >
-                    <NInput
-                      v-model:value="form.ticket_description_templates[index]"
-                      type="textarea"
-                      :autosize="{ minRows: 3, maxRows: 6 }"
-                      :placeholder="`模板 ${index + 1}`"
-                    />
-                    <NButton quaternary type="error" @click="removeDescriptionTemplate(index)"
-                      >删除</NButton
-                    >
-                  </div>
-                  <NButton dashed @click="addDescriptionTemplate">新增模板</NButton>
-                </div>
-              </NFormItem>
-              <NDivider title-placement="left">项目管理</NDivider>
-              <NFormItem label="项目产品" path="project_products">
-                <NDynamicTags v-model:value="form.project_products" />
-              </NFormItem>
-              <NFormItem label="项目状态" path="project_statuses">
-                <NDynamicTags v-model:value="form.project_statuses" />
-              </NFormItem>
-              <NFormItem label="项目区域" path="project_regions">
-                <NDynamicTags v-model:value="form.project_regions" />
-              </NFormItem>
-              <NFormItem label="运维类型" path="project_activity_types">
-                <NDynamicTags v-model:value="form.project_activity_types" />
-              </NFormItem>
-              <NFormItem label="服务器版本" path="project_server_versions">
-                <NDynamicTags v-model:value="form.project_server_versions" />
-              </NFormItem>
-              <NFormItem label="客户端版本" path="project_client_versions">
-                <NDynamicTags v-model:value="form.project_client_versions" />
-              </NFormItem>
-              <NDivider title-placement="left">工单提醒</NDivider>
-              <NAlert type="info" class="mb-12">
-                按角色配置提醒节点：用户/代理商（客服驳回、技术驳回、处理完成），客服（提交后待客服审核），技术（通过后待技术处理）。客服审核阶段决定哪些项目阶段会先进入客服审核，其余阶段会直接进入技术处理。
-              </NAlert>
-              <NFormItem
-                v-for="roleName in ticketNotifyRoles"
-                :key="roleName"
-                :label="`${roleName}提醒节点`"
-              >
-                <NCheckboxGroup v-model:value="form.ticket_notify_by_role[roleName]">
-                  <div
-                    style="
-                      display: grid;
-                      grid-template-columns: repeat(2, minmax(220px, 1fr));
-                      gap: 8px 12px;
-                    "
-                  >
-                    <NCheckbox
-                      v-for="item in ticketNotifyRoleOptions[roleName]"
-                      :key="item.value"
-                      :value="item.value"
-                    >
-                      {{ item.label }}
-                    </NCheckbox>
-                  </div>
-                </NCheckboxGroup>
-              </NFormItem>
-            </NCard>
-          </NTabPane>
-
           <NTabPane name="login-security" tab="登录安全">
             <NCard size="small" title="登录失败锁定策略">
               <NAlert type="info" class="mb-12">
-                推荐开启双层锁定：账号+IP 连续失败达到阈值后锁定，同时对异常来源 IP 做更高阈值拦截；普通用户超过配置天数未登录会自动禁用。
+                推荐开启双层锁定：账号+IP 连续失败达到阈值后锁定，同时对异常来源 IP
+                做更高阈值拦截；普通用户超过配置天数未登录会自动禁用。
               </NAlert>
               <NFormItem label="启用登录安全">
                 <NSwitch v-model:value="form.login_security_enabled" />
@@ -1222,7 +823,11 @@ function applyPresetHtmlTemplates() {
                 <NSwitch v-model:value="form.login_generic_error_enabled" />
               </NFormItem>
               <NFormItem label="Token失效(分钟)" path="user_token_expire_minutes">
-                <NInputNumber v-model:value="form.user_token_expire_minutes" :min="1" :max="43200" />
+                <NInputNumber
+                  v-model:value="form.user_token_expire_minutes"
+                  :min="1"
+                  :max="43200"
+                />
               </NFormItem>
               <NFormItem label="未登录自动禁用">
                 <NSwitch v-model:value="form.inactive_user_auto_disable_enabled" />
@@ -1414,7 +1019,8 @@ function applyPresetHtmlTemplates() {
           <NTabPane name="database-backup" tab="数据库备份">
             <NCard size="small" title="异地备份到 NAS">
               <NAlert type="info" class="mb-12">
-                数据库备份使用独立的 NAS/WebDAV 地址；系统会在 MySQL 容器内导出数据库，并直接上传 .sql.gz 备份。
+                数据库备份使用独立的 NAS/WebDAV 地址；系统会在 MySQL 容器内导出数据库，并直接上传
+                .sql.gz 备份。
               </NAlert>
               <NFormItem label="启用自动备份">
                 <NSwitch v-model:value="form.db_backup_enabled" />
@@ -1438,7 +1044,10 @@ function applyPresetHtmlTemplates() {
                 />
               </NFormItem>
               <NFormItem label="备份账号" path="db_backup_webdav_username">
-                <NInput v-model:value="form.db_backup_webdav_username" placeholder="请输入备份账号" />
+                <NInput
+                  v-model:value="form.db_backup_webdav_username"
+                  placeholder="请输入备份账号"
+                />
               </NFormItem>
               <NFormItem label="备份密码" path="db_backup_webdav_password">
                 <NInput
@@ -1469,232 +1078,16 @@ function applyPresetHtmlTemplates() {
                   <NButton ghost :loading="dbBackupTesting" @click="testDatabaseBackupDirectory">
                     测试远端上传
                   </NButton>
-                  <NButton type="primary" ghost :loading="dbBackupRunning" @click="runDatabaseBackup">
+                  <NButton
+                    type="primary"
+                    ghost
+                    :loading="dbBackupRunning"
+                    @click="runDatabaseBackup"
+                  >
                     立即备份
                   </NButton>
                 </NSpace>
               </NFormItem>
-            </NCard>
-          </NTabPane>
-
-          <NTabPane name="redmine" tab="Redmine同步">
-            <NCard size="small" title="Redmine同步配置">
-              <NAlert type="info" class="mb-12">
-                技术处理页手动同步工单到 Redmine；从 Redmine 拉取时只刷新外部状态，不自动改本地工单状态。
-              </NAlert>
-              <NFormItem label="启用Redmine">
-                <NSwitch v-model:value="form.redmine_enabled" />
-              </NFormItem>
-              <NFormItem label="定时拉取">
-                <NSpace align="center">
-                  <NSwitch v-model:value="form.redmine_auto_pull_enabled" />
-                  <span class="form-hint">开启后后台定时拉取已关联 Redmine 的工单状态和备注</span>
-                </NSpace>
-              </NFormItem>
-              <NFormItem label="拉取间隔(分钟)" path="redmine_auto_pull_interval_minutes">
-                <NInputNumber
-                  v-model:value="form.redmine_auto_pull_interval_minutes"
-                  :min="1"
-                  :max="1440"
-                  :step="5"
-                  :disabled="!form.redmine_auto_pull_enabled"
-                  style="width: 180px"
-                />
-              </NFormItem>
-              <NFormItem label="拉取工单状态" path="redmine_auto_pull_ticket_statuses">
-                <NSelect
-                  v-model:value="form.redmine_auto_pull_ticket_statuses"
-                  :options="ticketStatusOptions"
-                  multiple
-                  clearable
-                  :disabled="!form.redmine_auto_pull_enabled"
-                  placeholder="默认只拉取待技术处理"
-                />
-              </NFormItem>
-              <NFormItem label="Redmine地址" path="redmine_base_url">
-                <NInput
-                  v-model:value="form.redmine_base_url"
-                  placeholder="例如 https://redmine.example.com"
-                />
-              </NFormItem>
-              <NFormItem label="API Key" path="redmine_api_key">
-                <NInput
-                  v-model:value="form.redmine_api_key"
-                  type="password"
-                  show-password-on="click"
-                  placeholder="保存后会以 ****** 显示"
-                />
-              </NFormItem>
-              <NFormItem>
-                <NButton type="primary" ghost :loading="redmineMetadataLoading" @click="loadRedmineMetadata">
-                  获取配置选项
-                </NButton>
-              </NFormItem>
-              <NDivider title-placement="left">字段映射</NDivider>
-              <NFormItem label="项目标识" path="redmine_project_id">
-                <NSelect
-                  v-model:value="form.redmine_project_id"
-                  :options="redmineProjectOptions"
-                  filterable
-                  clearable
-                  placeholder="选择默认Redmine项目标识"
-                />
-              </NFormItem>
-              <NFormItem label="跟踪" path="redmine_tracker_id">
-                <NSelect
-                  v-model:value="form.redmine_tracker_id"
-                  :options="redmineTrackerOptions"
-                  filterable
-                  clearable
-                  placeholder="选择默认Redmine跟踪"
-                />
-              </NFormItem>
-              <NFormItem label="优先级">
-                <NSelect
-                  v-model:value="form.redmine_priority_id"
-                  :options="redminePriorityOptions"
-                  filterable
-                  clearable
-                  placeholder="选择默认Redmine优先级"
-                />
-              </NFormItem>
-              <NFormItem label="指派给">
-                <NSelect
-                  v-model:value="form.redmine_assigned_to_id"
-                  :options="redmineUserOptions"
-                  filterable
-                  clearable
-                  placeholder="选择默认Redmine指派人"
-                />
-              </NFormItem>
-              <NFormItem label="关闭状态">
-                <NSelect
-                  v-model:value="form.redmine_closed_status_id"
-                  :options="redmineStatusOptions"
-                  filterable
-                  clearable
-                  placeholder="选择Redmine关闭状态"
-                />
-              </NFormItem>
-              <NFormItem label="项目阶段字段">
-                <NSelect
-                  v-model:value="form.redmine_project_phase_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="选择Redmine项目阶段自定义字段"
-                />
-              </NFormItem>
-              <NFormItem label="操作系统字段">
-                <NSelect
-                  v-model:value="form.redmine_os_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="选择Redmine操作系统自定义字段"
-                />
-              </NFormItem>
-              <NFormItem label="服务端版本号字段">
-                <NSelect
-                  v-model:value="form.redmine_server_version_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="选择Redmine服务端版本号自定义字段"
-                />
-              </NFormItem>
-              <NFormItem label="客户端版本号字段">
-                <NSelect
-                  v-model:value="form.redmine_client_version_field_id"
-                  :options="redmineCustomFieldOptions"
-                  filterable
-                  clearable
-                  placeholder="选择Redmine客户端版本号自定义字段"
-                />
-              </NFormItem>
-              <NDivider title-placement="left">技术可选</NDivider>
-              <NAlert type="info" class="mb-12">
-                这里配置技术同步 Redmine 时可见、可选的字段和值；获取配置选项后默认不勾选，选择后保存生效。
-              </NAlert>
-              <NFormItem label="同步时展示字段">
-                <NCheckboxGroup v-model:value="form.redmine_sync_visible_fields">
-                  <NSpace>
-                    <NCheckbox value="tracker_id">跟踪</NCheckbox>
-                    <NCheckbox value="project_id">项目标识</NCheckbox>
-                    <NCheckbox value="priority_id">优先级</NCheckbox>
-                    <NCheckbox value="assigned_to_id">指派给</NCheckbox>
-                    <NCheckbox value="project_phase">项目阶段</NCheckbox>
-                    <NCheckbox value="os">操作系统</NCheckbox>
-                  </NSpace>
-                </NCheckboxGroup>
-              </NFormItem>
-              <NFormItem label="项目标识">
-                <NSelect
-                  :value="redmineSyncOptionValue('project_id')"
-                  :options="redmineSyncSelectOptions(redmineProjectOptions)"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的项目"
-                  @update:value="(value) => updateRedmineSyncOptionValue('project_id', value)"
-                />
-              </NFormItem>
-              <NFormItem label="跟踪">
-                <NSelect
-                  :value="redmineSyncOptionValue('tracker_id')"
-                  :options="redmineSyncSelectOptions(redmineTrackerOptions)"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的跟踪"
-                  @update:value="(value) => updateRedmineSyncOptionValue('tracker_id', value)"
-                />
-              </NFormItem>
-              <NFormItem label="优先级">
-                <NSelect
-                  :value="redmineSyncOptionValue('priority_id')"
-                  :options="redmineSyncSelectOptions(redminePriorityOptions)"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的优先级"
-                  @update:value="(value) => updateRedmineSyncOptionValue('priority_id', value)"
-                />
-              </NFormItem>
-              <NFormItem label="指派给">
-                <NSelect
-                  :value="redmineSyncOptionValue('assigned_to_id')"
-                  :options="redmineSyncSelectOptions(redmineUserOptions)"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的 Redmine 用户"
-                  @update:value="(value) => updateRedmineSyncOptionValue('assigned_to_id', value)"
-                />
-              </NFormItem>
-              <NFormItem label="项目阶段">
-                <NSelect
-                  :value="redmineSyncOptionValue('project_phase')"
-                  :options="redmineSyncSelectOptions(form.ticket_project_phases.map((item) => ({ label: item, value: item })))"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的项目阶段"
-                  @update:value="(value) => updateRedmineSyncOptionValue('project_phase', value)"
-                />
-              </NFormItem>
-              <NFormItem label="操作系统">
-                <NSelect
-                  :value="redmineSyncOptionValue('os')"
-                  :options="redmineSyncSelectOptions(redmineOsValueOptions)"
-                  multiple
-                  filterable
-                  clearable
-                  placeholder="选择技术同步时可见的操作系统"
-                  @update:value="(value) => updateRedmineSyncOptionValue('os', value)"
-                />
-              </NFormItem>
-
             </NCard>
           </NTabPane>
 
@@ -2020,4 +1413,3 @@ function applyPresetHtmlTemplates() {
   }
 }
 </style>
-

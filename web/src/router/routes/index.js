@@ -14,7 +14,7 @@ export const EMPTY_ROUTE = {
 export const basicRoutes = [
   {
     path: '/',
-    redirect: '/ticket/my', // 默认跳转到我的工单
+    redirect: '/ticket/issues',
     meta: { order: 0 },
   },
   {
@@ -58,6 +58,16 @@ export const basicRoutes = [
     name: 'TicketDetail',
     path: '/ticket/detail',
     component: () => import('@/views/ticket/detail/index.vue'),
+    isHidden: true,
+    meta: {
+      title: '工单详情',
+      order: 99,
+    },
+  },
+  {
+    name: 'IssueDetail',
+    path: '/issue/detail',
+    component: () => import('@/views/issue/detail/index.vue'),
     isHidden: true,
     meta: {
       title: '工单详情',

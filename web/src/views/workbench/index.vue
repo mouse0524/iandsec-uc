@@ -152,6 +152,7 @@ const stats = ref({
   ticket_active: 0,
   ticket_pending_review: 0,
   ticket_tech_processing: 0,
+  ticket_internal_processing: 0,
   ticket_done: 0,
   ticket_rejected: 0,
   ticket_today_created: 0,
@@ -179,7 +180,7 @@ const latestReportText = computed(() => {
 })
 
 const keyMetrics = computed(() => [
-  { key: 'active', label: '待处理工单', value: stats.value.ticket_active, hint: '审核与技术处理中', metric: 'ticket_active' },
+  { key: 'active', label: '待处理工单', value: stats.value.ticket_active, hint: '审核、技术与产研处理中', metric: 'ticket_active' },
   { key: 'terminal', label: '受管终端', value: stats.value.terminal_total, hint: `${stats.value.terminal_company_count} 家公司`, metric: 'terminal_total' },
   { key: 'audit', label: '今日审计', value: stats.value.auditlog_today, hint: `${stats.value.auditlog_failed_today} 个失败请求`, metric: 'auditlog_today' },
 ])
@@ -189,6 +190,7 @@ const ticketBars = computed(() => {
   return [
     { key: 'pending', label: '待客服审核', value: stats.value.ticket_pending_review, color: '#eab308' },
     { key: 'processing', label: '技术处理中', value: stats.value.ticket_tech_processing, color: '#2563eb' },
+    { key: 'internal', label: '产研处理中', value: stats.value.ticket_internal_processing, color: '#7c3aed' },
     { key: 'done', label: '已完成', value: stats.value.ticket_done, color: '#16a34a' },
     { key: 'rejected', label: '已驳回', value: stats.value.ticket_rejected, color: '#ef4444' },
   ].map((item) => ({ ...item, percent: Math.min(100, Math.round((item.value * 100) / total)) }))
@@ -279,7 +281,7 @@ function goByMetric(metric) {
   if (statusMap[metric]) query.status = statusMap[metric]
   if (metric === 'ticket_today_created') Object.assign(query, todayRangeQuery('created'))
   if (metric === 'ticket_today_done') Object.assign(query, todayRangeQuery('finished'))
-  router.push({ path: '/ticket/my', query })
+  router.push({ path: '/ticket/issues', query })
 }
 </script>
 

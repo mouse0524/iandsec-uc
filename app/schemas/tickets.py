@@ -49,17 +49,6 @@ class TicketAssignTechIn(BaseModel):
     comment: Optional[str] = Field(None, description="改派备注")
 
 
-class TicketRedmineSyncIn(BaseModel):
-    ticket_id: int = Field(..., description="工单ID")
-    note: Optional[str] = Field(None, description="同步备注")
-    project_id: Optional[str] = Field(None, description="Redmine Project ID")
-    tracker_id: Optional[int] = Field(None, description="Redmine Tracker ID")
-    priority_id: Optional[int] = Field(None, description="Redmine Priority ID")
-    assigned_to_id: Optional[int] = Field(None, description="Redmine Assignee ID")
-    project_phase: Optional[str] = Field(None, description="Redmine project phase custom field value")
-    os_value: Optional[str] = Field(None, description="Redmine OS custom field value")
-
-
 class TicketCloseIn(BaseModel):
     ticket_id: int = Field(..., description="工单ID")
     comment: Optional[str] = Field(None, description="关闭备注")

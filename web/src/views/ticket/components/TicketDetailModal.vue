@@ -40,15 +40,6 @@ const descriptionImagePreviewSrc = ref('')
 const descriptionImagePreviewAlt = ref('')
 const safeDescription = computed(() => sanitizeHtml(props.ticket?.description || '-'))
 const hasActions = computed(() => Array.isArray(props.ticket?.actions) && props.ticket.actions.length > 0)
-const redmineStatusTextMap = {
-  never: '未同步',
-  success: '同步成功',
-  failed: '同步失败',
-  syncing: '同步中',
-}
-const redmineDisplayStatus = computed(() => {
-  return props.ticket?.redmine_status_name || redmineStatusTextMap[props.ticket?.redmine_sync_status] || '-'
-})
 const detailWrapper = computed(() => props.embedded ? 'div' : CrudModal)
 const detailWrapperProps = computed(() => props.embedded
   ? { class: 'ticket-detail-content' }
@@ -221,7 +212,7 @@ async function copyImage(item) {
 function renderActionContent(item) {
   if (!item) return '-'
   if (item.action === 'finish' && props.ticket?.root_cause) {
-    const base = item.comment?.trim() || '处理完成'
+    const base = item.comment?.trim() || (isTransferToRdActionLog(item) ? '转产研' : '处理完成')
     return sanitizeHtml(`${base}（根因：${props.ticket.root_cause}）`)
   }
   const sanitized = sanitizeHtml(item.comment || '-')
@@ -238,6 +229,14 @@ function renderActionContent(item) {
 
 function isRejectAction(action) {
   return action === 'cs_reject' || action === 'tech_reject'
+}
+
+function isTransferToRdActionLog(item) {
+  return item?.action === 'finish' && item?.from_status === 'tech_processing' && item?.to_status === 'test_filtering'
+}
+
+function mapTimelineActionText(item) {
+  return isTransferToRdActionLog(item) ? '转产研' : mapTicketActionText(item?.action)
 }
 
 function getActionIcon(action) {
@@ -327,23 +326,6 @@ function getActionIconClass(action) {
           <span>完成时间</span>
           <strong>{{ ticket.finished_at || '-' }}</strong>
         </div>
-        <div class="detail-card">
-          <span>Redmine工单</span>
-          <strong>
-            <a v-if="ticket.redmine_issue_url" :href="ticket.redmine_issue_url" target="_blank" rel="noopener">
-              #{{ ticket.redmine_issue_id }}
-            </a>
-            <template v-else>{{ ticket.redmine_issue_id ? `#${ticket.redmine_issue_id}` : '-' }}</template>
-          </strong>
-        </div>
-        <div class="detail-card">
-          <span>Redmine状态</span>
-          <strong>{{ redmineDisplayStatus }}</strong>
-        </div>
-        <div class="detail-card">
-          <span>Redmine同步时间</span>
-          <strong>{{ ticket.redmine_synced_at || '-' }}</strong>
-        </div>
       </div>
     </section>
 
@@ -404,7 +386,7 @@ function getActionIconClass(action) {
         <n-timeline-item
           v-for="item in ticket.actions || []"
           :key="item.id"
-          :title="mapTicketActionText(item.action)"
+          :title="mapTimelineActionText(item)"
           :type="isRejectAction(item.action) ? 'error' : 'success'"
         >
           <template #icon>

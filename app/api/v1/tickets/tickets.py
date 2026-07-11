@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+import html
 import io
 import json
 import re
@@ -15,16 +16,26 @@ from app.log import logger
 from app.controllers.partner import partner_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.ticket import ticket_controller
-from app.controllers.user import user_controller
 from app.core.redis_client import execute_redis
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
 from app.models.admin import Dept, DeptClosure, Ticket, TicketActionLog, TicketAttachment, User
-from app.models.enums import ROLE_ADMIN, ROLE_AGENT, ROLE_CHANNEL, ROLE_CUSTOMER_SERVICE, ROLE_TECH, ROLE_USER, TicketActionType, TicketStatus
+from app.models.enums import (
+    ROLE_ADMIN,
+    ROLE_AGENT,
+    ROLE_CHANNEL,
+    ROLE_CUSTOMER_SERVICE,
+    ROLE_PRODUCT,
+    ROLE_RD,
+    ROLE_TECH,
+    ROLE_TEST,
+    ROLE_USER,
+    TicketActionType,
+    TicketStatus,
+)
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketRedmineSyncIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
+from app.schemas.tickets import TicketAssignTechIn, TicketCloseIn, TicketCreate, TicketFieldVerificationIn, TicketResubmitIn, TicketReviewIn, TicketTechActionIn, TicketUpdateIn
 from app.services.human_challenge import human_challenge_service
-from app.services.redmine_sync_service import redmine_sync_service
 from app.settings import settings
 from app.utils.company_name import company_name_search_q
 from app.utils.http_headers import build_download_content_disposition
@@ -95,7 +106,17 @@ async def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) 
     if ROLE_TECH in role_names:
         if ticket.submitter_id == user.id or ticket.tech_id == user.id:
             return True
-        return ticket.submitter_id in await _tech_related_submitter_ids(user.id)
+        if ticket.submitter_id in await _tech_related_submitter_ids(user.id):
+            return True
+    if getattr(ticket, "assigned_to_id", None) == user.id:
+        return True
+    role_statuses = {
+        ROLE_PRODUCT: {TicketStatus.PRODUCT_EVALUATION},
+        ROLE_TEST: {TicketStatus.TEST_FILTERING, TicketStatus.TEST_VERIFICATION},
+        ROLE_RD: {TicketStatus.RD_PROCESSING},
+    }
+    if any(ticket.status in statuses for role, statuses in role_statuses.items() if role in role_names):
+        return True
     return ticket.submitter_id == user.id
 
 
@@ -188,6 +209,62 @@ def _clean_export_text(value) -> str:
     return text
 
 
+_VERSION_PATTERN = r"([0-9]+(?:\.[0-9]+)+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)"
+_VERSION_TEMPLATE_MESSAGE = "请按照规范提交：服务器版本：6.0.8-20260422-1039，客户端版本：6.0.8.206"
+_TICKET_REQUIRED_LABELS = {
+    "company_name": "项目名称",
+    "contact_name": "联系人",
+    "email": "邮箱",
+    "phone": "手机号",
+    "project_phase": "项目阶段",
+    "issue_type": "跟踪",
+    "impact_scope": "影响范围",
+    "category": "问题分类",
+    "title": "标题",
+    "description": "问题描述",
+}
+
+
+def _plain_ticket_description(value) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    text = re.sub(r"</?(p|div|section|article|li|ul|ol|h[1-6])\b[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in html.unescape(text).splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _extract_labeled_version(text: str, label: str) -> str:
+    pattern = re.compile(rf"{re.escape(label)}\s*[:：]\s*{_VERSION_PATTERN}", flags=re.IGNORECASE)
+    match = pattern.search(text or "")
+    return match.group(1).strip() if match else ""
+
+
+def _ticket_description_version_error(description, issue_type: str | None = "现网问题") -> str | None:
+    if issue_type != "现网问题":
+        return None
+    text = _plain_ticket_description(description)
+    missing = []
+    if not _extract_labeled_version(text, "服务器版本"):
+        missing.append("服务器版本")
+    if not _extract_labeled_version(text, "客户端版本"):
+        missing.append("客户端版本")
+    if not missing:
+        return None
+    return f"问题描述缺少{'、'.join(missing)}，{_VERSION_TEMPLATE_MESSAGE}"
+
+
+def _ticket_required_error(payload) -> str | None:
+    for field, label in _TICKET_REQUIRED_LABELS.items():
+        raw_value = getattr(payload, field, None)
+        value = _plain_ticket_description(raw_value) if field == "description" else str(raw_value or "").strip()
+        if not value:
+            return f"{label}不能为空"
+    return None
+
+
 def _resolve_ticket_issue_type(payload_issue_type: str | None, issue_types: list[str]) -> str:
     issue_type = str(payload_issue_type or "").strip()
     if not issue_type:
@@ -229,6 +306,9 @@ async def create_ticket(payload: TicketCreate, request: Request):
     )
     if pending:
         return Fail(code=403, msg="您的注册申请仍在审核中，暂不可提交工单")
+    required_error = _ticket_required_error(payload)
+    if required_error:
+        return Fail(code=400, msg=required_error)
 
     config = await system_setting_controller.get_full_dict()
     valid, challenge_error = await human_challenge_service.verify(
@@ -257,7 +337,7 @@ async def create_ticket(payload: TicketCreate, request: Request):
         return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
-    version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+    version_error = _ticket_description_version_error(payload.description, issue_type)
     if version_error:
         return Fail(code=400, msg=version_error)
 
@@ -456,6 +536,10 @@ async def export_tickets(
         TicketStatus.PENDING_REVIEW.value: "待客服审核",
         TicketStatus.CS_REJECTED.value: "客服驳回",
         TicketStatus.TECH_PROCESSING.value: "待技术处理",
+        TicketStatus.TEST_FILTERING.value: "测试过滤",
+        TicketStatus.PRODUCT_EVALUATION.value: "产品评估",
+        TicketStatus.RD_PROCESSING.value: "研发处理",
+        TicketStatus.TEST_VERIFICATION.value: "测试验证",
         TicketStatus.FIELD_VERIFICATION.value: "现场验证",
         TicketStatus.PENDING_CLOSE.value: "待关闭",
         TicketStatus.TECH_REJECTED.value: "技术驳回",
@@ -469,12 +553,25 @@ async def export_tickets(
         TicketActionType.TECH_START.value: "技术开始处理",
         TicketActionType.TECH_ASSIGN.value: "改派技术",
         TicketActionType.TECH_NOTE.value: "技术备注",
+        TicketActionType.TEST_FILTER.value: "测试过滤",
+        TicketActionType.PRODUCT_EVALUATE.value: "产品评估",
+        TicketActionType.RD_PROCESS.value: "研发处理",
+        TicketActionType.TEST_VERIFY.value: "测试验证",
         TicketActionType.FIELD_VERIFY.value: "现场验证",
         TicketActionType.FIELD_REJECT.value: "现场验证驳回",
         TicketActionType.TECH_REJECT.value: "技术驳回",
         TicketActionType.FINISH.value: "处理完成",
         TicketActionType.CLOSE.value: "关闭",
     }
+
+    def action_label(action):
+        if (
+            action.action == TicketActionType.FINISH
+            and action.from_status == TicketStatus.TECH_PROCESSING
+            and action.to_status == TicketStatus.TEST_FILTERING
+        ):
+            return "转产研"
+        return action_text.get(str(action.action), str(action.action))
 
     workbook = Workbook()
     sheet = workbook.active
@@ -525,7 +622,7 @@ async def export_tickets(
                     part
                     for part in [
                         fmt_dt(action.created_at),
-                        action_text.get(str(action.action), str(action.action)),
+                        action_label(action),
                         f"{status_text.get(str(action.from_status), str(action.from_status or '-'))} -> {status_text.get(str(action.to_status), str(action.to_status))}",
                         operator_name,
                         _clean_export_text(action.comment),
@@ -732,8 +829,9 @@ async def resubmit_ticket(payload: TicketResubmitIn, request: Request):
     if not valid:
         logger.warning("[api.ticket.resubmit] captcha_invalid user_id={} ticket_id={}", user.id, payload.ticket_id)
         return Fail(code=400, msg=challenge_error)
+    current_ticket = await ticket_controller.get_ticket(payload.ticket_id)
     if payload.description:
-        version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+        version_error = _ticket_description_version_error(payload.description, current_ticket.issue_type)
         if version_error:
             return Fail(code=400, msg=version_error)
 
@@ -755,6 +853,9 @@ async def update_ticket(payload: TicketUpdateIn, request: Request):
         user.id,
         payload.ticket_id,
     )
+    required_error = _ticket_required_error(payload)
+    if required_error:
+        return Fail(code=400, msg=required_error)
 
     config = await system_setting_controller.get_full_dict()
     valid, challenge_error = await human_challenge_service.verify(
@@ -783,7 +884,7 @@ async def update_ticket(payload: TicketUpdateIn, request: Request):
         return Fail(code=400, msg="影响范围已更新，请刷新页面后重新选择")
     if categories and payload.category not in categories:
         return Fail(code=400, msg="问题分类已更新，请刷新页面后重新选择")
-    version_error = redmine_sync_service.ticket_description_version_error(payload.description)
+    version_error = _ticket_description_version_error(payload.description, issue_type)
     if version_error:
         return Fail(code=400, msg=version_error)
 
@@ -849,39 +950,3 @@ async def ticket_actions(ticket_id: int = Query(..., description="工单ID")):
     logs = await TicketActionLog.filter(ticket_id=ticket_id).order_by("id")
     data = [await item.to_dict() for item in logs]
     return Success(data=data)
-
-
-@router.post("/redmine/push", summary="同步工单到 Redmine", dependencies=[DependAuth])
-async def push_ticket_to_redmine(payload: TicketRedmineSyncIn):
-    user = await _get_current_user()
-    role_names = await _get_user_role_names(user)
-    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_TECH not in role_names:
-        return Fail(code=403, msg="仅技术或管理员可同步 Redmine")
-    ticket = await ticket_controller.get_ticket(payload.ticket_id)
-    if not await _can_access_ticket(ticket, user, role_names):
-        return Fail(code=403, msg="暂无权限操作该工单")
-    data = await redmine_sync_service.push_ticket(
-        ticket,
-        operator_id=user.id,
-        note=payload.note,
-        project_id=payload.project_id,
-        tracker_id=payload.tracker_id,
-        priority_id=payload.priority_id,
-        assigned_to_id=payload.assigned_to_id,
-        project_phase=payload.project_phase,
-        os_value=payload.os_value,
-    )
-    return Success(msg="Redmine 同步完成", data=data)
-
-
-@router.post("/redmine/pull", summary="从 Redmine 拉取工单状态", dependencies=[DependAuth])
-async def pull_ticket_from_redmine(payload: TicketRedmineSyncIn):
-    user = await _get_current_user()
-    role_names = await _get_user_role_names(user)
-    if not user.is_superuser and ROLE_ADMIN not in role_names and ROLE_TECH not in role_names:
-        return Fail(code=403, msg="仅技术或管理员可拉取 Redmine 状态")
-    ticket = await ticket_controller.get_ticket(payload.ticket_id)
-    if not await _can_access_ticket(ticket, user, role_names):
-        return Fail(code=403, msg="暂无权限操作该工单")
-    data = await redmine_sync_service.pull_ticket(ticket, operator_id=user.id)
-    return Success(msg="Redmine 状态已更新", data=data)

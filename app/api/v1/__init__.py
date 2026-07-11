@@ -9,6 +9,7 @@ from .depts import depts_router
 from .menus import menus_router
 from .monitor import monitor_router
 from .notices import notices_router
+from .issues import issues_router
 from .partner import partner_router
 from .projects import projects_router
 from .release import release_router
@@ -35,6 +36,7 @@ v1_router.include_router(apis_router, prefix="/api", dependencies=[DependPermiss
 v1_router.include_router(notices_router, prefix="/notice", dependencies=[DependPermission])
 v1_router.include_router(depts_router, prefix="/dept", dependencies=[DependPermission])
 v1_router.include_router(auditlog_router, prefix="/auditlog", dependencies=[DependPermission])
+v1_router.include_router(issues_router, prefix="/issue", dependencies=[DependPermission])
 v1_router.include_router(tickets_router, prefix="/ticket", dependencies=[DependPermission])
 v1_router.include_router(settings_router, prefix="/settings", dependencies=[DependPermission])
 v1_router.include_router(monitor_router, prefix="/monitor", dependencies=[DependPermission])

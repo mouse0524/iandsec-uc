@@ -23,6 +23,10 @@ class TicketStatus(StrEnum):
     PENDING_REVIEW = "pending_review"
     CS_REJECTED = "cs_rejected"
     TECH_PROCESSING = "tech_processing"
+    TEST_FILTERING = "test_filtering"
+    PRODUCT_EVALUATION = "product_evaluation"
+    RD_PROCESSING = "rd_processing"
+    TEST_VERIFICATION = "test_verification"
     FIELD_VERIFICATION = "field_verification"
     PENDING_CLOSE = "pending_close"
     TECH_REJECTED = "tech_rejected"
@@ -37,11 +41,58 @@ class TicketActionType(StrEnum):
     TECH_START = "tech_start"
     TECH_ASSIGN = "tech_assign"
     TECH_NOTE = "tech_note"
+    TEST_FILTER = "test_filter"
+    PRODUCT_EVALUATE = "product_evaluate"
+    RD_PROCESS = "rd_process"
+    TEST_VERIFY = "test_verify"
     FIELD_VERIFY = "field_verify"
     FIELD_REJECT = "field_reject"
     TECH_REJECT = "tech_reject"
     FINISH = "finish"
     CLOSE = "close"
+
+
+class IssueCustomFieldFormat(StrEnum):
+    STRING = "string"
+    TEXT = "text"
+    INT = "int"
+    FLOAT = "float"
+    BOOL = "bool"
+    DATE = "date"
+    LIST = "list"
+    USER = "user"
+    VERSION = "version"
+
+
+class IssueWorkflowFieldRule(StrEnum):
+    READONLY = "readonly"
+    REQUIRED = "required"
+
+
+class IssueRelationType(StrEnum):
+    RELATES = "relates"
+    DUPLICATES = "duplicates"
+    DUPLICATED = "duplicated"
+    BLOCKS = "blocks"
+    BLOCKED = "blocked"
+    PRECEDES = "precedes"
+    FOLLOWS = "follows"
+    COPIED_TO = "copied_to"
+    COPIED_FROM = "copied_from"
+
+
+class IssueVersionStatus(StrEnum):
+    OPEN = "open"
+    LOCKED = "locked"
+    CLOSED = "closed"
+
+
+class IssueVersionSharing(StrEnum):
+    NONE = "none"
+    DESCENDANTS = "descendants"
+    HIERARCHY = "hierarchy"
+    TREE = "tree"
+    SYSTEM = "system"
 
 
 class PartnerRegisterStatus(StrEnum):
@@ -72,6 +123,9 @@ class PartnerLevel(StrEnum):
 ROLE_ADMIN = "管理员"
 ROLE_CUSTOMER_SERVICE = "客服"
 ROLE_TECH = "技术"
+ROLE_PRODUCT = "产品"
+ROLE_TEST = "测试"
+ROLE_RD = "研发"
 ROLE_USER = "用户"
 ROLE_CHANNEL = "渠道商"
 ROLE_AGENT = "代理商"

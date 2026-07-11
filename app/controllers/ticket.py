@@ -253,6 +253,9 @@ class TicketController:
             status=TicketStatus.PENDING_REVIEW,
             **payload,
         )
+        from app.controllers.issue import issue_default_service
+
+        ticket = await issue_default_service.apply_defaults(ticket)
         if attachment_ids:
             await self._bind_attachments(ticket_id=ticket.id, attachment_ids=attachment_ids, owner_ids=[submitter_id])
 
@@ -280,7 +283,11 @@ class TicketController:
     async def create_ticket_with_optional_auto_review(self, *, submitter_id: int, payload: dict) -> Ticket:
         config = await system_setting_controller.get_public_config()
         auto_approve = config.get("customer_service_auto_approve_ticket", False)
-        needs_cs_review = self._needs_customer_service_review(payload.get("project_phase"), config)
+        needs_cs_review = self._needs_customer_service_review(
+            payload.get("project_phase"),
+            config,
+            payload.get("issue_type"),
+        )
         ticket = await self.create_ticket(
             submitter_id=submitter_id,
             payload=payload,
@@ -334,7 +341,9 @@ class TicketController:
             return ticket
 
     @staticmethod
-    def _needs_customer_service_review(project_phase: str | None, config: dict) -> bool:
+    def _needs_customer_service_review(project_phase: str | None, config: dict, issue_type: str | None = None) -> bool:
+        if issue_type in {"现网问题", "现网需求"}:
+            return True
         review_phases = set(config.get("ticket_cs_review_project_phases") or [])
         return not review_phases or project_phase in review_phases
 
@@ -361,15 +370,6 @@ class TicketController:
             "title",
             "root_cause",
             "status",
-            "redmine_issue_id",
-            "redmine_issue_url",
-            "redmine_sync_status",
-            "redmine_sync_error",
-            "redmine_synced_at",
-            "redmine_last_updated_on",
-            "redmine_status_id",
-            "redmine_status_name",
-            "redmine_closed",
             "submitter_id",
             "reviewer_id",
             "tech_id",
@@ -393,7 +393,7 @@ class TicketController:
                     user_map[int(uid)] = ""
 
         for row in rows:
-            for field in ("created_at", "updated_at", "finished_at", "redmine_synced_at", "redmine_last_updated_on"):
+            for field in ("created_at", "updated_at", "finished_at"):
                 value = row.get(field)
                 if isinstance(value, datetime):
                     row[field] = value.strftime(settings.DATETIME_FORMAT)
@@ -412,10 +412,26 @@ class TicketController:
 
     async def status_summary(self, *, search: Q) -> dict[str, int]:
         query = Ticket.filter(search)
-        total, pending_review, tech_processing, field_verification, pending_close, done, rejected = await asyncio.gather(
+        (
+            total,
+            pending_review,
+            tech_processing,
+            test_filtering,
+            product_evaluation,
+            rd_processing,
+            test_verification,
+            field_verification,
+            pending_close,
+            done,
+            rejected,
+        ) = await asyncio.gather(
             query.count(),
             query.filter(status=TicketStatus.PENDING_REVIEW).count(),
             query.filter(status=TicketStatus.TECH_PROCESSING).count(),
+            query.filter(status=TicketStatus.TEST_FILTERING).count(),
+            query.filter(status=TicketStatus.PRODUCT_EVALUATION).count(),
+            query.filter(status=TicketStatus.RD_PROCESSING).count(),
+            query.filter(status=TicketStatus.TEST_VERIFICATION).count(),
             query.filter(status=TicketStatus.FIELD_VERIFICATION).count(),
             query.filter(status=TicketStatus.PENDING_CLOSE).count(),
             query.filter(status=TicketStatus.DONE).count(),
@@ -425,6 +441,10 @@ class TicketController:
             "total": int(total or 0),
             "pending_review": int(pending_review or 0),
             "tech_processing": int(tech_processing or 0),
+            "test_filtering": int(test_filtering or 0),
+            "product_evaluation": int(product_evaluation or 0),
+            "rd_processing": int(rd_processing or 0),
+            "test_verification": int(test_verification or 0),
             "field_verification": int(field_verification or 0),
             "pending_close": int(pending_close or 0),
             "done": int(done or 0),
@@ -448,16 +468,23 @@ class TicketController:
         old_status = ticket.status
         comment = self._sanitize_rich_html(comment)
         if approved:
-            if not tech_id:
+            if ticket.issue_type == "现网需求":
+                ticket.status = TicketStatus.PRODUCT_EVALUATION
+                ticket.reviewer_id = reviewer_id
+                ticket.tech_id = None
+                ticket.reject_reason = None
+                action = TicketActionType.CS_APPROVE
+            elif not tech_id:
                 raise HTTPException(status_code=400, detail="审核通过时必须指派技术处理人")
-            tech_user = await User.filter(id=tech_id, is_active=True, roles__name="技术").first()
-            if not tech_user:
-                raise HTTPException(status_code=400, detail="请选择有效的技术处理人")
-            ticket.status = TicketStatus.TECH_PROCESSING
-            ticket.reviewer_id = reviewer_id
-            ticket.tech_id = tech_id
-            ticket.reject_reason = None
-            action = TicketActionType.CS_APPROVE
+            else:
+                tech_user = await User.filter(id=tech_id, is_active=True, roles__name="技术").first()
+                if not tech_user:
+                    raise HTTPException(status_code=400, detail="请选择有效的技术处理人")
+                ticket.status = TicketStatus.TECH_PROCESSING
+                ticket.reviewer_id = reviewer_id
+                ticket.tech_id = tech_id
+                ticket.reject_reason = None
+                action = TicketActionType.CS_APPROVE
         else:
             ticket.status = TicketStatus.CS_REJECTED
             ticket.reviewer_id = reviewer_id
@@ -579,7 +606,7 @@ class TicketController:
             ticket.status = TicketStatus.TECH_REJECTED
             ticket.reject_reason = comment or "技术驳回"
         elif action == TicketActionType.FINISH:
-            ticket.status = TicketStatus.PENDING_CLOSE
+            ticket.status = TicketStatus.TEST_FILTERING if ticket.issue_type == "现网问题" else TicketStatus.PENDING_CLOSE
             ticket.reject_reason = None
             ticket.root_cause = normalized_root_cause
         elif action == TicketActionType.TECH_START:
@@ -651,7 +678,7 @@ class TicketController:
             action_comment = "编辑后重新流转技术处理"
         elif old_status_value == TicketStatus.CS_REJECTED.value:
             config = await system_setting_controller.get_public_config()
-            if self._needs_customer_service_review(ticket.project_phase, config):
+            if self._needs_customer_service_review(ticket.project_phase, config, ticket.issue_type):
                 ticket.status = TicketStatus.PENDING_REVIEW
                 action = TicketActionType.RESUBMIT
                 action_comment = "编辑后重新提交客服审核"
@@ -743,7 +770,7 @@ class TicketController:
             action = TicketActionType.CLOSE
             action_comment = sanitized_comment or "关闭工单"
         else:
-            ticket.status = TicketStatus.TECH_PROCESSING
+            ticket.status = TicketStatus.TEST_VERIFICATION
             ticket.reject_reason = sanitized_comment or "现场验证不通过"
             action = TicketActionType.FIELD_REJECT
             action_comment = ticket.reject_reason
@@ -787,7 +814,7 @@ class TicketController:
             action = TicketActionType.TECH_START
         else:
             config = await system_setting_controller.get_public_config()
-            if self._needs_customer_service_review(ticket.project_phase, config):
+            if self._needs_customer_service_review(ticket.project_phase, config, ticket.issue_type):
                 ticket.status = TicketStatus.PENDING_REVIEW
             else:
                 tech_user = await self._get_first_active_tech_user()

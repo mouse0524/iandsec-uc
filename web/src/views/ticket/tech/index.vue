@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NSpace, NTag, NTooltip } from 'naive-ui'
+import { NButton, NCard, NDropdown, NInput, NModal, NSelect, NSpace, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import QueryBarItem from '@/components/query-bar/QueryBarItem.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
@@ -28,23 +28,12 @@ const editVisible = ref(false)
 const editingTicket = ref({})
 const commentVisible = ref(false)
 const assignVisible = ref(false)
-const redmineVisible = ref(false)
 const pendingActionRow = ref(null)
 const pendingAssignRow = ref(null)
-const pendingRedmineRow = ref(null)
 const pendingActionType = ref('finish')
 const actionComment = ref('')
 const assignTechId = ref(null)
 const assignComment = ref('')
-const redmineLoadingMap = ref({})
-const redmineForm = ref({
-  project_id: null,
-  tracker_id: null,
-  priority_id: null,
-  assigned_to_id: null,
-  project_phase: '',
-  os_value: '',
-})
 const rootCauseOptions = ref([])
 const categoryOptions = ref([])
 const issueTypeOptions = ref([])
@@ -52,40 +41,7 @@ const impactScopeOptions = ref([])
 const projectPhaseOptions = ref([])
 const selectedRootCause = ref(null)
 const techOptions = ref([])
-const redmineDefaultTrackerId = ref(null)
-const redmineDefaultProjectId = ref(null)
-const redmineDefaultPriorityId = ref(null)
-const redmineDefaultAssignedToId = ref(null)
-const redmineSyncVisibleFields = ref([])
-const redmineSyncOptions = ref({})
-const redmineProjectOptions = ref([])
-const redmineTrackerOptionsFromApi = ref([])
-const redminePriorityOptionsFromApi = ref([])
-const redmineUserOptions = ref([])
-const redmineOsOptions = ref([])
 let ticketMetaPromise = null
-const redmineStatusTextMap = {
-  never: '未同步',
-  success: '同步成功',
-  failed: '同步失败',
-  syncing: '同步中',
-}
-const redmineTrackerOptions = computed(() => {
-  if (redmineTrackerOptionsFromApi.value.length) return redmineTrackerOptionsFromApi.value
-  return [
-  { label: '现网问题', value: 8 },
-  { label: '现网需求', value: 9 },
-  ]
-})
-const redminePriorityOptions = computed(() => {
-  if (redminePriorityOptionsFromApi.value.length) return redminePriorityOptionsFromApi.value
-  return [
-  { label: '建议', value: 1 },
-  { label: '一般', value: 2 },
-  { label: '严重', value: 3 },
-  { label: '致命', value: 4 },
-  ]
-})
 const quickFilters = [
   { label: '处理中', value: 'tech_processing' },
   { label: '现场验证', value: 'field_verification' },
@@ -192,13 +148,14 @@ async function refreshSummaryStats() {
 }
 
 async function takeAction(row, action) {
+  const transferToRd = isTransferToRdAction(row, action)
   await api.techActionTicket({
     ticket_id: row.id,
     action,
-    comment: actionComment.value?.trim() || (action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
+    comment: actionComment.value?.trim() || (transferToRd ? '技术转产研，进入测试过滤' : action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : '处理进度更新'),
     root_cause: ['finish', 'field_verify'].includes(action) ? selectedRootCause.value : null,
   })
-  $message.success(action === 'tech_note' ? '处理备注已记录' : '处理操作已完成')
+  $message.success(action === 'tech_note' ? '处理备注已记录' : transferToRd ? '已转入产研流程' : '处理操作已完成')
   commentVisible.value = false
   pendingActionRow.value = null
   actionComment.value = ''
@@ -224,7 +181,7 @@ function openTechAction(row, action) {
   if (['finish', 'field_verify'].includes(action)) loadTicketMetaOptions()
   pendingActionRow.value = row
   pendingActionType.value = action
-  actionComment.value = action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : ''
+  actionComment.value = isTransferToRdAction(row, action) ? '技术转产研，进入测试过滤' : action === 'finish' ? '技术处理完成，等待关闭' : action === 'field_verify' ? '指派现场验证' : action === 'field_reject' ? '现场验证不通过，退回技术处理' : action === 'tech_reject' ? '技术驳回' : ''
   selectedRootCause.value = null
   commentVisible.value = true
 }
@@ -247,6 +204,7 @@ async function closeTicket(row) {
 }
 
 function techActionModalTitle() {
+  if (isTransferToRdAction(pendingActionRow.value, pendingActionType.value)) return '转产研备注'
   if (pendingActionType.value === 'finish') return '完成备注'
   if (pendingActionType.value === 'tech_note') return '处理进度备注'
   if (pendingActionType.value === 'field_verify') return '现场验证备注'
@@ -255,6 +213,7 @@ function techActionModalTitle() {
 }
 
 function techActionPlaceholder() {
+  if (isTransferToRdAction(pendingActionRow.value, pendingActionType.value)) return '填写转产研说明、排查结论或复现信息，可直接粘贴图片'
   if (pendingActionType.value === 'finish') return '填写处理结果摘要，可直接粘贴图片'
   if (pendingActionType.value === 'tech_note') return '填写当前处理进度、排查结论或下一步计划，可直接粘贴图片'
   if (pendingActionType.value === 'field_verify') return '填写现场验证安排或说明，可直接粘贴图片'
@@ -269,7 +228,7 @@ async function submitTechAction() {
     return
   }
   if (['finish', 'field_verify'].includes(pendingActionType.value) && !selectedRootCause.value) {
-    $message.warning(pendingActionType.value === 'field_verify' ? '转现场验证时必须选择问题根因' : '处理完成时必须选择问题根因')
+    $message.warning(pendingActionType.value === 'field_verify' ? '转现场验证时必须选择问题根因' : isTransferToRdAction(pendingActionRow.value, pendingActionType.value) ? '转产研时必须选择问题根因' : '处理完成时必须选择问题根因')
     return
   }
   await takeAction(pendingActionRow.value, pendingActionType.value)
@@ -303,244 +262,9 @@ async function submitAssignAction() {
   $table.value?.handleSearch()
 }
 
-function setRedmineLoading(ticketId, loading) {
-  redmineLoadingMap.value = {
-    ...redmineLoadingMap.value,
-    [ticketId]: loading,
-  }
-}
-
-function redmineLoading(row) {
-  return !!redmineLoadingMap.value[row.id]
-}
-
-function filterRedmineOptions(field, options) {
-  const allowed = Array.isArray(redmineSyncOptions.value?.[field])
-    ? redmineSyncOptions.value[field].map((item) => String(item))
-    : []
-  if (!allowed.length) return []
-  return options.filter((item) => allowed.includes(String(item.value)))
-}
-
-function normalizeOptionText(value) {
-  return String(value || '').trim().toLowerCase()
-}
-
-function findOptionByText(options, text) {
-  const target = normalizeOptionText(text)
-  if (!target) return null
-  return options.find((item) => normalizeOptionText(item.value) === target)
-    || options.find((item) => normalizeOptionText(item.label) === target)
-    || options.find((item) => {
-      const label = normalizeOptionText(item.label)
-      return label && (label.includes(target) || target.includes(label))
-    })
-    || null
-}
-
-async function loadRedmineOptions() {
-  if (redmineProjectOptions.value.length && redmineUserOptions.value.length && redmineTrackerOptionsFromApi.value.length && redminePriorityOptionsFromApi.value.length) return
-  try {
-    const res = await api.getRedmineMetadata()
-    const projects = Array.isArray(res?.data?.projects) ? res.data.projects : []
-    const trackers = Array.isArray(res?.data?.trackers) ? res.data.trackers : []
-    const priorities = Array.isArray(res?.data?.priorities) ? res.data.priorities : []
-    const users = Array.isArray(res?.data?.users) ? res.data.users : []
-    const customFields = Array.isArray(res?.data?.custom_fields) ? res.data.custom_fields : []
-    redmineDefaultProjectId.value = res?.data?.redmine_project_id || null
-    redmineDefaultTrackerId.value = Number(res?.data?.redmine_tracker_id) || null
-    redmineDefaultPriorityId.value = Number(res?.data?.redmine_priority_id) || null
-    redmineDefaultAssignedToId.value = Number(res?.data?.redmine_assigned_to_id) || null
-    redmineSyncVisibleFields.value = Array.isArray(res?.data?.redmine_sync_visible_fields)
-      ? res.data.redmine_sync_visible_fields
-      : []
-    redmineSyncOptions.value = res?.data?.redmine_sync_options || {}
-    redmineProjectOptions.value = filterRedmineOptions('project_id', projects
-      .map((item) => ({ label: item.label || item.name || String(item.value || item.id), value: String(item.value || item.id) }))
-      .filter((item) => item.value))
-    redmineTrackerOptionsFromApi.value = filterRedmineOptions('tracker_id', trackers
-      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
-      .filter((item) => item.value))
-    redminePriorityOptionsFromApi.value = filterRedmineOptions('priority_id', priorities
-      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
-      .filter((item) => item.value))
-    redmineUserOptions.value = filterRedmineOptions('assigned_to_id', users
-      .map((item) => ({ label: item.label || item.name || String(item.id), value: Number(item.id) }))
-      .filter((item) => item.value))
-    const osField = customFields.find((item) => Number(item.id) === Number(res?.data?.redmine_os_field_id))
-      || customFields.find((item) => String(item.label || item.name || '').includes('操作系统'))
-    redmineOsOptions.value = filterRedmineOptions('os', Array.isArray(osField?.possible_values) ? osField.possible_values : [])
-  } catch (error) {
-    redmineProjectOptions.value = []
-    redmineTrackerOptionsFromApi.value = []
-    redminePriorityOptionsFromApi.value = []
-    redmineUserOptions.value = []
-    redmineOsOptions.value = []
-  }
-}
-function defaultRedmineTrackerId(row) {
-  const issueType = String(row?.issue_type || '')
-  const matched = findOptionByText(redmineTrackerOptions.value, issueType)
-  if (matched) return matched.value
-
-  const preferred = issueType.includes('需求') ? 9 : issueType.includes('建议') ? null : 8
-  if (preferred && redmineTrackerOptions.value.some((item) => item.value === preferred)) return preferred
-  return redmineTrackerOptions.value[0]?.value || null
-}
-
-function defaultRedmineProjectId() {
-  return redmineProjectOptions.value[0]?.value || null
-}
-
-function defaultRedminePriorityId() {
-  return redminePriorityOptions.value[0]?.value || null
-}
-
-function defaultRedmineAssignedToId() {
-  return null
-}
-
-function defaultRedmineProjectPhase(row) {
-  const matched = findOptionByText(redmineProjectPhaseOptions.value, row?.project_phase)
-  if (matched) return matched.value
-  return redmineProjectPhaseOptions.value[0]?.value || ''
-}
-
-async function openRedmineSync(row) {
-  await loadTicketMetaOptions()
-  await loadRedmineOptions()
-  pendingRedmineRow.value = row
-  redmineForm.value = {
-    project_id: defaultRedmineProjectId(),
-    tracker_id: defaultRedmineTrackerId(row),
-    priority_id: defaultRedminePriorityId(),
-    assigned_to_id: defaultRedmineAssignedToId(),
-    project_phase: defaultRedmineProjectPhase(row),
-    os_value: '',
-  }
-  redmineVisible.value = true
-}
-
-async function pushRedmine(row, payload = {}) {
-  setRedmineLoading(row.id, true)
-  try {
-    const res = await api.pushTicketRedmine({ ticket_id: row.id, ...payload })
-    $message.success(res?.msg || 'Redmine同步成功')
-    $table.value?.handleSearch()
-  } finally {
-    setRedmineLoading(row.id, false)
-  }
-}
-
-
-function redmineFieldVisible(field) {
-  return redmineSyncVisibleFields.value.includes(field)
-}
-
-const redmineProjectPhaseOptions = computed(() => filterRedmineOptions('project_phase', projectPhaseOptions.value))
-const hasVisibleRedmineFields = computed(() => {
-  return ['project_id', 'tracker_id', 'priority_id', 'assigned_to_id', 'project_phase', 'os'].some((field) => redmineFieldVisible(field))
-})
-
-async function submitRedmineSync() {
-  if (!pendingRedmineRow.value) return
-  const payload = {}
-  if (redmineFieldVisible('project_id')) {
-    if (!redmineForm.value.project_id) {
-      $message.warning('请选择Redmine项目标识')
-      return
-    }
-    payload.project_id = redmineForm.value.project_id
-  }
-  if (redmineFieldVisible('tracker_id')) {
-    if (!redmineForm.value.tracker_id) {
-      $message.warning('请选择Redmine跟踪')
-      return
-    }
-    payload.tracker_id = redmineForm.value.tracker_id
-  }
-  if (redmineFieldVisible('priority_id')) {
-    if (!redmineForm.value.priority_id) {
-      $message.warning('请选择Redmine优先级')
-      return
-    }
-    payload.priority_id = redmineForm.value.priority_id
-  }
-  if (redmineFieldVisible('assigned_to_id') && redmineForm.value.assigned_to_id) {
-    payload.assigned_to_id = redmineForm.value.assigned_to_id
-  }
-  if (redmineFieldVisible('project_phase') && redmineForm.value.project_phase) {
-    payload.project_phase = redmineForm.value.project_phase
-  }
-  if (redmineFieldVisible('os') && redmineForm.value.os_value) {
-    payload.os_value = redmineForm.value.os_value
-  }
-  await pushRedmine(pendingRedmineRow.value, payload)
-  redmineVisible.value = false
-  pendingRedmineRow.value = null
-}
-
-async function pullRedmine(row) {
-  setRedmineLoading(row.id, true)
-  try {
-    const res = await api.pullTicketRedmine({ ticket_id: row.id })
-    $message.success(res?.msg || 'Redmine状态已更新')
-    $table.value?.handleSearch()
-  } finally {
-    setRedmineLoading(row.id, false)
-  }
-}
-
-function openRedmine(row) {
-  if (!row.redmine_issue_url) return
-  window.open(row.redmine_issue_url, '_blank', 'noopener,noreferrer')
-}
-
-function redmineDisplayStatus(row) {
-  return row.redmine_status_name || redmineStatusTextMap[row.redmine_sync_status] || '-'
-}
-
-function redmineSyncTagType(row) {
-  if (row.redmine_sync_status === 'failed') return 'error'
-  if (row.redmine_sync_status === 'success') return 'success'
-  if (row.redmine_sync_status === 'syncing') return 'info'
-  return 'warning'
-}
-
-function renderRedmineCell(row) {
-  const statusText = redmineDisplayStatus(row)
-  const issueText = row.redmine_issue_id ? `#${row.redmine_issue_id}` : '未关联'
-  const tooltipText = row.redmine_issue_id
-    ? `Redmine ${issueText}，${statusText}`
-    : `Redmine ${statusText}`
-  const tags = row.redmine_issue_id
-    ? [
-        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => issueText }),
-        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => statusText }),
-      ]
-    : [
-        h(NTag, { type: redmineSyncTagType(row), bordered: false, size: 'small', class: 'redmine-tag' }, { default: () => statusText }),
-      ]
-  return h(
-    NTooltip,
-    { trigger: 'hover' },
-    {
-      trigger: () => h('div', { class: 'redmine-cell' }, tags),
-      default: () => tooltipText,
-    }
-  )
-}
-
-function redmineMoreOptions(row) {
+function moreOptions(row) {
   const options = [
-    { label: row.redmine_issue_id ? '更新Redmine' : '同步Redmine', key: 'push-redmine' },
   ]
-  if (row.redmine_issue_id) {
-    options.push({ label: '拉取Redmine', key: 'pull-redmine' })
-    if (row.redmine_issue_url) {
-      options.push({ label: '打开Redmine', key: 'open-redmine' })
-    }
-  }
   if (row.status !== 'done') {
     options.push({ label: '编辑工单', key: 'edit-ticket' })
   }
@@ -552,7 +276,7 @@ function redmineMoreOptions(row) {
     }
     options.push(
       { label: '记录备注', key: 'tech-note' },
-      { label: '处理完成', key: 'finish' },
+      { label: isTransferToRdAction(row, 'finish') ? '转产研' : '处理完成', key: 'finish' },
       { label: '技术驳回', key: 'tech-reject' },
       { label: '改派技术', key: 'assign-tech' },
     )
@@ -563,10 +287,11 @@ function redmineMoreOptions(row) {
   return options
 }
 
+function isTransferToRdAction(row, action) {
+  return action === 'finish' && row?.status === 'tech_processing' && row?.issue_type === '现网问题'
+}
+
 function handleMoreAction(key, row) {
-  if (key === 'push-redmine') return openRedmineSync(row)
-  if (key === 'pull-redmine') return pullRedmine(row)
-  if (key === 'open-redmine') return openRedmine(row)
   if (key === 'edit-ticket') return openEdit(row)
   if (key === 'tech-note') return openTechAction(row, 'tech_note')
   if (key === 'field-verify') return openTechAction(row, 'field_verify')
@@ -625,15 +350,6 @@ const columns = [
   { title: '分类', key: 'category', align: 'center' },
   { title: '问题根因', key: 'root_cause', align: 'center', ellipsis: { tooltip: true } },
   {
-    title: 'Redmine',
-    key: 'redmine_issue_id',
-    align: 'center',
-    width: 160,
-    render(row) {
-      return renderRedmineCell(row)
-    },
-  },
-  {
     title: '状态',
     key: 'status',
     align: 'center',
@@ -651,7 +367,7 @@ const columns = [
     align: 'center',
     width: 220,
     render(row) {
-      const moreOptions = redmineMoreOptions(row)
+      const options = moreOptions(row)
       const buttons = [
         h(
           NButton,
@@ -663,13 +379,13 @@ const columns = [
           { default: () => '详情' }
         ),
       ]
-      if (moreOptions.length) {
+      if (options.length) {
         buttons.push(
           h(
             NDropdown,
             {
               trigger: 'click',
-              options: moreOptions,
+              options,
               onSelect: (key) => handleMoreAction(key, row),
             },
             {
@@ -679,7 +395,6 @@ const columns = [
                   size: 'small',
                   color: '#7c3aed',
                   textColor: '#fff',
-                  loading: redmineLoading(row),
                 },
                 { default: () => '更多' }
               ),
@@ -793,67 +508,6 @@ const columns = [
         @saved="handleEditSaved"
       />
 
-      <NModal v-model:show="redmineVisible" preset="card" style="width: 520px" title="同步Redmine">
-        <NAlert v-if="!hasVisibleRedmineFields" type="info" class="mb-12">
-          当前未配置技术可选字段，本次同步将使用 Redmine 后台默认配置。
-        </NAlert>
-        <NSelect
-          v-if="redmineFieldVisible('project_id')"
-          v-model:value="redmineForm.project_id"
-          class="mb-12"
-          :options="redmineProjectOptions"
-          :clearable="false"
-          filterable
-          placeholder="请选择Redmine项目标识"
-        />
-        <NSelect
-          v-if="redmineFieldVisible('tracker_id')"
-          v-model:value="redmineForm.tracker_id"
-          class="mb-12"
-          :options="redmineTrackerOptions"
-          :clearable="false"
-          placeholder="请选择Redmine跟踪"
-        />
-        <NSelect
-          v-if="redmineFieldVisible('priority_id')"
-          v-model:value="redmineForm.priority_id"
-          class="mb-12"
-          :options="redminePriorityOptions"
-          :clearable="false"
-          placeholder="请选择Redmine优先级"
-        />
-        <NSelect
-          v-if="redmineFieldVisible('assigned_to_id')"
-          v-model:value="redmineForm.assigned_to_id"
-          class="mb-12"
-          :options="redmineUserOptions"
-          clearable
-          placeholder="请选择Redmine指派人"
-        />
-        <NSelect
-          v-if="redmineFieldVisible('project_phase')"
-          v-model:value="redmineForm.project_phase"
-          class="mb-12"
-          :options="redmineProjectPhaseOptions"
-          clearable
-          placeholder="请选择项目阶段"
-        />
-        <NSelect
-          v-if="redmineFieldVisible('os')"
-          v-model:value="redmineForm.os_value"
-          class="mb-12"
-          :options="redmineOsOptions"
-          clearable
-          filterable
-          placeholder="请选择操作系统"
-        />
-        <div class="modal-actions">
-          <NButton @click="redmineVisible = false">取消</NButton>
-          <NButton color="#7c3aed" text-color="#fff" :loading="pendingRedmineRow && redmineLoading(pendingRedmineRow)" @click="submitRedmineSync">
-            确认同步
-          </NButton>
-        </div>
-      </NModal>
       <NModal
         v-model:show="commentVisible"
         preset="card"
@@ -875,7 +529,8 @@ const columns = [
           :min-height="180"
           :max-height="320"
         />
-        <div class="upload-tip" v-if="pendingActionType === 'finish'">技术完成时必须选择问题根因，备注框支持直接粘贴图片。</div>
+        <div class="upload-tip" v-if="isTransferToRdAction(pendingActionRow, pendingActionType)">转产研时必须选择问题根因，备注框支持直接粘贴图片。</div>
+        <div class="upload-tip" v-else-if="pendingActionType === 'finish'">技术完成时必须选择问题根因，备注框支持直接粘贴图片。</div>
         <div class="upload-tip" v-else-if="pendingActionType === 'field_verify'">转现场验证时必须选择问题根因，备注框支持直接粘贴图片。</div>
         <div class="upload-tip" v-else-if="pendingActionType === 'tech_note'">备注会记录到流转日志，不改变工单状态，支持直接粘贴图片。</div>
         <div class="upload-tip" v-else>备注框支持直接粘贴图片（与提交工单一致）。</div>
@@ -984,21 +639,6 @@ const columns = [
 .ticket-title-link:hover {
   color: #1d4ed8;
   text-decoration: underline;
-}
-
-.redmine-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  cursor: default;
-}
-
-.redmine-tag {
-  min-width: 68px;
-  justify-content: center;
-  font-size: 12px;
-  line-height: 20px;
 }
 
 .modal-actions {

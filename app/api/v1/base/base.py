@@ -331,6 +331,10 @@ async def get_workbench_stats():
     ticket_total = await ticket_query.count()
     ticket_pending_review = await ticket_query.filter(status=TicketStatus.PENDING_REVIEW).count()
     ticket_tech_processing = await ticket_query.filter(status=TicketStatus.TECH_PROCESSING).count()
+    ticket_test_filtering = await ticket_query.filter(status=TicketStatus.TEST_FILTERING).count()
+    ticket_product_evaluation = await ticket_query.filter(status=TicketStatus.PRODUCT_EVALUATION).count()
+    ticket_rd_processing = await ticket_query.filter(status=TicketStatus.RD_PROCESSING).count()
+    ticket_test_verification = await ticket_query.filter(status=TicketStatus.TEST_VERIFICATION).count()
     ticket_field_verification = await ticket_query.filter(status=TicketStatus.FIELD_VERIFICATION).count()
     ticket_pending_close = await ticket_query.filter(status=TicketStatus.PENDING_CLOSE).count()
     ticket_done = await ticket_query.filter(status=TicketStatus.DONE).count()
@@ -341,7 +345,16 @@ async def get_workbench_stats():
         finished_at__gte=today_start,
         finished_at__lt=tomorrow_start,
     ).count()
-    ticket_active = ticket_pending_review + ticket_tech_processing + ticket_field_verification + ticket_pending_close
+    ticket_internal_processing = (
+        ticket_test_filtering + ticket_product_evaluation + ticket_rd_processing + ticket_test_verification
+    )
+    ticket_active = (
+        ticket_pending_review
+        + ticket_tech_processing
+        + ticket_internal_processing
+        + ticket_field_verification
+        + ticket_pending_close
+    )
     ticket_today_completion_rate = round(ticket_today_done * 100 / ticket_today_created, 1) if ticket_today_created else 0
     register_pending = await PartnerRegistration.filter(status__in=PENDING_PARTNER_REGISTER_STATUSES).count() if is_global else 0
     register_approved = await PartnerRegistration.filter(status=PartnerRegisterStatus.APPROVED).count() if is_global else 0
@@ -419,6 +432,11 @@ async def get_workbench_stats():
         "ticket_active": ticket_active,
         "ticket_pending_review": ticket_pending_review,
         "ticket_tech_processing": ticket_tech_processing,
+        "ticket_test_filtering": ticket_test_filtering,
+        "ticket_product_evaluation": ticket_product_evaluation,
+        "ticket_rd_processing": ticket_rd_processing,
+        "ticket_test_verification": ticket_test_verification,
+        "ticket_internal_processing": ticket_internal_processing,
         "ticket_field_verification": ticket_field_verification,
         "ticket_pending_close": ticket_pending_close,
         "ticket_done": ticket_done,

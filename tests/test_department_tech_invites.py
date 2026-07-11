@@ -343,17 +343,17 @@ async def test_init_db_runs_migrations_before_schema_generation(monkeypatch):
     async def fake_generate_schemas(*args, **kwargs):
         calls.append("schemas")
 
-    async def fake_ensure_schema():
-        calls.append("ensure")
+    async def fake_ensure_dept_schema():
+        calls.append("ensure_dept")
 
     monkeypatch.setattr(init_app, "_run_pending_migrations", fake_run_pending_migrations)
-    monkeypatch.setattr(init_app, "_ensure_department_tech_invite_schema", fake_ensure_schema)
+    monkeypatch.setattr(init_app, "_ensure_department_tech_invite_schema", fake_ensure_dept_schema)
     monkeypatch.setattr(init_app.Tortoise, "init", fake_init)
     monkeypatch.setattr(init_app.Tortoise, "generate_schemas", fake_generate_schemas)
 
     await init_app.init_db()
 
-    assert calls == ["migrate", "init", "schemas", "ensure"]
+    assert calls == ["migrate", "init", "schemas", "ensure_dept"]
 
 
 @pytest.mark.anyio

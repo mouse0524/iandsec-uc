@@ -4,6 +4,11 @@ from app.schemas.menus import MenuType
 
 from .base import BaseModel, TimestampMixin
 from .enums import (
+    IssueCustomFieldFormat,
+    IssueRelationType,
+    IssueVersionSharing,
+    IssueVersionStatus,
+    IssueWorkflowFieldRule,
     MethodType,
     PartnerRegisterStatus,
     PartnerLevel,
@@ -122,16 +127,22 @@ class Ticket(BaseModel, TimestampMixin):
     reject_reason = fields.TextField(null=True, description="驳回原因")
     root_cause = fields.CharField(max_length=120, null=True, description="问题根因", index=True)
     finished_at = fields.DatetimeField(null=True, description="完成时间", index=True)
-
-    redmine_issue_id = fields.BigIntField(null=True, description="Redmine Issue ID", index=True)
-    redmine_issue_url = fields.CharField(max_length=500, null=True, description="Redmine Issue URL")
-    redmine_sync_status = fields.CharField(max_length=20, default="never", description="Redmine sync status", index=True)
-    redmine_sync_error = fields.TextField(null=True, description="Redmine sync error")
-    redmine_synced_at = fields.DatetimeField(null=True, description="Redmine synced at")
-    redmine_last_updated_on = fields.DatetimeField(null=True, description="Redmine last updated on")
-    redmine_status_id = fields.BigIntField(null=True, description="Redmine status ID", index=True)
-    redmine_status_name = fields.CharField(max_length=120, null=True, description="Redmine status name")
-    redmine_closed = fields.BooleanField(default=False, description="Redmine closed flag", index=True)
+    issue_project_id = fields.BigIntField(null=True, description="Issue项目ID", index=True)
+    issue_tracker_id = fields.BigIntField(null=True, description="Issue跟踪ID", index=True)
+    issue_status_id = fields.BigIntField(null=True, description="Issue状态ID", index=True)
+    issue_priority_id = fields.BigIntField(null=True, description="Issue优先级ID", index=True)
+    issue_category_id = fields.BigIntField(null=True, description="Issue分类ID", index=True)
+    issue_fixed_version_id = fields.BigIntField(null=True, description="Issue目标版本ID", index=True)
+    parent_issue_id = fields.BigIntField(null=True, description="父Issue ID", index=True)
+    root_issue_id = fields.BigIntField(null=True, description="根Issue ID", index=True)
+    assigned_to_id = fields.BigIntField(null=True, description="Issue指派人ID", index=True)
+    start_date = fields.DateField(null=True, description="开始日期", index=True)
+    due_date = fields.DateField(null=True, description="截止日期", index=True)
+    done_ratio = fields.IntField(default=0, description="完成率")
+    estimated_hours = fields.FloatField(null=True, description="预估工时")
+    closed_at = fields.DatetimeField(null=True, description="关闭时间", index=True)
+    is_private = fields.BooleanField(default=False, description="是否私有", index=True)
+    lock_version = fields.IntField(default=0, description="乐观锁版本")
 
     class Meta:
         table = "ticket"
@@ -159,6 +170,210 @@ class TicketActionLog(BaseModel, TimestampMixin):
 
     class Meta:
         table = "ticket_action_log"
+
+
+class ProjectMember(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(description="项目ID", index=True)
+    user_id = fields.BigIntField(description="用户ID", index=True)
+    role_id = fields.BigIntField(description="角色ID", index=True)
+
+    class Meta:
+        table = "project_member"
+        unique_together = ("project_id", "user_id", "role_id")
+
+
+class IssueTracker(BaseModel, TimestampMixin):
+    name = fields.CharField(max_length=60, unique=True, description="跟踪名称", index=True)
+    description = fields.TextField(null=True, description="说明")
+    position = fields.IntField(default=0, description="排序", index=True)
+    default_status_id = fields.BigIntField(null=True, description="默认状态ID", index=True)
+    is_in_roadmap = fields.BooleanField(default=True, description="是否进入路线图", index=True)
+    copy_workflow_from_id = fields.BigIntField(null=True, description="复制工作流来源Tracker ID")
+    is_active = fields.BooleanField(default=True, description="是否启用", index=True)
+
+    class Meta:
+        table = "issue_tracker"
+
+
+class IssueStatus(BaseModel, TimestampMixin):
+    name = fields.CharField(max_length=60, unique=True, description="状态名称", index=True)
+    position = fields.IntField(default=0, description="排序", index=True)
+    is_closed = fields.BooleanField(default=False, description="是否关闭态", index=True)
+    is_default = fields.BooleanField(default=False, description="是否默认状态", index=True)
+    active = fields.BooleanField(default=True, description="是否启用", index=True)
+
+    class Meta:
+        table = "issue_status"
+
+
+class IssuePriority(BaseModel, TimestampMixin):
+    name = fields.CharField(max_length=60, unique=True, description="优先级名称", index=True)
+    position = fields.IntField(default=0, description="排序", index=True)
+    is_default = fields.BooleanField(default=False, description="是否默认优先级", index=True)
+    active = fields.BooleanField(default=True, description="是否启用", index=True)
+
+    class Meta:
+        table = "issue_priority"
+
+
+class IssueCategory(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(description="项目ID", index=True)
+    name = fields.CharField(max_length=120, description="分类名称", index=True)
+    assigned_to_id = fields.BigIntField(null=True, description="默认指派人ID", index=True)
+
+    class Meta:
+        table = "issue_category"
+        unique_together = ("project_id", "name")
+
+
+class IssueVersion(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(description="项目ID", index=True)
+    name = fields.CharField(max_length=120, description="版本名称", index=True)
+    description = fields.TextField(null=True, description="说明")
+    status = fields.CharEnumField(IssueVersionStatus, max_length=20, default=IssueVersionStatus.OPEN, index=True)
+    sharing = fields.CharEnumField(IssueVersionSharing, max_length=20, default=IssueVersionSharing.NONE, index=True)
+    effective_date = fields.DateField(null=True, description="计划日期", index=True)
+
+    class Meta:
+        table = "issue_version"
+        unique_together = ("project_id", "name")
+
+
+class IssueCustomField(BaseModel, TimestampMixin):
+    type = fields.CharField(max_length=30, default="issue", description="自定义字段类型", index=True)
+    name = fields.CharField(max_length=120, description="字段名称", index=True)
+    field_format = fields.CharEnumField(
+        IssueCustomFieldFormat,
+        max_length=20,
+        default=IssueCustomFieldFormat.STRING,
+        description="字段格式",
+        index=True,
+    )
+    possible_values = fields.JSONField(default=list, description="可选值")
+    default_value = fields.TextField(null=True, description="默认值")
+    is_required = fields.BooleanField(default=False, description="是否必填", index=True)
+    is_filter = fields.BooleanField(default=False, description="是否可筛选", index=True)
+    searchable = fields.BooleanField(default=False, description="是否可搜索", index=True)
+    multiple = fields.BooleanField(default=False, description="是否多选")
+    visible = fields.BooleanField(default=True, description="是否可见", index=True)
+    position = fields.IntField(default=0, description="排序", index=True)
+
+    class Meta:
+        table = "issue_custom_field"
+
+
+class IssueCustomFieldBinding(BaseModel, TimestampMixin):
+    custom_field_id = fields.BigIntField(description="自定义字段ID", index=True)
+    tracker_id = fields.BigIntField(null=True, description="Tracker ID", index=True)
+    project_id = fields.BigIntField(null=True, description="项目ID", index=True)
+
+    class Meta:
+        table = "issue_custom_field_binding"
+
+
+class IssueCustomValue(BaseModel, TimestampMixin):
+    customized_type = fields.CharField(max_length=30, default="Issue", description="归属类型", index=True)
+    customized_id = fields.BigIntField(description="归属ID", index=True)
+    custom_field_id = fields.BigIntField(description="自定义字段ID", index=True)
+    value = fields.TextField(null=True, description="字段值")
+
+    class Meta:
+        table = "issue_custom_value"
+
+
+class IssueWorkflowTransition(BaseModel, TimestampMixin):
+    role_id = fields.BigIntField(description="角色ID", index=True)
+    tracker_id = fields.BigIntField(description="Tracker ID", index=True)
+    old_status_id = fields.BigIntField(description="原状态ID", index=True)
+    new_status_id = fields.BigIntField(description="目标状态ID", index=True)
+    assignee_required = fields.BooleanField(default=True, description="是否必须指派")
+    author_allowed = fields.BooleanField(default=True, description="提交人是否可执行")
+    assignee_allowed = fields.BooleanField(default=True, description="指派人是否可执行")
+
+    class Meta:
+        table = "issue_workflow_transition"
+        unique_together = ("role_id", "tracker_id", "old_status_id", "new_status_id")
+
+
+class IssueWorkflowPermission(BaseModel, TimestampMixin):
+    role_id = fields.BigIntField(description="角色ID", index=True)
+    tracker_id = fields.BigIntField(description="Tracker ID", index=True)
+    old_status_id = fields.BigIntField(description="状态ID", index=True)
+    field_name = fields.CharField(max_length=120, description="字段名", index=True)
+    rule = fields.CharEnumField(IssueWorkflowFieldRule, max_length=20, description="字段规则", index=True)
+
+    class Meta:
+        table = "issue_workflow_permission"
+        unique_together = ("role_id", "tracker_id", "old_status_id", "field_name", "rule")
+
+
+class IssueWatcher(BaseModel, TimestampMixin):
+    watchable_type = fields.CharField(max_length=30, default="Issue", description="关注对象类型", index=True)
+    watchable_id = fields.BigIntField(description="关注对象ID", index=True)
+    user_id = fields.BigIntField(description="用户ID", index=True)
+
+    class Meta:
+        table = "issue_watcher"
+        unique_together = ("watchable_type", "watchable_id", "user_id")
+
+
+class IssueRelation(BaseModel, TimestampMixin):
+    issue_from_id = fields.BigIntField(description="来源Issue ID", index=True)
+    issue_to_id = fields.BigIntField(description="目标Issue ID", index=True)
+    relation_type = fields.CharEnumField(IssueRelationType, max_length=20, description="关系类型", index=True)
+    delay = fields.IntField(null=True, description="延迟天数")
+
+    class Meta:
+        table = "issue_relation"
+        unique_together = ("issue_from_id", "issue_to_id", "relation_type")
+
+
+class IssueTimeEntry(BaseModel, TimestampMixin):
+    project_id = fields.BigIntField(description="项目ID", index=True)
+    issue_id = fields.BigIntField(null=True, description="Issue ID", index=True)
+    user_id = fields.BigIntField(description="用户ID", index=True)
+    activity_id = fields.BigIntField(null=True, description="活动ID", index=True)
+    hours = fields.FloatField(description="工时")
+    comments = fields.CharField(max_length=255, null=True, description="备注")
+    spent_on = fields.DateField(description="登记日期", index=True)
+
+    class Meta:
+        table = "issue_time_entry"
+
+
+class IssueJournal(BaseModel, TimestampMixin):
+    journalized_type = fields.CharField(max_length=30, default="Issue", description="记录对象类型", index=True)
+    journalized_id = fields.BigIntField(description="记录对象ID", index=True)
+    user_id = fields.BigIntField(description="用户ID", index=True)
+    notes = fields.TextField(null=True, description="备注")
+    private_notes = fields.BooleanField(default=False, description="是否私有备注", index=True)
+
+    class Meta:
+        table = "issue_journal"
+
+
+class IssueJournalDetail(BaseModel, TimestampMixin):
+    journal_id = fields.BigIntField(description="Journal ID", index=True)
+    property = fields.CharField(max_length=30, default="attr", description="属性类型", index=True)
+    prop_key = fields.CharField(max_length=120, description="属性Key", index=True)
+    old_value = fields.TextField(null=True, description="旧值")
+    value = fields.TextField(null=True, description="新值")
+
+    class Meta:
+        table = "issue_journal_detail"
+
+
+class IssueQuery(BaseModel, TimestampMixin):
+    name = fields.CharField(max_length=120, description="查询名称", index=True)
+    user_id = fields.BigIntField(null=True, description="用户ID", index=True)
+    project_id = fields.BigIntField(null=True, description="项目ID", index=True)
+    visibility = fields.CharField(max_length=20, default="private", description="可见性", index=True)
+    filters = fields.JSONField(default=dict, description="筛选条件")
+    columns = fields.JSONField(default=list, description="显示列")
+    sort_criteria = fields.JSONField(default=list, description="排序规则")
+
+    class Meta:
+        table = "issue_query"
 
 
 class Project(BaseModel, TimestampMixin):
@@ -410,5 +625,3 @@ class GlobalNoticeUser(BaseModel, TimestampMixin):
     class Meta:
         table = "global_notice_user"
         unique_together = ("notice_id", "user_id")
-
-

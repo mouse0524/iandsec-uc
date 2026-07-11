@@ -14,6 +14,8 @@ class SystemSettingUpdateIn(BaseModel):
     ticket_project_phases: list[str] = Field(default_factory=list, description="工单项目阶段")
     ticket_cs_review_project_phases: list[str] = Field(default_factory=list, description="工单客服审核项目阶段")
     ticket_issue_types: list[str] = Field(default_factory=list, description="工单跟踪")
+    ticket_statuses: list[str] = Field(default_factory=list, description="工单状态")
+    ticket_priorities: list[str] = Field(default_factory=list, description="工单优先级")
     ticket_impact_scopes: list[str] = Field(default_factory=list, description="工单影响范围")
     ticket_categories: list[str] = Field(default_factory=list, description="工单分类")
     customer_service_auto_approve_ticket: bool = Field(default=False, description="客服是否自动审批工单")
@@ -40,7 +42,9 @@ class SystemSettingUpdateIn(BaseModel):
     inactive_user_auto_disable_enabled: bool = Field(default=True, description="是否启用未登录用户自动禁用")
     inactive_user_auto_disable_days: int = Field(default=30, description="未登录用户自动禁用天数")
     password_min_length: int = Field(default=8, description="密码最小长度")
-    password_required_categories: list[str] = Field(default_factory=lambda: ["letter", "digit"], description="密码必选类别")
+    password_required_categories: list[str] = Field(
+        default_factory=lambda: ["letter", "digit"], description="密码必选类别"
+    )
     time_sync_enabled: bool = Field(default=True, description="是否启用时间同步配置")
     time_sync_server: str = Field(default="ntp.aliyun.com", description="时间服务器")
     time_sync_interval_minutes: int = Field(default=60, description="时间同步间隔(分钟)")
@@ -71,13 +75,19 @@ class SystemSettingUpdateIn(BaseModel):
     register_review_reject_template: str = "您好，{contact_name}，您的{register_type}注册申请已驳回。驳回理由：{reason}"
     reset_password_subject: str = "密码重置验证码"
     reset_password_is_html: bool = False
-    reset_password_template: str = "<div style=\"font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2937;line-height:1.7;\"><h2 style=\"margin:0 0 12px;font-size:18px;color:#0f4c81;\">找回密码验证码</h2><p style=\"margin:0 0 10px;\">您好，您正在进行密码重置操作，请使用以下验证码：</p><div style=\"display:inline-block;padding:10px 18px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:24px;font-weight:700;letter-spacing:4px;color:#1d4ed8;\">{code}</div><p style=\"margin:12px 0 0;color:#6b7280;\">验证码 {minutes} 分钟内有效，请勿泄露给他人。</p></div>"
+    reset_password_template: str = (
+        '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;"><h2 style="margin:0 0 12px;font-size:18px;color:#0f4c81;">找回密码验证码</h2><p style="margin:0 0 10px;">您好，您正在进行密码重置操作，请使用以下验证码：</p><div style="display:inline-block;padding:10px 18px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;font-size:24px;font-weight:700;letter-spacing:4px;color:#1d4ed8;">{code}</div><p style="margin:12px 0 0;color:#6b7280;">验证码 {minutes} 分钟内有效，请勿泄露给他人。</p></div>'
+    )
     admin_reset_password_subject: str = "账号密码已重置"
     admin_reset_password_is_html: bool = True
-    admin_reset_password_template: str = "<div style=\"font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2937;line-height:1.7;\"><h2 style=\"margin:0 0 12px;font-size:18px;color:#b45309;\">账号密码已重置</h2><p style=\"margin:0 0 8px;\">您好，<b>{username}</b>：</p><p style=\"margin:0 0 8px;\">管理员已重置您的账号密码，请使用以下临时密码登录：</p><div style=\"display:inline-block;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:20px;font-weight:700;color:#c2410c;\">{password}</div><p style=\"margin:12px 0 0;color:#6b7280;\">登录后请尽快在个人中心修改密码。</p></div>"
+    admin_reset_password_template: str = (
+        '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;"><h2 style="margin:0 0 12px;font-size:18px;color:#b45309;">账号密码已重置</h2><p style="margin:0 0 8px;">您好，<b>{username}</b>：</p><p style="margin:0 0 8px;">管理员已重置您的账号密码，请使用以下临时密码登录：</p><div style="display:inline-block;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:20px;font-weight:700;color:#c2410c;">{password}</div><p style="margin:12px 0 0;color:#6b7280;">登录后请尽快在个人中心修改密码。</p></div>'
+    )
     ticket_notify_subject: str = "工单状态提醒：{ticket_no}"
     ticket_notify_is_html: bool = True
-    ticket_notify_template: str = "<div style=\"font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2937;line-height:1.7;\"><h2 style=\"margin:0 0 12px;font-size:18px;color:#1d4ed8;\">工单状态提醒</h2><p style=\"margin:0 0 8px;\">您好，<b>{name}</b>：</p><p style=\"margin:0 0 6px;\">工单编号：<b>{ticket_no}</b></p><p style=\"margin:0 0 6px;\">工单标题：{title}</p><p style=\"margin:0 0 6px;\">当前状态：<b style=\"color:#1d4ed8;\">{status}</b></p><p style=\"margin:0 0 6px;\">操作人：{operator}</p><p style=\"margin:8px 0 0;color:#6b7280;\">请及时登录系统处理。</p></div>"
+    ticket_notify_template: str = (
+        '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>'
+    )
 
     webdav_enabled: bool = False
     webdav_base_url: str | None = None
@@ -96,29 +106,6 @@ class SystemSettingUpdateIn(BaseModel):
     db_backup_webdav_password: str | None = None
     db_backup_run_at: str = "02:30"
     db_backup_retention_days: int = 7
-    redmine_enabled: bool = False
-    redmine_base_url: str | None = None
-    redmine_api_key: str | None = None
-    redmine_project_id: str | None = None
-    redmine_tracker_id: int | None = None
-    redmine_priority_id: int | None = None
-    redmine_assigned_to_id: int | None = None
-    redmine_closed_status_id: int | None = None
-    redmine_project_phase_field_id: int | None = None
-    redmine_os_field_id: int | None = None
-    redmine_server_version_field_id: int | None = None
-    redmine_client_version_field_id: int | None = None
-    redmine_sync_visible_fields: list[str] = Field(default_factory=list)
-    redmine_sync_options: dict[str, list[str]] = Field(default_factory=dict)
-    redmine_auto_pull_enabled: bool = False
-    redmine_auto_pull_interval_minutes: int = 120
-    redmine_auto_pull_ticket_statuses: list[str] = Field(
-        default_factory=lambda: [
-            TicketStatus.TECH_PROCESSING.value,
-            TicketStatus.FIELD_VERIFICATION.value,
-            TicketStatus.PENDING_CLOSE.value,
-        ]
-    )
     llm_chat_provider: str = "openai"
     llm_chat_base_url: str = "https://api.openai.com/v1"
     llm_chat_api_key: str | None = None
@@ -166,7 +153,14 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError(f"{field_name}至少保留一项")
         return items
 
-    @field_validator("ticket_project_phases", "ticket_cs_review_project_phases", "ticket_issue_types", "ticket_impact_scopes")
+    @field_validator(
+        "ticket_project_phases",
+        "ticket_cs_review_project_phases",
+        "ticket_issue_types",
+        "ticket_statuses",
+        "ticket_priorities",
+        "ticket_impact_scopes",
+    )
     @classmethod
     def normalize_ticket_option_items(cls, value: list[str]):
         items: list[str] = []
@@ -184,6 +178,10 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("客服审核项目阶段至少保留一项")
         if "ticket_issue_types" in self.model_fields_set and not self.ticket_issue_types:
             raise ValueError("跟踪至少保留一项")
+        if "ticket_statuses" in self.model_fields_set and not self.ticket_statuses:
+            raise ValueError("状态至少保留一项")
+        if "ticket_priorities" in self.model_fields_set and not self.ticket_priorities:
+            raise ValueError("优先级至少保留一项")
         if "ticket_impact_scopes" in self.model_fields_set and not self.ticket_impact_scopes:
             raise ValueError("影响范围至少保留一项")
         if (
@@ -340,19 +338,15 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("数据库备份保留天数必须在1到365之间")
         return value
 
-
     @field_validator(
         "turnstile_site_key",
         "turnstile_secret_key",
-        "redmine_base_url",
-        "redmine_api_key",
-        "redmine_project_id",
         "llm_chat_base_url",
         "llm_chat_api_key",
         "llm_chat_model",
     )
     @classmethod
-    def validate_redmine_text(cls, value: str | None, info):
+    def validate_optional_text(cls, value: str | None, info):
         if value is None:
             return value
         text = str(value).strip()
@@ -392,77 +386,6 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("人机校验方式仅支持 captcha/turnstile/both")
         return text
 
-    @field_validator(
-        "redmine_tracker_id",
-        "redmine_priority_id",
-        "redmine_assigned_to_id",
-        "redmine_closed_status_id",
-        "redmine_project_phase_field_id",
-        "redmine_os_field_id",
-        "redmine_server_version_field_id",
-        "redmine_client_version_field_id",
-    )
-    @classmethod
-    def validate_redmine_ids(cls, value: int | None, info):
-        if value is None:
-            return value
-        if value < 1:
-            raise ValueError(f"{info.field_name} 必须大于等于1")
-        return value
-
-    @field_validator("redmine_auto_pull_interval_minutes")
-    @classmethod
-    def validate_redmine_auto_pull_interval_minutes(cls, value: int):
-        if value < 1 or value > 1440:
-            raise ValueError("Redmine定时拉取间隔必须在1到1440分钟之间")
-        return value
-
-    @field_validator("redmine_auto_pull_ticket_statuses")
-    @classmethod
-    def validate_redmine_auto_pull_ticket_statuses(cls, value: list[str]):
-        valid_statuses = {item.value for item in TicketStatus}
-        result = []
-        for item in value or []:
-            status = str(item or "").strip()
-            if not status:
-                continue
-            if status not in valid_statuses:
-                raise ValueError("Redmine定时拉取工单状态包含非法值")
-            if status not in result:
-                result.append(status)
-        if not result:
-            raise ValueError("Redmine定时拉取工单状态至少选择一项")
-        return result
-
-    @field_validator("redmine_sync_visible_fields")
-    @classmethod
-    def validate_redmine_sync_visible_fields(cls, value: list[str]):
-        allowed = {"project_id", "tracker_id", "priority_id", "assigned_to_id", "project_phase", "os"}
-        result = []
-        for item in value or []:
-            text = str(item or "").strip()
-            if text in allowed and text not in result:
-                result.append(text)
-        return result
-
-    @field_validator("redmine_sync_options", mode="before")
-    @classmethod
-    def validate_redmine_sync_options(cls, value):
-        allowed = {"project_id", "tracker_id", "priority_id", "assigned_to_id", "project_phase", "os"}
-        result = {}
-        for key, values in (value or {}).items():
-            field = str(key or "").strip()
-            if field not in allowed:
-                continue
-            items = []
-            for item in values or []:
-                text = str(item or "").strip()
-                if text and text not in items:
-                    items.append(text)
-            if items:
-                result[field] = items
-        return result
-
 
 class PublicSiteConfigOut(BaseModel):
     site_title: str
@@ -475,6 +398,8 @@ class PublicSiteConfigOut(BaseModel):
     ticket_project_phases: list[str]
     ticket_cs_review_project_phases: list[str]
     ticket_issue_types: list[str]
+    ticket_statuses: list[str]
+    ticket_priorities: list[str]
     ticket_impact_scopes: list[str]
     ticket_categories: list[str]
     customer_service_auto_approve_ticket: bool
@@ -508,23 +433,6 @@ class WebDavTestIn(BaseModel):
     webdav_base_url: str | None = None
     webdav_username: str | None = None
     webdav_password: str | None = None
-
-
-class RedmineMetadataIn(BaseModel):
-    redmine_base_url: str | None = None
-    redmine_api_key: str | None = None
-
-    @field_validator("redmine_base_url", "redmine_api_key")
-    @classmethod
-    def validate_redmine_metadata_text(cls, value: str | None, info):
-        if value is None:
-            return value
-        text = str(value).strip()
-        if not text:
-            return None
-        if len(text) > 500:
-            raise ValueError(f"{info.field_name} 不能超过500个字符")
-        return text
 
 
 class DatabaseBackupConfigIn(BaseModel):

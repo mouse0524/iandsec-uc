@@ -24,6 +24,8 @@ tests/*
 !tests/test_review_report_fixes.py
 !tests/test_security_hardening.py
 !tests/test_company_name_validation.py
+!tests/test_issue_core.py
+!tests/test_issue_api.py
 
 db.sqlite3
 db.sqlite3-journal

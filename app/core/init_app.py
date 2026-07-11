@@ -27,7 +27,8 @@ from app.core.exceptions import (
     ResponseValidationHandle,
 )
 from app.log import logger
-from app.models.admin import Api, Menu, Role
+from app.models.admin import Api, IssuePriority, IssueStatus, IssueTracker, IssueWorkflowTransition, Menu, Role, Ticket
+from app.models.enums import TicketStatus
 from app.schemas.menus import MenuType
 from app.settings.config import settings
 
@@ -70,11 +71,48 @@ def _webdav_password_api_paths() -> list[str]:
     ]
 
 
-def _ticket_redmine_api_paths() -> list[str]:
+def _issue_read_api_paths() -> list[str]:
     return [
-        "/api/v1/ticket/redmine/push",
-        "/api/v1/ticket/redmine/pull",
-        "/api/v1/settings/redmine/metadata",
+        "/api/v1/issue/list",
+        "/api/v1/issue/get",
+        "/api/v1/issue/metadata",
+        "/api/v1/issue/status-options",
+        "/api/v1/issue/watchers",
+        "/api/v1/issue/relations",
+        "/api/v1/issue/time-entries",
+        "/api/v1/issue/queries",
+    ]
+
+
+def _issue_create_api_paths() -> list[str]:
+    return [
+        "/api/v1/issue/create",
+    ]
+
+
+def _issue_update_api_paths() -> list[str]:
+    return [
+        "/api/v1/issue/update",
+        "/api/v1/issue/watcher/add",
+        "/api/v1/issue/watcher/delete",
+        "/api/v1/issue/relation/create",
+        "/api/v1/issue/relation/delete",
+        "/api/v1/issue/time-entry/create",
+        "/api/v1/issue/time-entry/delete",
+        "/api/v1/issue/query/create",
+        "/api/v1/issue/query/update",
+        "/api/v1/issue/query/delete",
+    ]
+
+
+def _issue_admin_api_paths() -> list[str]:
+    return [
+        "/api/v1/issue/admin/config",
+        "/api/v1/issue/admin/tracker/save",
+        "/api/v1/issue/admin/status/save",
+        "/api/v1/issue/admin/priority/save",
+        "/api/v1/issue/admin/workflow/save",
+        "/api/v1/issue/admin/custom-field/save",
     ]
 
 
@@ -90,6 +128,16 @@ def _ticket_submit_api_paths() -> list[str]:
         "/api/v1/ticket/resubmit",
         "/api/v1/ticket/actions",
         "/api/v1/ticket/field-verification",
+    ]
+
+
+def _ticket_read_api_paths() -> list[str]:
+    return [
+        "/api/v1/ticket/list",
+        "/api/v1/ticket/get",
+        "/api/v1/ticket/actions",
+        "/api/v1/ticket/attachment/download",
+        "/api/v1/ticket/attachment/preview-cache",
     ]
 
 
@@ -166,6 +214,123 @@ def _release_admin_api_paths() -> list[str]:
         "/api/v1/release/delete",
         "/api/v1/release/clear",
     ]
+
+
+ISSUE_STATUS_SEEDS = [
+    ("新建", False, True),
+    ("客服审核", False, False),
+    ("客服驳回", False, False),
+    ("技术处理", False, False),
+    ("测试过滤", False, False),
+    ("产品评估", False, False),
+    ("研发处理", False, False),
+    ("测试验证", False, False),
+    ("现场验证", False, False),
+    ("已解决", False, False),
+    ("关闭", True, False),
+    ("不采纳", False, False),
+]
+ISSUE_PRIORITY_SEEDS = [("高", False), ("中", True), ("低", False)]
+ISSUE_TRACKER_DEFAULT_STATUS = {
+    "现网问题": "新建",
+    "现网需求": "新建",
+}
+LEGACY_TICKET_STATUS_TO_ISSUE_STATUS = {
+    TicketStatus.PENDING_REVIEW: "客服审核",
+    TicketStatus.CS_REJECTED: "客服驳回",
+    TicketStatus.TECH_PROCESSING: "技术处理",
+    TicketStatus.TEST_FILTERING: "测试过滤",
+    TicketStatus.PRODUCT_EVALUATION: "产品评估",
+    TicketStatus.RD_PROCESSING: "研发处理",
+    TicketStatus.TEST_VERIFICATION: "测试验证",
+    TicketStatus.FIELD_VERIFICATION: "现场验证",
+    TicketStatus.PENDING_CLOSE: "已解决",
+    TicketStatus.TECH_REJECTED: "技术处理",
+    TicketStatus.DONE: "关闭",
+}
+
+
+async def _ensure_named_row(model, *, name: str, defaults: dict):
+    obj, created = await model.get_or_create(name=name, defaults=defaults)
+    return obj
+
+
+async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
+    status_map: dict[str, IssueStatus] = {}
+    for position, (name, is_closed, is_default) in enumerate(ISSUE_STATUS_SEEDS, start=1):
+        status_map[name] = await _ensure_named_row(
+            IssueStatus,
+            name=name,
+            defaults={"position": position, "is_closed": is_closed, "is_default": is_default, "active": True},
+        )
+    await IssueStatus.filter(name="已关闭").update(active=False, is_closed=False, is_default=False)
+
+    priority_map: dict[str, IssuePriority] = {}
+    for position, (name, is_default) in enumerate(ISSUE_PRIORITY_SEEDS, start=1):
+        priority_map[name] = await _ensure_named_row(
+            IssuePriority,
+            name=name,
+            defaults={"position": position, "is_default": is_default, "active": True},
+        )
+    await IssuePriority.filter(name__in=["普通", "紧急", "立刻"]).update(active=False, is_default=False)
+
+    tracker_map: dict[str, IssueTracker] = {}
+    for position, (name, default_status_name) in enumerate(ISSUE_TRACKER_DEFAULT_STATUS.items(), start=1):
+        tracker_map[name] = await _ensure_named_row(
+            IssueTracker,
+            name=name,
+            defaults={
+                "position": position,
+                "default_status_id": status_map[default_status_name].id,
+                "is_in_roadmap": True,
+                "is_active": True,
+            },
+        )
+    await IssueTracker.filter(name="产品建议").update(is_active=False)
+
+    default_priority = priority_map["中"]
+    await Ticket.filter(issue_priority_id__isnull=True).update(issue_priority_id=default_priority.id)
+    for issue_type, tracker in tracker_map.items():
+        await Ticket.filter(issue_type=issue_type, issue_tracker_id__isnull=True).update(issue_tracker_id=tracker.id)
+    for legacy_status, issue_status_name in LEGACY_TICKET_STATUS_TO_ISSUE_STATUS.items():
+        await Ticket.filter(status=legacy_status, issue_status_id__isnull=True).update(
+            issue_status_id=status_map[issue_status_name].id
+        )
+
+    async def add_transition(role_name: str, tracker_name: str, old_status: str, new_status: str) -> None:
+        role = role_map.get(role_name)
+        tracker = tracker_map.get(tracker_name)
+        if not role or not tracker:
+            return
+        await IssueWorkflowTransition.get_or_create(
+            role_id=role.id,
+            tracker_id=tracker.id,
+            old_status_id=status_map[old_status].id,
+            new_status_id=status_map[new_status].id,
+        )
+
+    for tracker_name, next_status in [("现网问题", "技术处理"), ("现网需求", "产品评估")]:
+        await add_transition("客服", tracker_name, "新建", "客服审核")
+        await add_transition("客服", tracker_name, "客服审核", next_status)
+        await add_transition("客服", tracker_name, "客服审核", "客服驳回")
+
+    await add_transition("技术", "现网问题", "技术处理", "测试过滤")
+    await add_transition("测试", "现网问题", "测试过滤", "研发处理")
+    await add_transition("测试", "现网问题", "测试过滤", "技术处理")
+    await add_transition("研发", "现网问题", "研发处理", "测试验证")
+    await add_transition("测试", "现网问题", "测试验证", "现场验证")
+    await add_transition("测试", "现网问题", "测试验证", "研发处理")
+    await add_transition("技术", "现网问题", "现场验证", "关闭")
+    await add_transition("技术", "现网问题", "现场验证", "测试验证")
+
+    await add_transition("产品", "现网需求", "产品评估", "研发处理")
+    await add_transition("产品", "现网需求", "产品评估", "不采纳")
+    await add_transition("研发", "现网需求", "研发处理", "测试验证")
+    await add_transition("研发", "现网需求", "研发处理", "产品评估")
+    await add_transition("测试", "现网需求", "测试验证", "现场验证")
+    await add_transition("测试", "现网需求", "测试验证", "研发处理")
+    await add_transition("技术", "现网需求", "现场验证", "关闭")
+    await add_transition("技术", "现网需求", "现场验证", "测试验证")
 
 
 def make_middlewares():
@@ -386,42 +551,40 @@ async def init_menus():
             is_hidden=False,
             component="Layout",
             keepalive=False,
-            redirect="/ticket/submit",
+            redirect="/ticket/issues",
         )
+    else:
+        ticket_parent.redirect = "/ticket/issues"
+        await ticket_parent.save()
+
+    await Menu.filter(
+        parent_id=ticket_parent.id,
+        component__in=["/ticket/submit", "/ticket/my", "/ticket/review", "/ticket/tech", "/ticket/rd-task"],
+    ).delete()
 
     ticket_children = [
         {
-            "name": "提交工单",
-            "path": "submit",
+            "name": "工单列表",
+            "path": "issues",
             "order": 1,
-            "icon": "material-symbols:upload-file-outline",
-            "component": "/ticket/submit",
+            "icon": "mdi:clipboard-list-outline",
+            "component": "/issue/list",
         },
         {
-            "name": "我的工单",
-            "path": "my",
+            "name": "工单配置",
+            "path": "config",
             "order": 2,
-            "icon": "mdi:ticket-account",
-            "component": "/ticket/my",
-        },
-        {
-            "name": "工单审核",
-            "path": "review",
-            "order": 3,
-            "icon": "material-symbols:checklist",
-            "component": "/ticket/review",
-        },
-        {
-            "name": "技术处理",
-            "path": "tech",
-            "order": 4,
-            "icon": "mdi:tools",
-            "component": "/ticket/tech",
+            "icon": "mdi:cog-outline",
+            "component": "/issue/config",
         },
     ]
     for child in ticket_children:
-        exists = await Menu.filter(parent_id=ticket_parent.id, path=child["path"]).exists()
-        if not exists:
+        menu = await Menu.filter(parent_id=ticket_parent.id, path=child["path"]).first()
+        if menu:
+            for key, value in child.items():
+                setattr(menu, key, value)
+            await menu.save()
+        else:
             await Menu.create(
                 menu_type=MenuType.MENU,
                 parent_id=ticket_parent.id,
@@ -525,9 +688,9 @@ async def init_menus():
         partner_parent.redirect = "/partner/review"
         await partner_parent.save()
 
-    partner_review_menu = await Menu.filter(parent_id=partner_parent.id).filter(
-        Q(component="/partner/review") | Q(path="review")
-    ).first()
+    partner_review_menu = (
+        await Menu.filter(parent_id=partner_parent.id).filter(Q(component="/partner/review") | Q(path="review")).first()
+    )
     if partner_review_menu:
         partner_review_menu.menu_type = MenuType.MENU
         partner_review_menu.name = "注册审核"
@@ -696,7 +859,9 @@ async def init_menus():
         )
 
     download_log_menu = await Menu.filter(
-        Q(component="/system/webdav-download-log") | Q(path="webdav-download-log", parent_id=outbound_parent.id) | Q(name="下载日志")
+        Q(component="/system/webdav-download-log")
+        | Q(path="webdav-download-log", parent_id=outbound_parent.id)
+        | Q(name="下载日志")
     ).first()
     if download_log_menu:
         download_log_menu.menu_type = MenuType.MENU
@@ -725,7 +890,9 @@ async def init_menus():
         )
 
     password_menu = await Menu.filter(
-        Q(component="/system/webdav-password") | Q(path="webdav-password", parent_id=outbound_parent.id) | Q(name="密码获取")
+        Q(component="/system/webdav-password")
+        | Q(path="webdav-password", parent_id=outbound_parent.id)
+        | Q(name="密码获取")
     ).first()
     if password_menu:
         password_menu.name = "密码获取"
@@ -873,8 +1040,6 @@ async def init_menus():
                 **child,
             )
 
-
-
     wiki_parent = await Menu.filter(path="/wiki").first()
     if not wiki_parent:
         wiki_parent = await Menu.create(
@@ -990,9 +1155,7 @@ async def _run_pending_migrations() -> None:
         logger.warning("[init_db] aerich upgrade stderr: {}", result.stderr.strip())
     if result.returncode != 0:
         if "aerich init-db" in result.stderr and "initialize the database" in result.stderr:
-            logger.warning(
-                "[init_db] aerich migration baseline is missing; continuing with runtime schema fallback"
-            )
+            logger.warning("[init_db] aerich migration baseline is missing; continuing with runtime schema fallback")
             return
         raise RuntimeError(f"aerich upgrade failed with exit code {result.returncode}")
 
@@ -1139,6 +1302,9 @@ async def init_roles():
         "用户": "用户角色",
         "技术": "技术角色",
         "客服": "客服角色",
+        "产品": "产品角色",
+        "测试": "测试角色",
+        "研发": "研发角色",
     }
 
     role_names = list(role_desc_map.keys())
@@ -1176,17 +1342,15 @@ async def init_roles():
                 )
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/monitor")))
                 await admin_role.menus.add(*await Menu.filter(Q(component="/system/webdav-password")))
-                await admin_role.menus.add(*await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"])))
+                await admin_role.menus.add(
+                    *await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
+                )
                 await _backfill_existing_role_permissions(
                     role_name="管理员",
                     api_paths=["/api/v1/webdav/download-log/list"],
                     component_paths=["/outbound", "/system/webdav-download-log"],
                 )
                 await user_controller.clear_all_permission_cache()
-            await _backfill_existing_role_permissions(
-                role_name="技术",
-                api_paths=_ticket_redmine_api_paths(),
-            )
             for role_name in ["用户", "渠道商", "技术"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
@@ -1219,28 +1383,65 @@ async def init_roles():
                     api_paths=_project_api_paths(),
                     component_paths=["/project", "/project/list", "/project/activity"],
                 )
-            for role_name in ["用户", "渠道商", "客服", "技术"]:
+            await _backfill_existing_role_permissions(
+                role_name="客服",
+                api_paths=[*_ticket_read_api_paths(), "/api/v1/ticket/export"],
+            )
+            for role_name in ["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=_wiki_read_api_paths(),
                     component_paths=["/wiki", "/wiki/search", "/wiki/view"],
                 )
-            for role_name in ["用户", "渠道商", "客服", "技术"]:
+            for role_name in ["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=_release_view_api_paths(),
                     component_paths=["/outbound", "release-view"],
                 )
             await _remove_existing_role_permissions(
-                role_names=["用户", "渠道商", "客服", "技术"],
+                role_names=["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"],
                 api_paths=_release_admin_api_paths(),
                 component_paths=["release-records"],
             )
             await _remove_existing_role_permissions(
-                role_names=["用户", "渠道商", "客服", "技术"],
+                role_names=["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"],
                 api_paths=[*_wiki_edit_api_paths(), *_wiki_admin_api_paths()],
                 component_paths=["/wiki/sources", "/wiki/records"],
             )
+            await _remove_existing_role_permissions(
+                role_names=["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"],
+                api_paths=_issue_admin_api_paths(),
+                component_paths=["/issue/config"],
+            )
+            await _remove_existing_role_permissions(
+                role_names=["用户", "渠道商", "客服", "技术", "产品", "测试", "研发"],
+                api_paths=[],
+                component_paths=["/ticket/submit", "/ticket/my", "/ticket/review", "/ticket/tech", "/ticket/rd-task"],
+            )
+            for role_name in ["产品", "测试", "研发"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=[
+                        *_ticket_read_api_paths(),
+                        *_issue_read_api_paths(),
+                        *_issue_create_api_paths(),
+                        *_issue_update_api_paths(),
+                    ],
+                    component_paths=["/ticket", "/issue/list"],
+                )
+            for role_name in ["用户", "渠道商", "客服", "技术"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=[*_issue_read_api_paths(), *_issue_create_api_paths()],
+                    component_paths=["/ticket", "/issue/list"],
+                )
+            for role_name in ["客服", "技术"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_issue_update_api_paths(),
+                )
+            await _ensure_issue_defaults({role.name: role for role in existing_roles})
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
 
@@ -1256,17 +1457,19 @@ async def init_roles():
     await admin_role.apis.add(*all_apis)
     await admin_role.menus.add(*all_menus)
 
-    ticket_submit_apis = await Api.filter(
-        path__in=_ticket_submit_api_paths()
-    )
+    ticket_submit_apis = await Api.filter(path__in=_ticket_submit_api_paths())
     ticket_tech_apis = await Api.filter(
         path__in=[
             "/api/v1/ticket/tech/action",
             "/api/v1/ticket/assign-tech",
-            *_ticket_redmine_api_paths(),
         ]
     )
     ticket_review_apis = await Api.filter(path__in=["/api/v1/ticket/review", "/api/v1/ticket/assign-tech"])
+    ticket_read_apis = await Api.filter(path__in=_ticket_read_api_paths())
+    issue_read_apis = await Api.filter(path__in=_issue_read_api_paths())
+    issue_create_apis = await Api.filter(path__in=_issue_create_api_paths())
+    issue_update_apis = await Api.filter(path__in=_issue_update_api_paths())
+    issue_admin_apis = await Api.filter(path__in=_issue_admin_api_paths())
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
     )
@@ -1277,7 +1480,6 @@ async def init_roles():
             "/api/v1/settings/update",
             "/api/v1/settings/time-sync/status",
             "/api/v1/settings/time-sync/sync",
-            "/api/v1/settings/redmine/metadata",
             "/api/v1/settings/database-backup/status",
             "/api/v1/settings/database-backup/test",
             "/api/v1/settings/database-backup/run",
@@ -1295,9 +1497,7 @@ async def init_roles():
             "/api/v1/webdav/share/delete",
         ]
     )
-    webdav_password_apis = await Api.filter(
-        path__in=_webdav_password_api_paths()
-    )
+    webdav_password_apis = await Api.filter(path__in=_webdav_password_api_paths())
     notice_apis = await Api.filter(
         path__in=[
             "/api/v1/notice/create",
@@ -1326,9 +1526,8 @@ async def init_roles():
     )
     basic_apis = await Api.filter(_default_basic_api_filter())
 
-    submit_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/submit") | Q(component="/ticket/my"))
-    tech_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/tech") | Q(component="/ticket/my"))
-    review_menus = await Menu.filter(Q(path="/ticket") | Q(component="/ticket/review"))
+    issue_menus = await Menu.filter(Q(path="/ticket") | Q(component="/issue/list"))
+    issue_config_menus = await Menu.filter(Q(component="/issue/config"))
     partner_review_menus = await Menu.filter(Q(path="/partner") | Q(component="/partner/review"))
     settings_menus = await Menu.filter(Q(component="/system/settings"))
     notice_menus = await Menu.filter(Q(component="/system/notice"))
@@ -1348,44 +1547,51 @@ async def init_roles():
     )
     webdav_password_menus = await Menu.filter(Q(component="/system/webdav-password"))
 
-    for role_name in ["用户", "渠道商", "技术", "客服"]:
+    for role_name in ["用户", "渠道商", "技术", "客服", "产品", "测试", "研发"]:
         role_obj = role_map[role_name]
         await role_obj.apis.add(*basic_apis)
         await role_obj.apis.add(*notice_user_apis)
         await role_obj.apis.add(*wiki_read_apis)
         await role_obj.apis.add(*release_view_apis)
+        await role_obj.apis.add(*issue_read_apis)
+        await role_obj.apis.add(*issue_create_apis)
         await role_obj.menus.add(*wiki_read_menus)
         await role_obj.menus.add(*release_view_menus)
+        await role_obj.menus.add(*issue_menus)
 
     await role_map["用户"].apis.add(*ticket_submit_apis)
-    await role_map["用户"].menus.add(*submit_menus)
 
     await role_map["渠道商"].apis.add(*ticket_submit_apis)
-    await role_map["渠道商"].menus.add(*submit_menus)
 
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)
+    await role_map["技术"].apis.add(*issue_update_apis)
     await role_map["技术"].apis.add(*partner_invite_apis)
     await role_map["技术"].apis.add(*partner_review_apis)
     await role_map["技术"].apis.add(*project_apis)
-    await role_map["技术"].menus.add(*tech_menus)
     await role_map["技术"].menus.add(*partner_review_menus)
     await role_map["技术"].menus.add(*project_menus)
 
     await role_map["客服"].apis.add(*ticket_review_apis)
     await role_map["客服"].apis.add(*partner_review_apis)
-    await role_map["客服"].apis.add(
-        *await Api.filter(path__in=["/api/v1/ticket/list", "/api/v1/ticket/export", "/api/v1/ticket/get", "/api/v1/ticket/actions"])
-    )
+    await role_map["客服"].apis.add(*ticket_read_apis)
+    await role_map["客服"].apis.add(*issue_update_apis)
+    await role_map["客服"].apis.add(*await Api.filter(path="/api/v1/ticket/export"))
     await role_map["客服"].apis.add(*project_apis)
-    await role_map["客服"].menus.add(*review_menus)
     await role_map["客服"].menus.add(*partner_review_menus)
     await role_map["客服"].menus.add(*project_menus)
+
+    for role_name in ["产品", "测试", "研发"]:
+        await role_map[role_name].apis.add(*ticket_read_apis)
+        await role_map[role_name].apis.add(*issue_update_apis)
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)
     await role_map["管理员"].apis.add(*terminal_apis)
     await role_map["管理员"].apis.add(*project_apis)
+    await role_map["管理员"].apis.add(*issue_update_apis)
+    await role_map["管理员"].apis.add(*issue_create_apis)
+    await role_map["管理员"].apis.add(*issue_admin_apis)
     await role_map["管理员"].apis.add(*wiki_edit_apis)
     await role_map["管理员"].apis.add(*wiki_admin_apis)
     await role_map["管理员"].apis.add(*release_admin_apis)
@@ -1396,11 +1602,14 @@ async def init_roles():
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*project_menus)
+    await role_map["管理员"].menus.add(*issue_menus)
+    await role_map["管理员"].menus.add(*issue_config_menus)
     await role_map["管理员"].menus.add(*wiki_edit_menus)
     await role_map["管理员"].menus.add(*wiki_admin_menus)
     await role_map["管理员"].menus.add(*notice_menus)
     await role_map["管理员"].menus.add(*webdav_menus)
     await role_map["管理员"].menus.add(*webdav_password_menus)
+    await _ensure_issue_defaults(role_map)
 
 
 async def init_data():

@@ -506,11 +506,7 @@ function getDefaultLoginPath() {
   if (userStore.isSuperUser) {
     return '/workbench'
   }
-  const roleNames = (userStore.role || []).map((item) => item?.name).filter(Boolean)
-  if (roleNames.includes('客服')) return '/ticket/review'
-  if (roleNames.includes('技术')) return '/ticket/tech'
-  if (roleNames.includes('用户') || roleNames.includes('渠道商') || roleNames.includes('代理商')) return '/ticket/my'
-  return '/ticket/my'
+  return '/ticket/issues'
 }
 
 const forgotRules = {

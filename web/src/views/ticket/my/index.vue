@@ -48,6 +48,7 @@ const summaryStats = ref({
   total: 0,
   pending_review: 0,
   tech_processing: 0,
+  internal_processing: 0,
   field_verification: 0,
   pending_close: 0,
   done: 0,
@@ -69,12 +70,6 @@ const fallbackIssueTypes = ['现网问题', '现网需求', '产品建议']
 const fallbackImpactScopes = ['全部', '偶现', '单台必现', '单台偶现']
 const fallbackCategories = ['登录问题', '权限问题', '系统异常', '其他']
 const fallbackRootCauses = ['代码缺陷', '配置错误', '环境异常', '数据问题', '操作不当', '第三方依赖']
-const redmineStatusTextMap = {
-  never: '未同步',
-  success: '同步成功',
-  failed: '同步失败',
-  syncing: '同步中',
-}
 
 const summaryCards = computed(() => {
   const stats = summaryStats.value || {}
@@ -82,6 +77,7 @@ const summaryCards = computed(() => {
     { label: '当前总工单', value: stats.total || 0, tone: 'neutral' },
     { label: '审核中', value: stats.pending_review || 0, tone: 'warning' },
     { label: '技术处理中', value: stats.tech_processing || 0, tone: 'info' },
+    { label: '产研处理中', value: stats.internal_processing || 0, tone: 'info' },
     { label: '现场验证', value: stats.field_verification || 0, tone: 'warning' },
     { label: '待关闭', value: stats.pending_close || 0, tone: 'success' },
     { label: '已驳回', value: stats.rejected || 0, tone: 'error' },
@@ -107,6 +103,11 @@ async function getMyTicketList(params = {}) {
     total: Number(res?.status_summary?.total || 0),
     pending_review: Number(res?.status_summary?.pending_review || 0),
     tech_processing: Number(res?.status_summary?.tech_processing || 0),
+    internal_processing:
+      Number(res?.status_summary?.test_filtering || 0) +
+      Number(res?.status_summary?.product_evaluation || 0) +
+      Number(res?.status_summary?.rd_processing || 0) +
+      Number(res?.status_summary?.test_verification || 0),
     field_verification: Number(res?.status_summary?.field_verification || 0),
     pending_close: Number(res?.status_summary?.pending_close || 0),
     done: Number(res?.status_summary?.done || 0),
@@ -228,17 +229,6 @@ async function submitFieldReject() {
 }
 
 
-function redmineDisplayStatus(row) {
-  return row.redmine_status_name || redmineStatusTextMap[row.redmine_sync_status] || '-'
-}
-
-function redmineSyncTagType(row) {
-  if (row.redmine_sync_status === 'failed') return 'error'
-  if (row.redmine_sync_status === 'success') return 'success'
-  if (row.redmine_sync_status === 'syncing') return 'info'
-  return 'warning'
-}
-
 function moreOptions(row) {
   const options = []
   if (row.status !== 'done') {
@@ -300,18 +290,6 @@ const columns = [
     align: 'center',
     render(row) {
       return h(NTag, { type: ticketStatusTypeMap[row.status] || 'default' }, { default: () => ticketStatusTextMap[row.status] })
-    },
-  },
-  {
-    title: 'Redmine状态',
-    key: 'redmine_status_name',
-    align: 'center',
-    render(row) {
-      return h(
-        NTag,
-        { type: redmineSyncTagType(row), bordered: false },
-        { default: () => redmineDisplayStatus(row) }
-      )
     },
   },
   { title: '创建时间', key: 'created_at', align: 'center' },

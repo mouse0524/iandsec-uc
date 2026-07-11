@@ -203,7 +203,7 @@ async def test_ticket_export_uses_batch_user_query_and_chinese_labels(monkeypatc
     monkeypatch.setattr(ticket_api.User, "filter", user_filter)
     monkeypatch.setattr(ticket_api.user_controller, "get_user_basic", fail_get_user_basic)
 
-    response = await ticket_api.export_tickets()
+    response = await ticket_api.export_tickets(submitter_name=None)
     body = b"".join([chunk async for chunk in response.body_iterator])
     workbook = load_workbook(io.BytesIO(body))
     sheet = workbook.active
