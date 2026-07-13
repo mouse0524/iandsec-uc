@@ -1,7 +1,6 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert,
   NButton,
   NCheckbox,
   NDrawer,
@@ -81,6 +80,25 @@ const detailDrawerTitle = computed(() =>
 const customFields = computed(() => metadata.value.custom_fields || [])
 const customFilterFields = computed(() => customFields.value.filter((item) => item.is_filter))
 const tableScrollX = computed(() => 1160 + customFields.value.length * 140)
+const builtInQueries = computed(() => {
+  const userId = Number(userStore.userId || 0)
+  return [
+    {
+      label: '我提交',
+      value: 'builtin:submitted-by-me',
+      filters: userId ? { submitter_id: userId } : {},
+    },
+    {
+      label: '指派给我',
+      value: 'builtin:assigned-to-me',
+      filters: userId ? { assigned_to_id: userId } : {},
+    },
+  ]
+})
+const queryOptions = computed(() => [
+  ...builtInQueries.value,
+  ...queries.value.map((item) => ({ label: item.name, value: item.id })),
+])
 
 const createRules = {
   company_name: { required: true, message: '请输入项目名称', trigger: ['blur', 'input'] },
@@ -111,10 +129,11 @@ onMounted(() => {
 
 function getIssueList(params) {
   const { filters, customValues } = splitListParams(params)
+  const queryId = savedQueryId(selectedQueryId.value)
   return api.getIssueList({
     ...filters,
     custom_values: Object.keys(customValues).length ? JSON.stringify(customValues) : undefined,
-    query_id: selectedQueryId.value || undefined,
+    query_id: queryId || undefined,
   })
 }
 
@@ -435,6 +454,12 @@ function compactFilters() {
 }
 
 function applySavedQuery(queryId) {
+  const builtInQuery = builtInQueries.value.find((item) => item.value === queryId)
+  if (builtInQuery) {
+    queryItems.value = { ...builtInQuery.filters }
+    $table.value?.handleSearch?.()
+    return
+  }
   const query = queries.value.find((item) => Number(item.id) === Number(queryId))
   const filters = { ...(query?.filters || {}) }
   const customValues = filters.custom_values || {}
@@ -444,6 +469,12 @@ function applySavedQuery(queryId) {
     ...Object.fromEntries(Object.entries(customValues).map(([key, value]) => [`cf_${key}`, value])),
   }
   $table.value?.handleSearch?.()
+}
+
+function savedQueryId(value) {
+  if (!value || String(value).startsWith('builtin:')) return null
+  const id = Number(value)
+  return Number.isFinite(id) ? id : null
 }
 
 function splitListParams(params = {}) {
@@ -612,37 +643,12 @@ const columns = computed(() => [
 <template>
   <CommonPage title="工单列表" :show-header="false" show-footer>
     <div class="issue-list-page">
-      <div class="issue-list-header">
-        <div>
-          <div class="eyebrow">工单工作台</div>
-          <h2>问题与需求统一跟踪</h2>
-        </div>
-        <div class="header-metrics" aria-label="工单配置概览">
-          <div>
-            <strong>{{ metadata.trackers.length }}</strong>
-            <span>跟踪</span>
-          </div>
-          <div>
-            <strong>{{ metadata.statuses.length }}</strong>
-            <span>状态</span>
-          </div>
-          <div>
-            <strong>{{ metadata.priorities.length }}</strong>
-            <span>优先级</span>
-          </div>
-        </div>
-      </div>
-
       <div class="table-shell">
         <div class="issue-toolbar">
-          <div class="toolbar-copy">
-            <strong>列表视图</strong>
-            <span>按保存查询、状态、优先级快速定位待处理事项</span>
-          </div>
           <div class="query-tools">
             <NSelect
               v-model:value="selectedQueryId"
-              :options="queries.map((item) => ({ label: item.name, value: item.id }))"
+              :options="queryOptions"
               clearable
               placeholder="保存查询"
               @update:value="applySavedQuery"
@@ -677,12 +683,22 @@ const columns = computed(() => [
                 @keypress.enter="$table?.handleSearch()"
               />
             </QueryBarItem>
-            <QueryBarItem label="项目ID" :label-width="58">
-              <NInputNumber
-                v-model:value="queryItems.issue_project_id"
+            <QueryBarItem label="提交者" :label-width="58">
+              <NInput
+                v-model:value="queryItems.submitter_name"
                 clearable
-                placeholder="项目ID"
+                placeholder="输入提交者"
                 style="width: 140px"
+                @keypress.enter="$table?.handleSearch()"
+              />
+            </QueryBarItem>
+            <QueryBarItem label="项目名称" :label-width="68">
+              <NInput
+                v-model:value="queryItems.issue_project_name"
+                clearable
+                placeholder="输入项目名称"
+                style="width: 140px"
+                @keypress.enter="$table?.handleSearch()"
               />
             </QueryBarItem>
             <QueryBarItem label="跟踪" :label-width="58">
@@ -694,10 +710,10 @@ const columns = computed(() => [
                 style="width: 140px"
               />
             </QueryBarItem>
-            <QueryBarItem label="状态ID" :label-width="58">
+            <QueryBarItem label="状态" :label-width="58">
               <NSelect
-                v-model:value="queryItems.issue_status_id"
-                :options="optionList('statuses')"
+                v-model:value="queryItems.issue_status_name"
+                :options="metadata.statuses.map((item) => ({ label: item.name, value: item.name }))"
                 clearable
                 placeholder="状态"
                 style="width: 140px"
@@ -713,11 +729,12 @@ const columns = computed(() => [
               />
             </QueryBarItem>
             <QueryBarItem label="当前指派人" :label-width="82">
-              <NInputNumber
-                v-model:value="queryItems.assigned_to_id"
+              <NInput
+                v-model:value="queryItems.assigned_to_name"
                 clearable
-                placeholder="用户ID"
+                placeholder="输入用户名称"
                 style="width: 140px"
+                @keypress.enter="$table?.handleSearch()"
               />
             </QueryBarItem>
             <QueryBarItem
@@ -781,15 +798,10 @@ const columns = computed(() => [
             label-placement="left"
             class="issue-create-form"
           >
-            <NAlert type="info" class="mb-14">
-              工单编号会在提交后自动生成；未手动指定指派人时，系统默认指派给当前提交人。
-            </NAlert>
-
             <section class="create-section">
               <div class="create-section-head compact">
                 <div>
                   <h3>问题内容</h3>
-                  <p>标题只填写业务摘要，工单编号由系统生成。</p>
                 </div>
               </div>
               <div class="create-grid two-col">
@@ -1013,60 +1025,6 @@ const columns = computed(() => [
   gap: 16px;
 }
 
-.issue-list-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 4px 2px 2px;
-}
-
-.eyebrow {
-  color: var(--issue-accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.issue-list-header h2 {
-  margin: 6px 0 0;
-  color: var(--issue-ink);
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.header-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(82px, 1fr));
-  gap: 8px;
-}
-
-.header-metrics > div {
-  min-width: 82px;
-  padding: 8px 10px;
-  border: 1px solid var(--issue-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.header-metrics strong,
-.header-metrics span {
-  display: block;
-}
-
-.header-metrics strong {
-  color: var(--issue-ink);
-  font-size: 18px;
-  line-height: 1;
-}
-
-.header-metrics span {
-  margin-top: 4px;
-  color: var(--issue-muted);
-  font-size: 12px;
-}
-
 .table-shell {
   padding: 14px;
   border: 1px solid var(--issue-border);
@@ -1084,26 +1042,8 @@ const columns = computed(() => [
 
 .issue-toolbar {
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-bottom: 12px;
-}
-
-.toolbar-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 220px;
-}
-
-.toolbar-copy strong {
-  color: var(--issue-ink);
-  font-size: 15px;
-}
-
-.toolbar-copy span {
-  color: var(--issue-muted);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .query-tools :deep(.n-select) {
@@ -1294,15 +1234,6 @@ const columns = computed(() => [
 }
 
 @media (max-width: 720px) {
-  .issue-list-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .header-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .issue-toolbar,
   .query-tools {
     align-items: stretch;
@@ -1311,10 +1242,6 @@ const columns = computed(() => [
 
   .query-tools :deep(.n-select) {
     width: 100%;
-  }
-
-  .toolbar-copy {
-    min-width: 0;
   }
 
   .create-grid.two-col {

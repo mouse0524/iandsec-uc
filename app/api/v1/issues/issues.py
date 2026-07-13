@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from tortoise.expressions import Q
 
-from app.api.v1.tickets.tickets import _build_ticket_search, _can_access_ticket, _get_current_user, _get_user_role_names
+from app.api.v1.tickets.tickets import _get_current_user, _get_user_role_names, _tech_related_submitter_ids
 from app.controllers.issue import (
     ISSUE_FIELD_LABELS,
     _int_value,
@@ -51,7 +51,6 @@ from app.models.enums import (
     ROLE_CHANNEL,
     ROLE_AGENT,
     IssueRelationType,
-    TicketStatus,
 )
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.issues import (
@@ -100,7 +99,17 @@ ISSUE_LIST_FIELDS = [
     "created_at",
     "updated_at",
 ]
-ISSUE_UPDATE_ROLES = {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_TECH, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}
+ISSUE_UPDATE_ROLES = {
+    ROLE_ADMIN,
+    ROLE_CUSTOMER_SERVICE,
+    ROLE_TECH,
+    ROLE_PRODUCT,
+    ROLE_TEST,
+    ROLE_RD,
+    ROLE_USER,
+    ROLE_CHANNEL,
+    ROLE_AGENT,
+}
 ISSUE_CREATE_ROLES = ISSUE_UPDATE_ROLES | {ROLE_USER, ROLE_CHANNEL, ROLE_AGENT}
 ISSUE_QUERY_FILTER_FIELDS = {
     "issue_project_id",
@@ -108,6 +117,7 @@ ISSUE_QUERY_FILTER_FIELDS = {
     "issue_status_id",
     "issue_priority_id",
     "assigned_to_id",
+    "submitter_id",
 }
 ISSUE_SORT_FIELDS = {
     "id",
@@ -121,11 +131,7 @@ ISSUE_SORT_FIELDS = {
     "due_date",
     "done_ratio",
 }
-STATUS_BY_ROLE = {
-    ROLE_PRODUCT: {TicketStatus.PRODUCT_EVALUATION},
-    ROLE_TEST: {TicketStatus.TEST_FILTERING, TicketStatus.TEST_VERIFICATION},
-    ROLE_RD: {TicketStatus.RD_PROCESSING},
-}
+ISSUE_VIEW_ALL_ROLES = {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}
 
 
 async def _maybe_await(value):
@@ -490,37 +496,30 @@ async def _save_issue_config(model, payload):
     return await model.create(**data)
 
 
-async def _issue_visibility_q(user: User, role_names: list[str], scope: str | None) -> Q:
-    if user.is_superuser or {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE}.intersection(role_names):
-        return Q(assigned_to_id=user.id) if scope == "mine" else Q()
-    if ROLE_TECH in role_names and not {ROLE_PRODUCT, ROLE_TEST, ROLE_RD}.intersection(role_names):
-        return await _build_ticket_search(
-            user=user,
-            role_names=role_names,
-            title=None,
-            scope=scope,
-            status=None,
-            exclude_status=None,
-            project_phase=None,
-            issue_type=None,
-            impact_scope=None,
-            category=None,
-            root_cause=None,
-            company_name=None,
-            submitter_name=None,
-            created_start=None,
-            created_end=None,
-            finished_start=None,
-            finished_end=None,
-        )
+def _can_view_all_issues(user: User, role_names: list[str]) -> bool:
+    return bool(user.is_superuser or getattr(user, "username", "") == "admin" or ISSUE_VIEW_ALL_ROLES.intersection(role_names))
 
-    visible_q = Q(submitter_id=user.id) | Q(assigned_to_id=user.id)
-    visible_statuses = {status for role, statuses in STATUS_BY_ROLE.items() if role in role_names for status in statuses}
-    if visible_statuses:
-        visible_q |= Q(status__in=list(visible_statuses))
-    if scope == "mine":
-        return Q(assigned_to_id=user.id) | Q(submitter_id=user.id)
-    return visible_q
+
+async def _issue_visibility_q(user: User, role_names: list[str], scope: str | None) -> Q:
+    if _can_view_all_issues(user, role_names):
+        return Q(assigned_to_id=user.id) if scope == "mine" else Q()
+    own_q = Q(submitter_id=user.id) | Q(assigned_to_id=user.id)
+    if ROLE_TECH in role_names:
+        related_submitter_ids = await _tech_related_submitter_ids(user.id)
+        return own_q | Q(submitter_id__in=related_submitter_ids)
+    return own_q
+
+
+async def _can_access_ticket(ticket: Ticket, user: User, role_names: list[str]) -> bool:
+    if _can_view_all_issues(user, role_names):
+        return True
+    if getattr(ticket, "assigned_to_id", None) == user.id:
+        return True
+    if ROLE_TECH in role_names:
+        if ticket.submitter_id == user.id:
+            return True
+        return int(ticket.submitter_id or 0) in await _tech_related_submitter_ids(user.id)
+    return ticket.submitter_id == user.id
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -530,6 +529,43 @@ def _coerce_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+async def _ids_by_contains(model, text: Any, fields: tuple[str, ...]) -> list[int]:
+    value = str(text or "").strip()
+    if not value or not fields:
+        return []
+    q = Q(**{f"{fields[0]}__contains": value})
+    for field in fields[1:]:
+        q |= Q(**{f"{field}__contains": value})
+    return [int(row["id"]) for row in await model.filter(q).values("id")]
+
+
+async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
+    q = Q()
+    project_name = str(filters.get("issue_project_name") or "").strip()
+    if project_name:
+        project_ids = await _ids_by_contains(Project, project_name, ("project_name",))
+        project_q = Q(company_name__contains=project_name)
+        if project_ids:
+            project_q |= Q(issue_project_id__in=project_ids)
+        q &= project_q
+
+    status_name = str(filters.get("issue_status_name") or "").strip()
+    if status_name:
+        status_ids = await _ids_by_contains(IssueStatus, status_name, ("name",))
+        q &= Q(issue_status_id__in=status_ids) if status_ids else Q(id=0)
+
+    assignee_name = str(filters.get("assigned_to_name") or "").strip()
+    if assignee_name:
+        user_ids = await _ids_by_contains(User, assignee_name, ("alias", "username", "email"))
+        q &= Q(assigned_to_id__in=user_ids) if user_ids else Q(id=0)
+
+    submitter_name = str(filters.get("submitter_name") or "").strip()
+    if submitter_name:
+        user_ids = await _ids_by_contains(User, submitter_name, ("alias", "username", "email"))
+        q &= Q(submitter_id__in=user_ids) if user_ids else Q(id=0)
+    return q
 
 
 def _apply_query_filters(q: Q, filters: dict[str, Any]) -> Q:
@@ -648,6 +684,11 @@ async def list_issues(
     issue_status_id: int | None = Query(None, description="状态ID"),
     issue_priority_id: int | None = Query(None, description="优先级ID"),
     assigned_to_id: int | None = Query(None, description="指派人ID"),
+    submitter_id: int | None = Query(None, description="提交者ID"),
+    issue_project_name: str | None = Query(None, description="项目名称"),
+    issue_status_name: str | None = Query(None, description="状态"),
+    assigned_to_name: str | None = Query(None, description="用户名称"),
+    submitter_name: str | None = Query(None, description="提交者"),
     title: str | None = Query(None, description="标题"),
     custom_values: str | None = Query(None, description="自定义字段筛选JSON"),
     scope: str | None = Query(None, description="范围"),
@@ -667,7 +708,7 @@ async def list_issues(
     title = title if title is not None else saved_filters.get("title")
     scope = scope if scope is not None else saved_filters.get("scope")
     q = await _issue_visibility_q(user, role_names, scope)
-    for field, value in {
+    issue_filters = {
         "issue_project_id": issue_project_id if issue_project_id is not None else saved_filters.get("issue_project_id"),
         "issue_tracker_id": issue_tracker_id if issue_tracker_id is not None else saved_filters.get("issue_tracker_id"),
         "issue_status_id": issue_status_id if issue_status_id is not None else saved_filters.get("issue_status_id"),
@@ -675,10 +716,21 @@ async def list_issues(
             issue_priority_id if issue_priority_id is not None else saved_filters.get("issue_priority_id")
         ),
         "assigned_to_id": assigned_to_id if assigned_to_id is not None else saved_filters.get("assigned_to_id"),
-    }.items():
+        "submitter_id": submitter_id if submitter_id is not None else saved_filters.get("submitter_id"),
+        "issue_project_name": (
+            issue_project_name if issue_project_name is not None else saved_filters.get("issue_project_name")
+        ),
+        "issue_status_name": (
+            issue_status_name if issue_status_name is not None else saved_filters.get("issue_status_name")
+        ),
+        "assigned_to_name": assigned_to_name if assigned_to_name is not None else saved_filters.get("assigned_to_name"),
+        "submitter_name": submitter_name if submitter_name is not None else saved_filters.get("submitter_name"),
+    }
+    for field, value in {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS}.items():
         int_value = _coerce_int(value)
         if int_value is not None:
             q &= Q(**{field: int_value})
+    q &= await _issue_name_filter_q(issue_filters)
     if title:
         q &= Q(title__contains=title)
     raw_custom_filters = custom_values if custom_values is not None else saved_filters.get("custom_values")
@@ -893,7 +945,10 @@ async def get_issue(issue_id: int = Query(..., description="Issue ID")):
         row["file_exists"] = _ticket_attachment_file_exists(item)
         data["attachments"].append(row)
     data["attachment_count"] = len(data["attachments"])
-    can_view_private = bool(user.is_superuser or ISSUE_UPDATE_ROLES.intersection(role_names))
+    can_view_private = bool(
+        user.is_superuser
+        or {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_TECH, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}.intersection(role_names)
+    )
     journal_query = IssueJournal.filter(journalized_type="Issue", journalized_id=issue_id)
     if not can_view_private:
         journal_query = journal_query.filter(private_notes=False)
@@ -935,8 +990,8 @@ async def get_issue_status_options(issue_id: int = Query(..., description="Issue
         return Fail(code=403, msg="您暂无权限查看该Issue")
 
     current_status_id = int(ticket.issue_status_id or 0)
-    if user.is_superuser:
-        status_ids = [int(row["id"]) for row in await IssueStatus.all().values("id")]
+    if user.is_superuser or ROLE_ADMIN in role_names:
+        status_ids = [int(row["id"]) for row in await IssueStatus.filter(active=True).values("id")]
     elif current_status_id and ticket.issue_tracker_id:
         status_ids = await issue_workflow_service.allowed_status_ids(
             role_ids=await _role_ids(user),
@@ -969,7 +1024,7 @@ async def update_issue(payload: IssueUpdateIn):
         changes=payload.changes,
         notes=payload.notes,
         private_notes=payload.private_notes,
-        bypass_workflow=bool(user.is_superuser),
+        bypass_workflow=bool(user.is_superuser or ROLE_ADMIN in role_names),
     )
     custom_details = (
         await _save_issue_custom_values(payload.issue_id, payload.custom_values) if payload.custom_values else []

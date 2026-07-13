@@ -292,9 +292,6 @@ const submitNotifyCount = computed(() =>
     0,
   ),
 )
-const issueSettingCount = computed(
-  () => submitEntryCount.value + submitContentCount.value + submitProjectCount.value,
-)
 const possibleValueText = computed({
   get: () => (modalForm.value.possible_values || []).join('\n'),
   set: (value) => {
@@ -824,35 +821,6 @@ async function saveCurrent() {
 <template>
   <CommonPage title="工单配置" :show-header="false" show-footer>
     <div class="issue-config-page">
-      <div class="config-header">
-        <div>
-          <div class="eyebrow">工单管理</div>
-          <h2>配置中心</h2>
-        </div>
-        <div class="config-stats">
-          <div>
-            <strong>{{ issueSettingCount }}</strong
-            ><span>提交项</span>
-          </div>
-          <div>
-            <strong>{{ settingListCount(['ticket_issue_types']) }}</strong
-            ><span>跟踪</span>
-          </div>
-          <div>
-            <strong>{{ settingListCount(['ticket_statuses']) }}</strong
-            ><span>状态</span>
-          </div>
-          <div>
-            <strong>{{ workflowCount }}</strong
-            ><span>流转</span>
-          </div>
-          <div>
-            <strong>{{ sectionCount('custom_fields') }}</strong
-            ><span>字段</span>
-          </div>
-        </div>
-      </div>
-
       <div class="config-shell">
         <NForm
           ref="settingsFormRef"
@@ -1292,60 +1260,6 @@ async function saveCurrent() {
   gap: 16px;
 }
 
-.config-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 4px 2px 2px;
-}
-
-.eyebrow {
-  color: var(--issue-accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.config-header h2 {
-  margin: 6px 0 0;
-  color: var(--issue-ink);
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.config-stats {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(76px, 1fr));
-  gap: 8px;
-}
-
-.config-stats > div {
-  min-width: 76px;
-  padding: 8px 10px;
-  border: 1px solid var(--issue-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.config-stats strong,
-.config-stats span {
-  display: block;
-}
-
-.config-stats strong {
-  color: var(--issue-ink);
-  font-size: 18px;
-  line-height: 1;
-}
-
-.config-stats span {
-  margin-top: 4px;
-  color: var(--issue-muted);
-  font-size: 12px;
-}
-
 .config-shell {
   padding: 14px;
   border: 1px solid var(--issue-border);
@@ -1587,14 +1501,9 @@ async function saveCurrent() {
 }
 
 @media (max-width: 720px) {
-  .config-header,
   .section-toolbar {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .config-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-grid,

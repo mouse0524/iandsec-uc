@@ -235,6 +235,31 @@ ISSUE_TRACKER_DEFAULT_STATUS = {
     "现网问题": "新建",
     "现网需求": "新建",
 }
+ISSUE_WORKFLOW_TRANSITION_SEEDS = [
+    ("客服", "现网问题", "新建", ["客服审核"]),
+    ("客服", "现网问题", "客服审核", ["技术处理", "客服驳回"]),
+    ("用户", "现网问题", "客服驳回", ["新建"]),
+    ("渠道商", "现网问题", "客服驳回", ["新建"]),
+    ("技术", "现网问题", "客服驳回", ["新建"]),
+    ("技术", "现网问题", "技术处理", ["测试过滤", "客服审核"]),
+    ("测试", "现网问题", "测试过滤", ["研发处理", "技术处理"]),
+    ("研发", "现网问题", "研发处理", ["测试验证", "测试过滤"]),
+    ("测试", "现网问题", "测试验证", ["现场验证", "研发处理"]),
+    ("用户", "现网问题", "现场验证", ["关闭", "测试验证"]),
+    ("渠道商", "现网问题", "现场验证", ["关闭", "测试验证"]),
+    ("技术", "现网问题", "现场验证", ["关闭", "测试验证"]),
+    ("客服", "现网需求", "新建", ["客服审核"]),
+    ("客服", "现网需求", "客服审核", ["产品评估", "客服驳回"]),
+    ("用户", "现网需求", "客服驳回", ["新建"]),
+    ("渠道商", "现网需求", "客服驳回", ["新建"]),
+    ("技术", "现网需求", "客服驳回", ["新建"]),
+    ("产品", "现网需求", "产品评估", ["研发处理", "客服审核", "不采纳"]),
+    ("研发", "现网需求", "研发处理", ["测试验证", "产品评估"]),
+    ("测试", "现网需求", "测试验证", ["现场验证", "研发处理"]),
+    ("用户", "现网需求", "现场验证", ["关闭", "测试验证"]),
+    ("渠道商", "现网需求", "现场验证", ["关闭", "测试验证"]),
+    ("技术", "现网需求", "现场验证", ["关闭", "测试验证"]),
+]
 LEGACY_TICKET_STATUS_TO_ISSUE_STATUS = {
     TicketStatus.PENDING_REVIEW: "客服审核",
     TicketStatus.CS_REJECTED: "客服驳回",
@@ -309,28 +334,9 @@ async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
             new_status_id=status_map[new_status].id,
         )
 
-    for tracker_name, next_status in [("现网问题", "技术处理"), ("现网需求", "产品评估")]:
-        await add_transition("客服", tracker_name, "新建", "客服审核")
-        await add_transition("客服", tracker_name, "客服审核", next_status)
-        await add_transition("客服", tracker_name, "客服审核", "客服驳回")
-
-    await add_transition("技术", "现网问题", "技术处理", "测试过滤")
-    await add_transition("测试", "现网问题", "测试过滤", "研发处理")
-    await add_transition("测试", "现网问题", "测试过滤", "技术处理")
-    await add_transition("研发", "现网问题", "研发处理", "测试验证")
-    await add_transition("测试", "现网问题", "测试验证", "现场验证")
-    await add_transition("测试", "现网问题", "测试验证", "研发处理")
-    await add_transition("技术", "现网问题", "现场验证", "关闭")
-    await add_transition("技术", "现网问题", "现场验证", "测试验证")
-
-    await add_transition("产品", "现网需求", "产品评估", "研发处理")
-    await add_transition("产品", "现网需求", "产品评估", "不采纳")
-    await add_transition("研发", "现网需求", "研发处理", "测试验证")
-    await add_transition("研发", "现网需求", "研发处理", "产品评估")
-    await add_transition("测试", "现网需求", "测试验证", "现场验证")
-    await add_transition("测试", "现网需求", "测试验证", "研发处理")
-    await add_transition("技术", "现网需求", "现场验证", "关闭")
-    await add_transition("技术", "现网需求", "现场验证", "测试验证")
+    for role_name, tracker_name, old_status, new_statuses in ISSUE_WORKFLOW_TRANSITION_SEEDS:
+        for new_status in new_statuses:
+            await add_transition(role_name, tracker_name, old_status, new_status)
 
 
 def make_middlewares():
@@ -1469,6 +1475,7 @@ async def init_roles():
     issue_read_apis = await Api.filter(path__in=_issue_read_api_paths())
     issue_create_apis = await Api.filter(path__in=_issue_create_api_paths())
     issue_update_apis = await Api.filter(path__in=_issue_update_api_paths())
+    issue_status_update_apis = await Api.filter(path="/api/v1/issue/update")
     issue_admin_apis = await Api.filter(path__in=_issue_admin_api_paths())
     partner_review_apis = await Api.filter(
         path__in=["/api/v1/partner/register/list", "/api/v1/partner/register/review"]
@@ -1560,8 +1567,10 @@ async def init_roles():
         await role_obj.menus.add(*issue_menus)
 
     await role_map["用户"].apis.add(*ticket_submit_apis)
+    await role_map["用户"].apis.add(*issue_status_update_apis)
 
     await role_map["渠道商"].apis.add(*ticket_submit_apis)
+    await role_map["渠道商"].apis.add(*issue_status_update_apis)
 
     await role_map["技术"].apis.add(*ticket_submit_apis)
     await role_map["技术"].apis.add(*ticket_tech_apis)

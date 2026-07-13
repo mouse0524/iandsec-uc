@@ -63,6 +63,12 @@ def test_issue_admin_api_paths_are_registered_for_init_permissions():
     assert "/api/v1/issue/create" not in _issue_update_api_paths()
 
 
+def test_issue_submitter_roles_can_update_for_workflow_verification():
+    from app.api.v1.issues import issues as issue_api
+
+    assert {"用户", "渠道商", "代理商"} <= issue_api.ISSUE_UPDATE_ROLES
+
+
 def test_issue_attachment_file_exists_rejects_missing_and_escaped_paths(monkeypatch, tmp_path):
     from app.api.v1.issues import issues as issue_api
 
@@ -74,6 +80,88 @@ def test_issue_attachment_file_exists_rejects_missing_and_escaped_paths(monkeypa
     assert issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="tickets/shot.png"))
     assert not issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="tickets/missing.png"))
     assert not issue_api._ticket_attachment_file_exists(SimpleNamespace(file_path="../outside.png"))
+
+
+def _q_filters(q):
+    filters = []
+    if getattr(q, "filters", None):
+        filters.append(q.filters)
+    for child in getattr(q, "children", ()) or ():
+        filters.extend(_q_filters(child))
+    return filters
+
+
+@pytest.mark.anyio
+async def test_issue_name_filter_q_maps_names_to_search_conditions(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    async def fake_ids(model, text, fields):
+        if model is issue_api.Project:
+            return [11]
+        if model is issue_api.IssueStatus:
+            return [22]
+        if model is issue_api.User:
+            return [33]
+        return []
+
+    monkeypatch.setattr(issue_api, "_ids_by_contains", fake_ids)
+
+    q = await issue_api._issue_name_filter_q(
+        {
+            "issue_project_name": "安得",
+            "issue_status_name": "新建",
+            "assigned_to_name": "管理员",
+            "submitter_name": "管理员",
+        }
+    )
+
+    filters = _q_filters(q)
+    assert {"company_name__contains": "安得"} in filters
+    assert {"issue_project_id__in": [11]} in filters
+    assert {"issue_status_id__in": [22]} in filters
+    assert {"assigned_to_id__in": [33]} in filters
+    assert {"submitter_id__in": [33]} in filters
+    assert {"submitter_id": 33} in _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"submitter_id": 33}))
+
+
+@pytest.mark.anyio
+async def test_issue_visibility_scope_follows_role_rules(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    tech_user = SimpleNamespace(id=7, is_superuser=False, username="tech01")
+    normal_user = SimpleNamespace(id=8, is_superuser=False, username="user01")
+    all_user = SimpleNamespace(id=9, is_superuser=False, username="pm01")
+
+    async def fake_related_submitters(tech_id):
+        assert tech_id == 7
+        return [11, 12]
+
+    monkeypatch.setattr(issue_api, "_tech_related_submitter_ids", fake_related_submitters)
+
+    assert _q_filters(await issue_api._issue_visibility_q(all_user, ["客服"], None)) == []
+    assert _q_filters(await issue_api._issue_visibility_q(all_user, ["产品"], None)) == []
+    assert _q_filters(await issue_api._issue_visibility_q(all_user, ["测试"], None)) == []
+    assert _q_filters(await issue_api._issue_visibility_q(all_user, ["研发"], None)) == []
+
+    tech_filters = _q_filters(await issue_api._issue_visibility_q(tech_user, ["技术"], None))
+    assert {"submitter_id": 7} in tech_filters
+    assert {"assigned_to_id": 7} in tech_filters
+    assert {"submitter_id__in": [11, 12]} in tech_filters
+
+    channel_filters = _q_filters(await issue_api._issue_visibility_q(normal_user, ["渠道商"], None))
+    user_filters = _q_filters(await issue_api._issue_visibility_q(normal_user, ["用户"], None))
+    assert {"submitter_id": 8} in channel_filters
+    assert {"assigned_to_id": 8} in channel_filters
+    assert {"submitter_id": 8} in user_filters
+    assert {"assigned_to_id": 8} in user_filters
+
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=11), tech_user, ["技术"])
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99, assigned_to_id=7), tech_user, ["技术"])
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99, assigned_to_id=8), normal_user, ["用户"])
+    assert not await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), tech_user, ["技术"])
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), all_user, ["客服"])
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), all_user, ["研发"])
+    assert not await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), normal_user, ["用户"])
 
 
 @pytest.mark.anyio
@@ -454,7 +542,7 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_update_issue_api_rejects_external_user_role(monkeypatch):
+async def test_update_issue_api_allows_submitter_role_when_issue_is_accessible(monkeypatch):
     from app.api.v1.issues import issues as issue_api
     from app.schemas.issues import IssueUpdateIn
 
@@ -484,14 +572,25 @@ async def test_update_issue_api_rejects_external_user_role(monkeypatch):
     monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
     monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
     monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
 
     response = await issue_api.update_issue(
         IssueUpdateIn(issue_id=7, changes={"issue_status_id": 30}, notes="尝试推进")
     )
 
     body = _response_body(response)
-    assert body["code"] == 403
-    assert calls == []
+    assert body["data"] == {"id": 7}
+    assert calls == [
+        {
+            "issue_id": 7,
+            "user_id": 3,
+            "role_ids": [9],
+            "changes": {"issue_status_id": 30},
+            "notes": "尝试推进",
+            "private_notes": False,
+            "bypass_workflow": False,
+        }
+    ]
 
 
 @pytest.mark.anyio

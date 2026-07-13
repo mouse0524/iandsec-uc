@@ -44,6 +44,22 @@ def test_issue_default_seed_configuration_matches_current_workflow():
     assert init_app.ISSUE_PRIORITY_SEEDS == [("高", False), ("中", True), ("低", False)]
     assert [name for name, is_closed, _is_default in init_app.ISSUE_STATUS_SEEDS if is_closed] == ["关闭"]
 
+    workflow = {
+        (role, tracker, old_status): tuple(new_statuses)
+        for role, tracker, old_status, new_statuses in init_app.ISSUE_WORKFLOW_TRANSITION_SEEDS
+    }
+    assert workflow[("客服", "现网问题", "客服审核")] == ("技术处理", "客服驳回")
+    assert workflow[("技术", "现网问题", "技术处理")] == ("测试过滤", "客服审核")
+    assert workflow[("测试", "现网问题", "测试过滤")] == ("研发处理", "技术处理")
+    assert workflow[("研发", "现网问题", "研发处理")] == ("测试验证", "测试过滤")
+    assert workflow[("产品", "现网需求", "产品评估")] == ("研发处理", "客服审核", "不采纳")
+    assert workflow[("研发", "现网需求", "研发处理")] == ("测试验证", "产品评估")
+    for role in ("用户", "渠道商", "技术"):
+        assert workflow[(role, "现网问题", "现场验证")] == ("关闭", "测试验证")
+        assert workflow[(role, "现网需求", "现场验证")] == ("关闭", "测试验证")
+        assert workflow[(role, "现网问题", "客服驳回")] == ("新建",)
+        assert workflow[(role, "现网需求", "客服驳回")] == ("新建",)
+
 
 @pytest.mark.anyio
 async def test_ensure_named_row_does_not_overwrite_existing_admin_config():

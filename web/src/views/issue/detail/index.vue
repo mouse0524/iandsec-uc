@@ -574,9 +574,36 @@ onBeforeUnmount(() => {
           <div class="issue-hero-main">
             <h1>{{ issue.title || '-' }}</h1>
             <div class="issue-subline">
-              <span>提交人：{{ issue.submitter_name || issue.submitter_id || '-' }}</span>
-              <span>创建：{{ issue.created_at || '-' }}</span>
-              <span>更新：{{ issue.updated_at || '-' }}</span>
+              <div class="issue-subline-row">
+                <span class="issue-pill"
+                  >提交人：{{ issue.submitter_name || issue.submitter_id || '-' }}</span
+                >
+                <span class="issue-pill">创建：{{ issue.created_at || '-' }}</span>
+                <span class="issue-pill">更新：{{ issue.updated_at || '-' }}</span>
+                <span class="issue-pill is-phase">项目阶段：{{ issue.project_phase || '-' }}</span>
+                <span class="issue-pill is-tracker">
+                  跟踪：{{ issue.tracker_name || issue.issue_type || '-' }}
+                </span>
+                <span class="issue-pill is-status">
+                  状态：{{ issue.status_name || issue.issue_status_id || '-' }}
+                </span>
+              </div>
+              <div class="issue-subline-row">
+                <span class="issue-pill">影响范围：{{ issue.impact_scope || '-' }}</span>
+                <span class="issue-pill">问题分类：{{ issue.category || '-' }}</span>
+                <span class="issue-pill"
+                  >优先级：{{ issue.priority_name || issue.issue_priority_id || '-' }}</span
+                >
+                <span class="issue-pill">
+                  当前指派人：{{ issue.assigned_to_name || issue.assigned_to_id || '-' }}
+                </span>
+                <span v-for="field in customFields" :key="field.id" class="issue-pill">
+                  {{ field.name }}：{{ formatCustomValue(field, issue.custom_values?.[field.id]) }}
+                </span>
+                <span v-if="issueClosed" class="issue-pill"
+                  >问题根因：{{ issue.root_cause || '-' }}</span
+                >
+              </div>
             </div>
           </div>
           <div class="detail-actions">
@@ -588,45 +615,6 @@ onBeforeUnmount(() => {
             </NButton>
           </div>
         </header>
-
-        <section class="overview-grid" aria-label="提交信息">
-          <div class="overview-card">
-            <span>项目名称</span><strong>{{ issue.company_name || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>项目阶段</span><strong>{{ issue.project_phase || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>跟踪</span><strong>{{ issue.tracker_name || issue.issue_type || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>状态</span
-            ><strong>{{ issue.status_name || issue.issue_status_id || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>影响范围</span><strong>{{ issue.impact_scope || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>问题分类</span><strong>{{ issue.category || '-' }}</strong>
-          </div>
-          <div v-for="field in customFields" :key="field.id" class="overview-card">
-            <span>{{ field.name }}</span>
-            <strong>{{ formatCustomValue(field, issue.custom_values?.[field.id]) }}</strong>
-          </div>
-          <div v-if="issueClosed" class="overview-card">
-            <span>问题根因</span><strong>{{ issue.root_cause || '-' }}</strong>
-          </div>
-          <div class="overview-card">
-            <span>优先级</span>
-            <strong>
-              {{ issue.priority_name || issue.issue_priority_id || '-' }}
-            </strong>
-          </div>
-          <div class="overview-card">
-            <span>当前指派人</span
-            ><strong>{{ issue.assigned_to_name || issue.assigned_to_id || '-' }}</strong>
-          </div>
-        </section>
 
         <div class="detail-layout">
           <main class="detail-main">
@@ -982,11 +970,49 @@ onBeforeUnmount(() => {
 
 .issue-subline {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 10px;
   color: var(--issue-muted);
   font-size: 12px;
+}
+
+.issue-subline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.issue-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.issue-pill.is-phase {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.issue-pill.is-tracker {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.issue-pill.is-status {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .detail-actions {
@@ -994,35 +1020,6 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 12px 0 4px;
-}
-
-.overview-card {
-  min-height: 58px;
-  padding: 10px 12px;
-  border: 1px solid var(--issue-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.overview-card span {
-  display: block;
-  color: var(--issue-muted);
-  font-size: 12px;
-}
-
-.overview-card strong {
-  display: block;
-  margin-top: 6px;
-  color: var(--issue-ink);
-  font-size: 14px;
-  word-break: break-word;
 }
 
 .detail-layout {
@@ -1263,8 +1260,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1100px) {
-  .issue-hero,
-  .overview-grid {
+  .issue-hero {
     grid-template-columns: minmax(0, 1fr);
   }
 }
