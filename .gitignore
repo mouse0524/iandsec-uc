@@ -34,3 +34,5 @@ dist
 ._.DS_Store
 *.xlsx
 .pytest-tmp/
+node_modules/
+docs/

@@ -85,6 +85,7 @@ const form = ref(defaultForm())
 let optionsPromise = null
 
 onMounted(async () => {
+  await loadOptions()
   $table.value?.handleSearch()
 })
 
@@ -103,6 +104,7 @@ function defaultForm() {
     customer_contact: '',
     customer_phone: '',
     customer_email: '',
+    creator_name: '',
     status: null,
     assignee_id: null,
     attachment_ids: [],
@@ -204,10 +206,6 @@ const selectedProducts = computed({
     }))
   },
 })
-
-function formatDate(value) {
-  return value ? String(value).slice(0, 10) : '-'
-}
 
 function formatDateTime(value) {
   if (!value) return '-'
@@ -579,10 +577,6 @@ const columns = [
       return (row.product_points || []).map((item) => `${item.product_name}：${item.points || 0}`).join('；') || '-'
     },
   },
-  { title: '服务器版本', key: 'server_version', align: 'center', width: 130, render: (row) => row.server_version || '-' },
-  { title: '客户端版本', key: 'client_version', align: 'center', width: 130, render: (row) => row.client_version || '-' },
-  { title: '客户对接人', key: 'customer_contact', align: 'center', width: 130 },
-  { title: '维保时间', key: 'maintenance_time', align: 'center', width: 120, render: (row) => formatDate(row.maintenance_time) },
   { title: '状态', key: 'status', align: 'center', width: 110, render: (row) => row.status || '-' },
   { title: '负责人', key: 'assignee_name', align: 'center', width: 120, render: (row) => row.assignee_name || '-' },
   { title: '创建时间', key: 'created_at', align: 'center', width: 170, render: (row) => row.created_at || '-' },
@@ -591,17 +585,17 @@ const columns = [
     key: 'actions',
     align: 'center',
     fixed: 'right',
-    width: 230,
+    width: 180,
     render(row) {
       return [
         h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
-        h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 10px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-        h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 10px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
+        h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 6px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+        h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 6px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
         h(
           NPopconfirm,
           { onPositiveClick: () => deleteProjects([row.id]) },
           {
-            trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 10px' }, { default: () => '删除' }),
+            trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 6px' }, { default: () => '删除' }),
             default: () => '删除后不可恢复，是否继续？',
           }
         ),
@@ -660,7 +654,7 @@ const columns = [
       v-model:query-items="queryItems"
       :columns="columns"
       :get-data="getProjectList"
-      :scroll-x="2128"
+      :scroll-x="1568"
       @on-checked="handleChecked"
     >
       <template #queryBar>
@@ -698,6 +692,12 @@ const columns = [
         </QueryBarItem>
         <QueryBarItem label="使用产品" :label-width="64">
           <NSelect v-model:value="queryItems.product_name" :options="productOptions" clearable filterable style="width: 160px" @focus="loadOptions" />
+        </QueryBarItem>
+        <QueryBarItem label="服务器版本" :label-width="72">
+          <NSelect v-model:value="queryItems.server_version" :options="serverVersionOptions" clearable filterable style="width: 160px" @focus="loadOptions" />
+        </QueryBarItem>
+        <QueryBarItem label="客户端版本" :label-width="72">
+          <NSelect v-model:value="queryItems.client_version" :options="clientVersionOptions" clearable filterable style="width: 160px" @focus="loadOptions" />
         </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <div class="toolbar-actions">
@@ -745,6 +745,7 @@ const columns = [
             <div class="form-grid">
               <NFormItem label="项目名称" class="span-full project-name-field"><NInput v-model:value="form.project_name" placeholder="请输入完整项目名称" :disabled="readonly" /></NFormItem>
               <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
+              <NFormItem v-if="readonly" label="创建人"><NInput :value="form.creator_name || '-'" disabled /></NFormItem>
               <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable placeholder="选择区域" :disabled="readonly" /></NFormItem>
               <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote placeholder="搜索代理商" :disabled="readonly" @search="loadAgentOptions" /></NFormItem>
               <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" placeholder="选择状态" :disabled="readonly" /></NFormItem>
