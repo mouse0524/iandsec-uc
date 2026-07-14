@@ -145,15 +145,20 @@ function userOption(user) {
   }
 }
 
-async function loadAssigneeOptions() {
+async function loadAssigneeOptions(statusId = form.value.issue_status_id, keepCurrent = true) {
   const options = []
   try {
-    const res = await api.getUserList({ page: 1, page_size: 200 })
+    const res = await api.getIssueAssignees({
+      issue_id: issueId.value,
+      status_id: statusId || undefined,
+      tracker_id: form.value.issue_tracker_id || issue.value.issue_tracker_id || undefined,
+    })
     options.push(...(res?.data || []).map(userOption))
   } catch {
     // 用户列表不是详情编辑的硬依赖；至少保留当前指派人。
   }
   if (
+    keepCurrent &&
     issue.value.assigned_to_id &&
     !options.some((item) => item.value === Number(issue.value.assigned_to_id))
   ) {
@@ -320,8 +325,8 @@ async function submitUpdate() {
   if (!validateIssueFields(changes)) return
   if (Object.hasOwn(changes, 'issue_status_id')) {
     const nextAssignee = normalizeNumber(form.value.assigned_to_id)
-    if (!nextAssignee || nextAssignee === normalizeNumber(issue.value.assigned_to_id)) {
-      $message.warning('状态变更时，请同步变更当前指派人')
+    if (!nextAssignee) {
+      $message.warning('状态变更时必须指定当前指派人')
       return
     }
   }
@@ -541,15 +546,18 @@ async function openAttachment(item) {
 watch(issueId, loadIssue, { immediate: true })
 watch(
   () => form.value.issue_status_id,
-  (value) => {
+  async (value) => {
+    if (!editing.value) return
     const currentStatusId = normalizeNumber(issue.value.issue_status_id)
     const nextStatusId = normalizeNumber(value)
     if (!nextStatusId) return
     if (nextStatusId === currentStatusId) {
+      await loadAssigneeOptions(nextStatusId)
       form.value.assigned_to_id = issue.value.assigned_to_id || null
       return
     }
-    form.value.assigned_to_id = null
+    await loadAssigneeOptions(nextStatusId, false)
+    form.value.assigned_to_id = assigneeOptions.value[0]?.value || null
   },
 )
 watch(() => imageAttachments.value.map((item) => item.id).join(','), loadImageAttachmentPreviews)

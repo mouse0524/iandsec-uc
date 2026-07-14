@@ -100,28 +100,25 @@ ISSUE_FIELD_LABELS = {
 }
 
 ISSUE_STATUS_TO_TICKET_STATUS = {
-    "客服审核": TicketStatus.PENDING_REVIEW,
-    "客服驳回": TicketStatus.CS_REJECTED,
+    "商务审核": TicketStatus.PENDING_REVIEW,
     "技术处理": TicketStatus.TECH_PROCESSING,
     "测试过滤": TicketStatus.TEST_FILTERING,
     "产品评估": TicketStatus.PRODUCT_EVALUATION,
-    "研发处理": TicketStatus.RD_PROCESSING,
+    "研发修改": TicketStatus.RD_PROCESSING,
     "测试验证": TicketStatus.TEST_VERIFICATION,
     "现场验证": TicketStatus.FIELD_VERIFICATION,
-    "已解决": TicketStatus.PENDING_CLOSE,
     "关闭": TicketStatus.DONE,
-    "不采纳": TicketStatus.DONE,
 }
 LEGACY_TICKET_STATUS_TO_ISSUE_STATUS = {
-    TicketStatus.PENDING_REVIEW: "客服审核",
-    TicketStatus.CS_REJECTED: "客服驳回",
+    TicketStatus.PENDING_REVIEW: "商务审核",
+    TicketStatus.CS_REJECTED: "新建",
     TicketStatus.TECH_PROCESSING: "技术处理",
     TicketStatus.TEST_FILTERING: "测试过滤",
     TicketStatus.PRODUCT_EVALUATION: "产品评估",
-    TicketStatus.RD_PROCESSING: "研发处理",
+    TicketStatus.RD_PROCESSING: "研发修改",
     TicketStatus.TEST_VERIFICATION: "测试验证",
     TicketStatus.FIELD_VERIFICATION: "现场验证",
-    TicketStatus.PENDING_CLOSE: "已解决",
+    TicketStatus.PENDING_CLOSE: "现场验证",
     TicketStatus.TECH_REJECTED: "技术处理",
     TicketStatus.DONE: "关闭",
 }

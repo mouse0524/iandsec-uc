@@ -48,17 +48,33 @@ def test_issue_default_seed_configuration_matches_current_workflow():
         (role, tracker, old_status): tuple(new_statuses)
         for role, tracker, old_status, new_statuses in init_app.ISSUE_WORKFLOW_TRANSITION_SEEDS
     }
-    assert workflow[("客服", "现网问题", "客服审核")] == ("技术处理", "客服驳回")
-    assert workflow[("技术", "现网问题", "技术处理")] == ("测试过滤", "客服审核")
-    assert workflow[("测试", "现网问题", "测试过滤")] == ("研发处理", "技术处理")
-    assert workflow[("研发", "现网问题", "研发处理")] == ("测试验证", "测试过滤")
-    assert workflow[("产品", "现网需求", "产品评估")] == ("研发处理", "客服审核", "不采纳")
-    assert workflow[("研发", "现网需求", "研发处理")] == ("测试验证", "产品评估")
+    assert [name for name, _is_closed, _is_default in init_app.ISSUE_STATUS_SEEDS] == [
+        "新建",
+        "商务审核",
+        "技术处理",
+        "测试过滤",
+        "研发修改",
+        "测试验证",
+        "现场验证",
+        "产品评估",
+        "问题转需求",
+        "关闭",
+    ]
+    assert workflow[("客服", "现网问题", "商务审核")] == ("新建", "技术处理")
+    assert workflow[("客服", "现网需求", "商务审核")] == ("新建", "产品评估")
+    assert workflow[("技术", "现网问题", "技术处理")] == ("新建", "测试过滤")
+    assert workflow[("测试", "现网问题", "测试过滤")] == ("研发修改", "技术处理", "现场验证", "问题转需求")
+    assert workflow[("测试", "现网问题", "测试验证")] == ("现场验证", "研发修改", "技术处理", "问题转需求")
+    assert workflow[("研发", "现网问题", "研发修改")] == ("技术处理", "测试验证", "现场验证", "问题转需求")
+    assert workflow[("产品", "现网问题", "问题转需求")] == ("研发修改", "测试验证", "现场验证")
+    assert workflow[("产品", "现网需求", "产品评估")] == ("新建", "测试验证", "研发修改")
+    assert workflow[("研发", "现网需求", "研发修改")] == ("产品评估", "测试验证")
+    assert workflow[("测试", "现网需求", "测试验证")] == ("现场验证", "研发修改", "产品评估", "新建")
     for role in ("用户", "渠道商", "技术"):
-        assert workflow[(role, "现网问题", "现场验证")] == ("关闭", "测试验证")
-        assert workflow[(role, "现网需求", "现场验证")] == ("关闭", "测试验证")
-        assert workflow[(role, "现网问题", "客服驳回")] == ("新建",)
-        assert workflow[(role, "现网需求", "客服驳回")] == ("新建",)
+        assert workflow[(role, "现网问题", "新建")] == ("商务审核",)
+        assert workflow[(role, "现网需求", "新建")] == ("商务审核",)
+        assert workflow[(role, "现网问题", "现场验证")] == ("技术处理", "测试验证", "关闭", "研发修改")
+        assert workflow[(role, "现网需求", "现场验证")] == ("产品评估", "测试验证", "关闭", "研发修改")
 
 
 @pytest.mark.anyio
@@ -117,6 +133,11 @@ def test_ticket_status_settings_normalize_legacy_closed_label():
     from app.controllers.system_setting import SystemSettingController
 
     assert SystemSettingController._normalize_ticket_statuses(["新建", "已关闭", "关闭"]) == ["新建", "关闭"]
+    assert SystemSettingController._normalize_ticket_statuses(["客服审核", "研发处理", "已解决"]) == [
+        "商务审核",
+        "研发修改",
+        "现场验证",
+    ]
 
 
 @pytest.mark.anyio
@@ -224,6 +245,14 @@ def test_issue_workflow_constraints_default_on():
     assert payload.assignee_required is True
     assert payload.author_allowed is True
     assert payload.assignee_allowed is True
+
+
+def test_issue_workflow_save_allows_explicit_empty_targets_for_delete():
+    from app.schemas.issues import IssueAdminWorkflowSaveIn
+
+    payload = IssueAdminWorkflowSaveIn(role_id=1, tracker_id=2, old_status_id=3, new_status_ids=[])
+
+    assert payload.new_status_ids == []
 
 
 @pytest.mark.anyio
@@ -626,13 +655,13 @@ class FakeTracker:
 
 class FakeDefaultStatus:
     id = 21
-    name = "客服审核"
+    name = "商务审核"
     is_closed = False
 
 
 class FakePriority:
     id = 5
-    name = "普通"
+    name = "中"
 
 
 @pytest.mark.anyio

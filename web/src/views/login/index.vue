@@ -506,7 +506,7 @@ function getDefaultLoginPath() {
   if (userStore.isSuperUser) {
     return '/workbench'
   }
-  return '/ticket/issues'
+  return permissionStore.accessPaths.find((path) => path !== '/ticket') || '/profile'
 }
 
 const forgotRules = {

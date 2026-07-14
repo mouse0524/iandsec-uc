@@ -47,7 +47,7 @@ const form = ref({
   ticket_attachment_extensions: ['zip', 'rar', 'png', 'jpg', 'jpeg', 'gif', 'docx', 'pptx', 'xlsx'],
   ticket_project_phases: ['售前', '实施', '售后'],
   ticket_cs_review_project_phases: ['实施', '售后'],
-  ticket_issue_types: ['现网问题', '现网需求', '产品建议'],
+  ticket_issue_types: ['现网问题', '现网需求'],
   ticket_impact_scopes: ['全部', '偶现', '单台必现', '单台偶现'],
   ticket_categories: ['登录问题', '权限问题', '系统异常', '其他'],
   customer_service_auto_approve_ticket: false,
@@ -204,7 +204,7 @@ const ticketNotifyRoleOptions = {
     { label: '待关闭', value: 'pending_close' },
     { label: '处理完成', value: 'done' },
   ],
-  客服: [{ label: '提交后待客服审核', value: 'pending_review' }],
+  客服: [{ label: '商务审核', value: 'pending_review' }],
   技术: [
     { label: '通过后待技术处理', value: 'tech_processing' },
     { label: '现场验证', value: 'field_verification' },
@@ -214,7 +214,7 @@ const ticketNotifyRoleOptions = {
     { label: '测试过滤', value: 'test_filtering' },
     { label: '测试验证', value: 'test_verification' },
   ],
-  研发: [{ label: '研发处理', value: 'rd_processing' }],
+  研发: [{ label: '研发修改', value: 'rd_processing' }],
 }
 
 const passwordCategoryOptions = [

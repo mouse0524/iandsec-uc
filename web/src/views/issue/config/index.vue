@@ -12,6 +12,7 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
+  NPopconfirm,
   NSelect,
   NSpace,
   NSwitch,
@@ -123,7 +124,7 @@ const ticketNotifyRoleOptions = {
     { label: '待关闭', value: 'pending_close' },
     { label: '处理完成', value: 'done' },
   ],
-  客服: [{ label: '提交后待客服审核', value: 'pending_review' }],
+  客服: [{ label: '商务审核', value: 'pending_review' }],
   技术: [
     { label: '待技术处理', value: 'tech_processing' },
     { label: '现场验证', value: 'field_verification' },
@@ -133,7 +134,7 @@ const ticketNotifyRoleOptions = {
     { label: '测试过滤', value: 'test_filtering' },
     { label: '测试验证', value: 'test_verification' },
   ],
-  研发: [{ label: '研发处理', value: 'rd_processing' }],
+  研发: [{ label: '研发修改', value: 'rd_processing' }],
 }
 
 const settingsRules = {
@@ -208,7 +209,7 @@ const sectionMap = {
 const submitSectionMap = {
   system_config: {
     title: '系统配置',
-    hint: '维护客服审核、附件类型等提交基础规则',
+    hint: '维护商务审核、附件类型等提交基础规则',
   },
   issue_config: {
     title: '工单配置',
@@ -303,11 +304,24 @@ const possibleValueText = computed({
 })
 const workflowRoleGroups = computed(() => {
   const groups = new Map()
+  const activeStatusIds = new Set(activeStatuses.value.map((item) => Number(item.id || 0)))
+  const activeTrackerIds = new Set(
+    (config.value.trackers || [])
+      .filter((item) => item.is_active !== false)
+      .map((item) => Number(item.id || 0)),
+  )
   ;(config.value.workflows || []).forEach((row) => {
     const roleId = Number(row.role_id || 0)
     const trackerId = Number(row.tracker_id || 0)
     const oldStatusId = Number(row.old_status_id || 0)
     const newStatusId = Number(row.new_status_id || 0)
+    if (
+      !activeTrackerIds.has(trackerId) ||
+      !activeStatusIds.has(oldStatusId) ||
+      !activeStatusIds.has(newStatusId)
+    ) {
+      return
+    }
     if (!groups.has(roleId))
       groups.set(roleId, { id: roleId, name: nameOf(roleMap, roleId), rows: [] })
     const group = groups.get(roleId)
@@ -413,17 +427,15 @@ function defaultIssueSettings() {
     ticket_issue_types: ['现网问题', '现网需求'],
     ticket_statuses: [
       '新建',
-      '客服审核',
-      '客服驳回',
+      '商务审核',
       '技术处理',
       '测试过滤',
-      '产品评估',
-      '研发处理',
+      '研发修改',
       '测试验证',
       '现场验证',
-      '已解决',
+      '产品评估',
+      '问题转需求',
       '关闭',
-      '不采纳',
     ],
     ticket_priorities: ['高', '中', '低'],
     ticket_impact_scopes: ['全部', '偶现', '单台必现', '单台偶现'],
@@ -816,6 +828,17 @@ async function saveCurrent() {
     saving.value = false
   }
 }
+
+async function deleteWorkflow(row) {
+  await currentSection.value.save({
+    role_id: row.role_id,
+    tracker_id: row.tracker_id,
+    old_status_id: row.old_status_id,
+    new_status_ids: [],
+  })
+  $message.success('删除成功')
+  await loadConfig()
+}
 </script>
 
 <template>
@@ -1077,11 +1100,23 @@ async function saveCurrent() {
                   <div class="workflow-role-items">
                     <div v-for="row in group.rows" :key="row.key" class="workflow-role-item">
                       <span>{{ workflowLine(row) }}</span>
-                      <NButton quaternary circle size="tiny" @click="openEditor('workflows', row)">
-                        <template #icon>
-                          <TheIcon icon="material-symbols:edit-outline" :size="15" />
-                        </template>
-                      </NButton>
+                      <NSpace :size="4">
+                        <NButton quaternary circle size="tiny" @click="openEditor('workflows', row)">
+                          <template #icon>
+                            <TheIcon icon="material-symbols:edit-outline" :size="15" />
+                          </template>
+                        </NButton>
+                        <NPopconfirm @positive-click="deleteWorkflow(row)">
+                          <template #trigger>
+                            <NButton quaternary circle size="tiny" type="error">
+                              <template #icon>
+                                <TheIcon icon="material-symbols:delete-outline" :size="15" />
+                              </template>
+                            </NButton>
+                          </template>
+                          删除后该角色在当前状态下将无法执行这些流转，是否确认？
+                        </NPopconfirm>
+                      </NSpace>
                     </div>
                   </div>
                 </div>

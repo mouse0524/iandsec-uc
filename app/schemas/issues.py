@@ -136,6 +136,8 @@ class IssueAdminWorkflowSaveIn(BaseModel):
 
     @model_validator(mode="after")
     def validate_target_statuses(self):
+        if "new_status_ids" in self.model_fields_set and not self.new_status_ids:
+            return self
         if not self.new_status_ids and self.new_status_id:
             self.new_status_ids = [self.new_status_id]
         if self.new_status_ids and self.new_status_id is None:

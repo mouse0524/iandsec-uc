@@ -77,6 +77,7 @@ def _issue_read_api_paths() -> list[str]:
         "/api/v1/issue/get",
         "/api/v1/issue/metadata",
         "/api/v1/issue/status-options",
+        "/api/v1/issue/assignees",
         "/api/v1/issue/watchers",
         "/api/v1/issue/relations",
         "/api/v1/issue/time-entries",
@@ -138,6 +139,13 @@ def _ticket_read_api_paths() -> list[str]:
         "/api/v1/ticket/actions",
         "/api/v1/ticket/attachment/download",
         "/api/v1/ticket/attachment/preview-cache",
+    ]
+
+
+def _test_role_extra_api_paths() -> list[str]:
+    return [
+        "/api/v1/user/list",
+        "/api/v1/ticket/prefill",
     ]
 
 
@@ -218,17 +226,15 @@ def _release_admin_api_paths() -> list[str]:
 
 ISSUE_STATUS_SEEDS = [
     ("新建", False, True),
-    ("客服审核", False, False),
-    ("客服驳回", False, False),
+    ("商务审核", False, False),
     ("技术处理", False, False),
     ("测试过滤", False, False),
-    ("产品评估", False, False),
-    ("研发处理", False, False),
+    ("研发修改", False, False),
     ("测试验证", False, False),
     ("现场验证", False, False),
-    ("已解决", False, False),
+    ("产品评估", False, False),
+    ("问题转需求", False, False),
     ("关闭", True, False),
-    ("不采纳", False, False),
 ]
 ISSUE_PRIORITY_SEEDS = [("高", False), ("中", True), ("低", False)]
 ISSUE_TRACKER_DEFAULT_STATUS = {
@@ -236,40 +242,39 @@ ISSUE_TRACKER_DEFAULT_STATUS = {
     "现网需求": "新建",
 }
 ISSUE_WORKFLOW_TRANSITION_SEEDS = [
-    ("客服", "现网问题", "新建", ["客服审核"]),
-    ("客服", "现网问题", "客服审核", ["技术处理", "客服驳回"]),
-    ("用户", "现网问题", "客服驳回", ["新建"]),
-    ("渠道商", "现网问题", "客服驳回", ["新建"]),
-    ("技术", "现网问题", "客服驳回", ["新建"]),
-    ("技术", "现网问题", "技术处理", ["测试过滤", "客服审核"]),
-    ("测试", "现网问题", "测试过滤", ["研发处理", "技术处理"]),
-    ("研发", "现网问题", "研发处理", ["测试验证", "测试过滤"]),
-    ("测试", "现网问题", "测试验证", ["现场验证", "研发处理"]),
-    ("用户", "现网问题", "现场验证", ["关闭", "测试验证"]),
-    ("渠道商", "现网问题", "现场验证", ["关闭", "测试验证"]),
-    ("技术", "现网问题", "现场验证", ["关闭", "测试验证"]),
-    ("客服", "现网需求", "新建", ["客服审核"]),
-    ("客服", "现网需求", "客服审核", ["产品评估", "客服驳回"]),
-    ("用户", "现网需求", "客服驳回", ["新建"]),
-    ("渠道商", "现网需求", "客服驳回", ["新建"]),
-    ("技术", "现网需求", "客服驳回", ["新建"]),
-    ("产品", "现网需求", "产品评估", ["研发处理", "客服审核", "不采纳"]),
-    ("研发", "现网需求", "研发处理", ["测试验证", "产品评估"]),
-    ("测试", "现网需求", "测试验证", ["现场验证", "研发处理"]),
-    ("用户", "现网需求", "现场验证", ["关闭", "测试验证"]),
-    ("渠道商", "现网需求", "现场验证", ["关闭", "测试验证"]),
-    ("技术", "现网需求", "现场验证", ["关闭", "测试验证"]),
+    ("用户", "现网问题", "新建", ["商务审核"]),
+    ("渠道商", "现网问题", "新建", ["商务审核"]),
+    ("技术", "现网问题", "新建", ["商务审核"]),
+    ("客服", "现网问题", "商务审核", ["新建", "技术处理"]),
+    ("技术", "现网问题", "技术处理", ["新建", "测试过滤"]),
+    ("测试", "现网问题", "测试过滤", ["研发修改", "技术处理", "现场验证", "问题转需求"]),
+    ("研发", "现网问题", "研发修改", ["技术处理", "测试验证", "现场验证", "问题转需求"]),
+    ("测试", "现网问题", "测试验证", ["现场验证", "研发修改", "技术处理", "问题转需求"]),
+    ("产品", "现网问题", "问题转需求", ["研发修改", "测试验证", "现场验证"]),
+    ("用户", "现网问题", "现场验证", ["技术处理", "测试验证", "关闭", "研发修改"]),
+    ("渠道商", "现网问题", "现场验证", ["技术处理", "测试验证", "关闭", "研发修改"]),
+    ("技术", "现网问题", "现场验证", ["技术处理", "测试验证", "关闭", "研发修改"]),
+    ("用户", "现网需求", "新建", ["商务审核"]),
+    ("渠道商", "现网需求", "新建", ["商务审核"]),
+    ("技术", "现网需求", "新建", ["商务审核"]),
+    ("客服", "现网需求", "商务审核", ["新建", "产品评估"]),
+    ("产品", "现网需求", "产品评估", ["新建", "测试验证", "研发修改"]),
+    ("研发", "现网需求", "研发修改", ["产品评估", "测试验证"]),
+    ("测试", "现网需求", "测试验证", ["现场验证", "研发修改", "产品评估", "新建"]),
+    ("用户", "现网需求", "现场验证", ["产品评估", "测试验证", "关闭", "研发修改"]),
+    ("渠道商", "现网需求", "现场验证", ["产品评估", "测试验证", "关闭", "研发修改"]),
+    ("技术", "现网需求", "现场验证", ["产品评估", "测试验证", "关闭", "研发修改"]),
 ]
 LEGACY_TICKET_STATUS_TO_ISSUE_STATUS = {
-    TicketStatus.PENDING_REVIEW: "客服审核",
-    TicketStatus.CS_REJECTED: "客服驳回",
+    TicketStatus.PENDING_REVIEW: "商务审核",
+    TicketStatus.CS_REJECTED: "新建",
     TicketStatus.TECH_PROCESSING: "技术处理",
     TicketStatus.TEST_FILTERING: "测试过滤",
     TicketStatus.PRODUCT_EVALUATION: "产品评估",
-    TicketStatus.RD_PROCESSING: "研发处理",
+    TicketStatus.RD_PROCESSING: "研发修改",
     TicketStatus.TEST_VERIFICATION: "测试验证",
     TicketStatus.FIELD_VERIFICATION: "现场验证",
-    TicketStatus.PENDING_CLOSE: "已解决",
+    TicketStatus.PENDING_CLOSE: "现场验证",
     TicketStatus.TECH_REJECTED: "技术处理",
     TicketStatus.DONE: "关闭",
 }
@@ -288,7 +293,30 @@ async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
             name=name,
             defaults={"position": position, "is_closed": is_closed, "is_default": is_default, "active": True},
         )
-    await IssueStatus.filter(name="已关闭").update(active=False, is_closed=False, is_default=False)
+        await IssueStatus.filter(id=status_map[name].id).update(
+            position=position,
+            is_closed=is_closed,
+            is_default=is_default,
+            active=True,
+        )
+    legacy_status_map = {
+        "客服审核": "商务审核",
+        "客服驳回": "新建",
+        "研发处理": "研发修改",
+        "已解决": "现场验证",
+        "不采纳": "关闭",
+        "已关闭": "关闭",
+    }
+    for legacy_name, target_name in legacy_status_map.items():
+        legacy_status = await IssueStatus.filter(name=legacy_name).first()
+        target_status = status_map.get(target_name)
+        if legacy_status and target_status:
+            await Ticket.filter(issue_status_id=legacy_status.id).update(issue_status_id=target_status.id)
+    await IssueStatus.filter(name__in=list(legacy_status_map)).update(
+        active=False,
+        is_closed=False,
+        is_default=False,
+    )
 
     priority_map: dict[str, IssuePriority] = {}
     for position, (name, is_default) in enumerate(ISSUE_PRIORITY_SEEDS, start=1):
@@ -296,6 +324,11 @@ async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
             IssuePriority,
             name=name,
             defaults={"position": position, "is_default": is_default, "active": True},
+        )
+        await IssuePriority.filter(id=priority_map[name].id).update(
+            position=position,
+            is_default=is_default,
+            active=True,
         )
     await IssuePriority.filter(name__in=["普通", "紧急", "立刻"]).update(active=False, is_default=False)
 
@@ -311,7 +344,19 @@ async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
                 "is_active": True,
             },
         )
-    await IssueTracker.filter(name="产品建议").update(is_active=False)
+        await IssueTracker.filter(id=tracker_map[name].id).update(
+            position=position,
+            default_status_id=status_map[default_status_name].id,
+            is_in_roadmap=True,
+            is_active=True,
+        )
+    product_advice_tracker = await IssueTracker.filter(name="产品建议").first()
+    if product_advice_tracker:
+        await Ticket.filter(issue_tracker_id=product_advice_tracker.id).update(
+            issue_tracker_id=tracker_map["现网需求"].id,
+            issue_type="现网需求",
+        )
+        await IssueTracker.filter(id=product_advice_tracker.id).update(is_active=False)
 
     default_priority = priority_map["中"]
     await Ticket.filter(issue_priority_id__isnull=True).update(issue_priority_id=default_priority.id)
@@ -333,6 +378,21 @@ async def _ensure_issue_defaults(role_map: dict[str, Role]) -> None:
             old_status_id=status_map[old_status].id,
             new_status_id=status_map[new_status].id,
         )
+
+    legacy_status_ids = [
+        row["id"] for row in await IssueStatus.filter(name__in=list(legacy_status_map)).values("id")
+    ]
+    default_role_ids = [
+        role.id
+        for name, role in role_map.items()
+        if name in {"用户", "渠道商", "技术", "客服", "产品", "测试", "研发"}
+    ]
+    default_tracker_ids = [tracker.id for tracker in tracker_map.values()]
+    if legacy_status_ids and default_role_ids and default_tracker_ids:
+        await IssueWorkflowTransition.filter(
+            role_id__in=default_role_ids,
+            tracker_id__in=default_tracker_ids,
+        ).filter(Q(old_status_id__in=legacy_status_ids) | Q(new_status_id__in=legacy_status_ids)).delete()
 
     for role_name, tracker_name, old_status, new_statuses in ISSUE_WORKFLOW_TRANSITION_SEEDS:
         for new_status in new_statuses:
@@ -1442,11 +1502,20 @@ async def init_roles():
                     api_paths=[*_issue_read_api_paths(), *_issue_create_api_paths()],
                     component_paths=["/ticket", "/issue/list"],
                 )
+            for role_name in ["用户", "渠道商"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=["/api/v1/issue/update"],
+                )
             for role_name in ["客服", "技术"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=_issue_update_api_paths(),
                 )
+            await _backfill_existing_role_permissions(
+                role_name="测试",
+                api_paths=_test_role_extra_api_paths(),
+            )
             await _ensure_issue_defaults({role.name: role for role in existing_roles})
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
@@ -1593,6 +1662,7 @@ async def init_roles():
     for role_name in ["产品", "测试", "研发"]:
         await role_map[role_name].apis.add(*ticket_read_apis)
         await role_map[role_name].apis.add(*issue_update_apis)
+    await role_map["测试"].apis.add(*await Api.filter(path__in=_test_role_extra_api_paths()))
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)

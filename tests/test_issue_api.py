@@ -18,6 +18,7 @@ def test_issue_router_is_mounted():
     assert "/issue/get" in paths
     assert "/issue/metadata" in paths
     assert "/issue/status-options" in paths
+    assert "/issue/assignees" in paths
     assert "/issue/update" in paths
     assert "/issue/watchers" in paths
     assert "/issue/watcher/add" in paths
@@ -49,16 +50,24 @@ def test_rd_task_router_is_not_mounted():
 
 
 def test_issue_admin_api_paths_are_registered_for_init_permissions():
-    from app.core.init_app import _issue_admin_api_paths, _issue_create_api_paths, _issue_update_api_paths
+    from app.core.init_app import (
+        _issue_admin_api_paths,
+        _issue_create_api_paths,
+        _issue_read_api_paths,
+        _test_role_extra_api_paths,
+        _issue_update_api_paths,
+    )
 
     paths = set(_issue_admin_api_paths())
 
+    assert "/api/v1/issue/assignees" in _issue_read_api_paths()
     assert "/api/v1/issue/admin/config" in paths
     assert "/api/v1/issue/admin/tracker/save" in paths
     assert "/api/v1/issue/admin/status/save" in paths
     assert "/api/v1/issue/admin/priority/save" in paths
     assert "/api/v1/issue/admin/workflow/save" in paths
     assert "/api/v1/issue/admin/custom-field/save" in paths
+    assert _test_role_extra_api_paths() == ["/api/v1/user/list", "/api/v1/ticket/prefill"]
     assert _issue_create_api_paths() == ["/api/v1/issue/create"]
     assert "/api/v1/issue/create" not in _issue_update_api_paths()
 
@@ -66,7 +75,48 @@ def test_issue_admin_api_paths_are_registered_for_init_permissions():
 def test_issue_submitter_roles_can_update_for_workflow_verification():
     from app.api.v1.issues import issues as issue_api
 
+    assert issue_api.ISSUE_CREATE_ROLES is issue_api.ISSUE_UPDATE_ROLES
     assert {"用户", "渠道商", "代理商"} <= issue_api.ISSUE_UPDATE_ROLES
+
+
+def test_issue_assignee_scope_follows_role_rules():
+    from app.api.v1.issues import issues as issue_api
+
+    user = SimpleNamespace(id=8, is_superuser=False, username="channel01")
+    tech = SimpleNamespace(id=7, is_superuser=False, username="tech01")
+    admin = SimpleNamespace(id=1, is_superuser=True, username="admin")
+    ticket = SimpleNamespace(assigned_to_id=5)
+
+    assert _q_filters(issue_api._issue_assignee_q(admin, [], ticket)) == []
+    assert {"roles__id__in": [1, 2]} in _q_filters(
+        issue_api._issue_assignee_q(admin, [], ticket, {2, 1})
+    )
+    assert {"id__in": [5, 8]} in _q_filters(issue_api._issue_assignee_q(user, ["渠道商"], ticket))
+    assert {"id__in": [5, 7]} in _q_filters(issue_api._issue_assignee_q(tech, ["技术"], ticket))
+
+
+@pytest.mark.anyio
+async def test_issue_assignee_role_ids_come_from_workflow(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    calls = []
+
+    class WorkflowQuery:
+        async def values(self, *fields):
+            calls.append(fields)
+            return [{"role_id": 6}, {"role_id": 2}, {"role_id": 2}]
+
+    def fake_filter(**kwargs):
+        calls.append(kwargs)
+        return WorkflowQuery()
+
+    monkeypatch.setattr(issue_api.IssueWorkflowTransition, "filter", fake_filter)
+
+    assert await issue_api._target_assignee_role_ids(status_id=20, tracker_id=3) == {2, 6}
+    assert calls == [
+        {"old_status_id": 20, "tracker_id": 3},
+        ("role_id",),
+    ]
 
 
 def test_issue_attachment_file_exists_rejects_missing_and_escaped_paths(monkeypatch, tmp_path):
@@ -122,6 +172,26 @@ async def test_issue_name_filter_q_maps_names_to_search_conditions(monkeypatch):
     assert {"assigned_to_id__in": [33]} in filters
     assert {"submitter_id__in": [33]} in filters
     assert {"submitter_id": 33} in _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"submitter_id": 33}))
+
+
+@pytest.mark.anyio
+async def test_issue_name_filter_q_ignores_empty_name_matches(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    async def fake_ids(model, text, fields):
+        return []
+
+    monkeypatch.setattr(issue_api, "_ids_by_contains", fake_ids)
+
+    q = await issue_api._issue_name_filter_q(
+        {
+            "issue_status_name": "不存在",
+            "assigned_to_name": "不存在",
+            "submitter_name": "不存在",
+        }
+    )
+
+    assert {"id": 0} not in _q_filters(q)
 
 
 @pytest.mark.anyio
@@ -279,6 +349,50 @@ async def test_issue_admin_workflow_save_accepts_multiple_targets(monkeypatch):
     assert ("filter", {"role_id": 1, "tracker_id": 2, "old_status_id": 3}) in calls
     assert ("exclude", {"new_status_id__in": [4, 5]}) in calls
     assert [call[1]["new_status_id"] for call in calls if call[0] == "get_or_create"] == [4, 5]
+
+
+@pytest.mark.anyio
+async def test_issue_admin_workflow_save_deletes_all_targets(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueAdminWorkflowSaveIn
+
+    calls = []
+    user = SimpleNamespace(id=1, is_superuser=True, roles=[])
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return []
+
+    class WorkflowQuery:
+        def exclude(self, **kwargs):
+            calls.append(("exclude", kwargs))
+            return self
+
+        async def delete(self):
+            calls.append(("delete", None))
+            return 2
+
+    class WorkflowModel:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(("filter", kwargs))
+            return WorkflowQuery()
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "IssueWorkflowTransition", WorkflowModel)
+
+    response = await issue_api.save_issue_workflow(
+        IssueAdminWorkflowSaveIn(role_id=1, tracker_id=2, old_status_id=3, new_status_ids=[])
+    )
+
+    body = _response_body(response)
+    assert body["data"] == []
+    assert ("filter", {"role_id": 1, "tracker_id": 2, "old_status_id": 3}) in calls
+    assert not [call for call in calls if call[0] == "exclude"]
+    assert ("delete", None) in calls
 
 
 @pytest.mark.anyio
@@ -511,10 +625,14 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
     async def fake_get_issue(issue_id):
         return ticket
 
+    async def fake_assignee_ids(current_user, role_names, current_ticket, status_id=None, tracker_id=None):
+        return {3, 4}
+
     monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
     monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
     monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
     monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api, "_issue_assignee_ids", fake_assignee_ids)
     monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
     monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
 
@@ -539,6 +657,39 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
             "bypass_workflow": False,
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_update_issue_api_rejects_disallowed_assignee(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueUpdateIn
+
+    role = SimpleNamespace(id=9, name="渠道商")
+    user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
+    ticket = SimpleNamespace(id=7, submitter_id=3, assigned_to_id=5)
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["渠道商"]
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    async def fake_assignee_ids(current_user, role_names, current_ticket, status_id=None, tracker_id=None):
+        return {3, 5}
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api, "_issue_assignee_ids", fake_assignee_ids)
+
+    response = await issue_api.update_issue(IssueUpdateIn(issue_id=7, changes={"assigned_to_id": 99}))
+
+    body = _response_body(response)
+    assert body["code"] == 403
+    assert body["msg"] == "您暂无权限指派给该用户"
 
 
 @pytest.mark.anyio

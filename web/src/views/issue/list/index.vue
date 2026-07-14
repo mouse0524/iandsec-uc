@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onMounted, ref } from 'vue'
 import {
   NButton,
   NCheckbox,
@@ -31,7 +31,7 @@ const $table = ref(null)
 const formRef = ref(null)
 const appStore = useAppStore()
 const userStore = useUserStore()
-const queryItems = ref({})
+const queryItems = ref(defaultQueryFilters())
 const metadata = ref({ trackers: [], statuses: [], priorities: [], custom_fields: [] })
 const queries = ref([])
 const selectedQueryId = ref(null)
@@ -119,12 +119,17 @@ const createRules = {
   },
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (!userStore.userId) await userStore.getUserInfo()
+  queryItems.value = defaultQueryFilters()
+  selectedQueryId.value = defaultQueryId()
   loadMetadata()
   loadQueries()
   loadIssueCreateConfig()
   loadAssigneeOptions()
   fetchPrefill()
+  await nextTick()
+  $table.value?.handleSearch?.()
 })
 
 function getIssueList(params) {
@@ -255,10 +260,19 @@ function userOption(user) {
   }
 }
 
+function defaultQueryId() {
+  return 'builtin:assigned-to-me'
+}
+
+function defaultQueryFilters() {
+  const userId = Number(userStore.userId || 0)
+  return userId ? { assigned_to_id: userId } : {}
+}
+
 async function loadAssigneeOptions() {
   const options = []
   try {
-    const res = await api.getUserList({ page: 1, page_size: 200 })
+    const res = await api.getIssueAssignees()
     options.push(...(res?.data || []).map(userOption))
   } catch {
     // 指派人列表只是新建体验增强；后端仍会默认指派给当前提交人。

@@ -110,7 +110,7 @@ ISSUE_UPDATE_ROLES = {
     ROLE_CHANNEL,
     ROLE_AGENT,
 }
-ISSUE_CREATE_ROLES = ISSUE_UPDATE_ROLES | {ROLE_USER, ROLE_CHANNEL, ROLE_AGENT}
+ISSUE_CREATE_ROLES = ISSUE_UPDATE_ROLES
 ISSUE_QUERY_FILTER_FIELDS = {
     "issue_project_id",
     "issue_tracker_id",
@@ -500,6 +500,54 @@ def _can_view_all_issues(user: User, role_names: list[str]) -> bool:
     return bool(user.is_superuser or getattr(user, "username", "") == "admin" or ISSUE_VIEW_ALL_ROLES.intersection(role_names))
 
 
+def _issue_assignee_q(
+    user: User,
+    role_names: list[str],
+    ticket: Ticket | None = None,
+    target_role_ids: set[int] | None = None,
+) -> Q:
+    if target_role_ids:
+        return Q(roles__id__in=sorted(target_role_ids))
+    if _can_view_all_issues(user, role_names):
+        return Q()
+    user_ids = {int(user.id)}
+    assigned_to_id = _coerce_int(getattr(ticket, "assigned_to_id", None))
+    if assigned_to_id:
+        user_ids.add(assigned_to_id)
+    return Q(id__in=sorted(user_ids))
+
+
+async def _target_assignee_role_ids(status_id: int | None, tracker_id: int | None) -> set[int]:
+    status_id = _coerce_int(status_id)
+    tracker_id = _coerce_int(tracker_id)
+    if not status_id or not tracker_id:
+        return set()
+    rows = await IssueWorkflowTransition.filter(
+        old_status_id=status_id,
+        tracker_id=tracker_id,
+    ).values("role_id")
+    return {int(row["role_id"]) for row in rows if row.get("role_id")}
+
+
+async def _issue_assignee_ids(
+    user: User,
+    role_names: list[str],
+    ticket: Ticket | None = None,
+    status_id: int | None = None,
+    tracker_id: int | None = None,
+) -> set[int]:
+    target_role_ids = await _target_assignee_role_ids(status_id, tracker_id or getattr(ticket, "issue_tracker_id", None))
+    rows = (
+        await User.filter(
+            _issue_assignee_q(user, role_names, ticket, target_role_ids),
+            is_active=True,
+        )
+        .distinct()
+        .values("id")
+    )
+    return {int(row["id"]) for row in rows}
+
+
 async def _issue_visibility_q(user: User, role_names: list[str], scope: str | None) -> Q:
     if _can_view_all_issues(user, role_names):
         return Q(assigned_to_id=user.id) if scope == "mine" else Q()
@@ -554,17 +602,20 @@ async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
     status_name = str(filters.get("issue_status_name") or "").strip()
     if status_name:
         status_ids = await _ids_by_contains(IssueStatus, status_name, ("name",))
-        q &= Q(issue_status_id__in=status_ids) if status_ids else Q(id=0)
+        if status_ids:
+            q &= Q(issue_status_id__in=status_ids)
 
     assignee_name = str(filters.get("assigned_to_name") or "").strip()
     if assignee_name:
         user_ids = await _ids_by_contains(User, assignee_name, ("alias", "username", "email"))
-        q &= Q(assigned_to_id__in=user_ids) if user_ids else Q(id=0)
+        if user_ids:
+            q &= Q(assigned_to_id__in=user_ids)
 
     submitter_name = str(filters.get("submitter_name") or "").strip()
     if submitter_name:
         user_ids = await _ids_by_contains(User, submitter_name, ("alias", "username", "email"))
-        q &= Q(submitter_id__in=user_ids) if user_ids else Q(id=0)
+        if user_ids:
+            q &= Q(submitter_id__in=user_ids)
     return q
 
 
@@ -847,15 +898,14 @@ async def save_issue_workflow(payload: IssueAdminWorkflowSaveIn):
         return error
     data = payload.model_dump(exclude={"id", "new_status_ids"})
     if "new_status_ids" in payload.model_fields_set:
-        await (
-            IssueWorkflowTransition.filter(
-                role_id=payload.role_id,
-                tracker_id=payload.tracker_id,
-                old_status_id=payload.old_status_id,
-            )
-            .exclude(new_status_id__in=payload.new_status_ids)
-            .delete()
+        stale_workflows = IssueWorkflowTransition.filter(
+            role_id=payload.role_id,
+            tracker_id=payload.tracker_id,
+            old_status_id=payload.old_status_id,
         )
+        if payload.new_status_ids:
+            stale_workflows = stale_workflows.exclude(new_status_id__in=payload.new_status_ids)
+        await stale_workflows.delete()
         workflows = []
         for new_status_id in payload.new_status_ids:
             workflow, _ = await IssueWorkflowTransition.get_or_create(
@@ -1005,6 +1055,35 @@ async def get_issue_status_options(issue_id: int = Query(..., description="Issue
     return Success(data={"current_status_id": current_status_id or None, "statuses": [_json_row(row) for row in rows]})
 
 
+@router.get("/assignees", summary="Issue可指派人", dependencies=[DependAuth])
+async def get_issue_assignees(
+    issue_id: int | None = Query(None, description="Issue ID"),
+    status_id: int | None = Query(None, description="目标状态ID"),
+    tracker_id: int | None = Query(None, description="目标跟踪ID"),
+):
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    ticket = await _get_issue_or_none(issue_id) if issue_id else None
+    if issue_id and not ticket:
+        return _issue_not_found()
+    if ticket and not await _can_access_ticket(ticket, user, role_names):
+        return Fail(code=403, msg="您暂无权限查看该Issue")
+    target_role_ids = await _target_assignee_role_ids(
+        status_id,
+        tracker_id or getattr(ticket, "issue_tracker_id", None),
+    )
+    rows = (
+        await User.filter(
+            _issue_assignee_q(user, role_names, ticket, target_role_ids),
+            is_active=True,
+        )
+        .distinct()
+        .order_by("id")
+        .values("id", "username", "alias", "email")
+    )
+    return Success(data=[_json_row(row) for row in rows])
+
+
 @router.post("/update", summary="更新Issue", dependencies=[DependAuth])
 async def update_issue(payload: IssueUpdateIn):
     user = await _get_current_user()
@@ -1016,6 +1095,17 @@ async def update_issue(payload: IssueUpdateIn):
         return _issue_not_found()
     if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="您暂无权限操作该Issue")
+    assigned_to_id = _coerce_int((payload.changes or {}).get("assigned_to_id"))
+    target_status_id = _coerce_int((payload.changes or {}).get("issue_status_id")) or _coerce_int(
+        getattr(ticket, "issue_status_id", None)
+    )
+    target_tracker_id = _coerce_int((payload.changes or {}).get("issue_tracker_id")) or _coerce_int(
+        getattr(ticket, "issue_tracker_id", None)
+    )
+    if assigned_to_id and assigned_to_id not in await _issue_assignee_ids(
+        user, role_names, ticket, target_status_id, target_tracker_id
+    ):
+        return Fail(code=403, msg="您暂无权限指派给该用户")
 
     issue = await issue_update_service.update_issue(
         issue_id=payload.issue_id,

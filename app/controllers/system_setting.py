@@ -37,17 +37,15 @@ def normalize_webdav_base_url(url: str | None) -> str:
 
 DEFAULT_TICKET_STATUSES = [
     "新建",
-    "客服审核",
-    "客服驳回",
+    "商务审核",
     "技术处理",
     "测试过滤",
-    "产品评估",
-    "研发处理",
+    "研发修改",
     "测试验证",
     "现场验证",
-    "已解决",
+    "产品评估",
+    "问题转需求",
     "关闭",
-    "不采纳",
 ]
 DEFAULT_TICKET_PRIORITIES = ["高", "中", "低"]
 
@@ -344,7 +342,15 @@ class SystemSettingController:
 
     @classmethod
     def _normalize_ticket_statuses(cls, items) -> list[str]:
-        return cls._clean_option_items("关闭" if str(item or "").strip() == "已关闭" else item for item in items or [])
+        legacy_names = {
+            "客服审核": "商务审核",
+            "客服驳回": "新建",
+            "研发处理": "研发修改",
+            "已解决": "现场验证",
+            "不采纳": "关闭",
+            "已关闭": "关闭",
+        }
+        return cls._clean_option_items(legacy_names.get(str(item or "").strip(), item) for item in items or [])
 
     @staticmethod
     async def _upsert_named_option(model, name: str, defaults: dict):

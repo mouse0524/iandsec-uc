@@ -98,6 +98,7 @@ export default {
   getIssueById: (params = {}) => request.get('/issue/get', { params }),
   getIssueMetadata: () => request.get('/issue/metadata'),
   getIssueStatusOptions: (params = {}) => request.get('/issue/status-options', { params }),
+  getIssueAssignees: (params = {}) => request.get('/issue/assignees', { params }),
   updateIssue: (data = {}) => request.post('/issue/update', data),
   getIssueWatchers: (params = {}) => request.get('/issue/watchers', { params }),
   addIssueWatcher: (data = {}) => request.post('/issue/watcher/add', data),
