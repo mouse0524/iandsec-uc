@@ -23,7 +23,7 @@ import RichTextEditor from '@/components/editor/RichTextEditor.vue'
 import IssueDetail from '@/views/issue/detail/index.vue'
 import api from '@/api'
 import { useAppStore, useUserStore } from '@/store'
-import { isImageName } from '@/utils'
+import { formatDateTime, isImageName } from '@/utils'
 
 defineOptions({ name: '工单列表' })
 
@@ -79,7 +79,7 @@ const detailDrawerTitle = computed(() =>
 )
 const customFields = computed(() => metadata.value.custom_fields || [])
 const customFilterFields = computed(() => customFields.value.filter((item) => item.is_filter))
-const tableScrollX = computed(() => 1160 + customFields.value.length * 140)
+const tableScrollX = computed(() => 1020 + customFields.value.length * 140)
 const builtInQueries = computed(() => {
   const userId = Number(userStore.userId || 0)
   return [
@@ -189,7 +189,10 @@ function renderTag(label, type = 'default') {
 }
 
 function renderIssueTitle(row) {
-  const meta = [row.company_name || null, row.project_phase || null].filter(Boolean)
+  const meta = [
+    row.company_name ? h('span', { title: row.company_name }, row.company_name) : null,
+    row.project_phase ? h('span', row.project_phase) : null,
+  ].filter(Boolean)
   return h('div', { class: 'issue-title-cell' }, [
     h(
       'button',
@@ -207,7 +210,7 @@ function renderIssueTitle(row) {
       ? h(
           'div',
           { class: 'issue-title-meta' },
-          meta.map((item) => h('span', item)),
+          meta,
         )
       : null,
   ])
@@ -467,10 +470,11 @@ function compactFilters() {
   return filters
 }
 
-function applySavedQuery(queryId) {
+async function applySavedQuery(queryId) {
   const builtInQuery = builtInQueries.value.find((item) => item.value === queryId)
   if (builtInQuery) {
     queryItems.value = { ...builtInQuery.filters }
+    await nextTick()
     $table.value?.handleSearch?.()
     return
   }
@@ -482,6 +486,7 @@ function applySavedQuery(queryId) {
     ...filters,
     ...Object.fromEntries(Object.entries(customValues).map(([key, value]) => [`cf_${key}`, value])),
   }
+  await nextTick()
   $table.value?.handleSearch?.()
 }
 
@@ -599,16 +604,9 @@ const columns = computed(() => [
   {
     title: '标题',
     key: 'title',
-    align: 'left',
+    align: 'center',
     minWidth: 280,
     render: renderIssueTitle,
-  },
-  {
-    title: '项目',
-    key: 'issue_project_id',
-    align: 'center',
-    minWidth: 140,
-    render: (row) => row.company_name || row.issue_project_id || '-',
   },
   {
     title: '跟踪',
@@ -650,7 +648,13 @@ const columns = computed(() => [
     width: 120,
     render: (row) => row.assigned_to_name || row.assigned_to_id || '未指派',
   },
-  { title: '更新于', key: 'updated_at', align: 'center', width: 180 },
+  {
+    title: '更新于',
+    key: 'updated_at',
+    align: 'center',
+    width: 180,
+    render: (row) => (row.updated_at ? formatDateTime(row.updated_at) : '-'),
+  },
 ])
 </script>
 
@@ -669,13 +673,13 @@ const columns = computed(() => [
             />
             <NButton secondary @click="showQueryModal = true">
               <template #icon>
-                <TheIcon icon="material-symbols:bookmark-add-outline" :size="16" />
+                <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
               </template>
               保存查询
             </NButton>
             <NButton type="primary" @click="openCreateModal">
               <template #icon>
-                <TheIcon icon="material-symbols:add" :size="18" />
+                <TheIcon icon="mdi-content-save-cog-outline" :size="18" />
               </template>
               新建工单
             </NButton>
@@ -969,7 +973,12 @@ const columns = computed(() => [
                     :accept="attachmentAccept"
                     @remove="handleRemove"
                   >
-                    <NButton class="upload-btn" :loading="uploadLoading">上传附件</NButton>
+                    <NButton class="upload-btn" :loading="uploadLoading">
+                      <template #icon>
+                        <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                      </template>
+                      上传附件
+                    </NButton>
                   </NUpload>
                   <span class="upload-tip"
                     >支持最多 5 个附件，支持粘贴图片上传，当前允许类型：{{
@@ -982,8 +991,18 @@ const columns = computed(() => [
           </NForm>
           <template #footer>
             <div class="modal-actions">
-              <NButton @click="showCreateModal = false">取消</NButton>
-              <NButton type="primary" :loading="creating" @click="submitCreateIssue">创建</NButton>
+              <NButton @click="showCreateModal = false">
+                <template #icon>
+                  <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
+                </template>
+                取消
+              </NButton>
+              <NButton type="primary" :loading="creating" @click="submitCreateIssue">
+                <template #icon>
+                  <TheIcon icon="mdi-content-save-cog-outline" :size="18" />
+                </template>
+                创建
+              </NButton>
             </div>
           </template>
         </NDrawerContent>
@@ -1018,8 +1037,18 @@ const columns = computed(() => [
         </NForm>
         <template #footer>
           <div class="modal-actions">
-            <NButton @click="showQueryModal = false">取消</NButton>
-            <NButton type="primary" :loading="savingQuery" @click="saveCurrentQuery">保存</NButton>
+            <NButton @click="showQueryModal = false">
+              <template #icon>
+                <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
+              </template>
+              取消
+            </NButton>
+            <NButton type="primary" :loading="savingQuery" @click="saveCurrentQuery">
+              <template #icon>
+                <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+              </template>
+              保存
+            </NButton>
           </div>
         </template>
       </NModal>
@@ -1086,9 +1115,11 @@ const columns = computed(() => [
 :deep(.issue-title-cell) {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 5px;
   min-width: 0;
   padding: 2px 0;
+  text-align: center;
 }
 
 :deep(.issue-title-link) {
@@ -1100,7 +1131,7 @@ const columns = computed(() => [
   font-weight: 700;
   line-height: 1.4;
   padding: 0;
-  text-align: left;
+  text-align: center;
   text-decoration: none;
   white-space: normal;
 }
@@ -1112,6 +1143,7 @@ const columns = computed(() => [
 :deep(.issue-title-meta) {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
   color: var(--issue-muted);
   font-size: 12px;

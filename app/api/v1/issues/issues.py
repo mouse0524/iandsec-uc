@@ -71,6 +71,13 @@ from app.settings import settings
 
 router = APIRouter()
 
+ISSUE_CUSTOM_FIELD_FORMAT_OPTIONS = [
+    {"label": "单行文本", "value": IssueCustomFieldFormat.STRING.value},
+    {"label": "多行文本", "value": IssueCustomFieldFormat.TEXT.value},
+    {"label": "日期", "value": IssueCustomFieldFormat.DATE.value},
+    {"label": "列表", "value": IssueCustomFieldFormat.LIST.value},
+]
+
 ISSUE_LIST_FIELDS = [
     "id",
     "ticket_no",
@@ -435,7 +442,7 @@ async def _admin_metadata_lists() -> dict[str, list[dict]]:
         "custom_fields": [_json_row(row) for row in custom_fields],
         "workflows": [_json_row(row) for row in workflows],
         "roles": [_json_row(row) for row in roles],
-        "field_formats": [{"label": item.value, "value": item.value} for item in IssueCustomFieldFormat],
+        "field_formats": ISSUE_CUSTOM_FIELD_FORMAT_OPTIONS,
     }
 
 
@@ -527,6 +534,22 @@ async def _target_assignee_role_ids(status_id: int | None, tracker_id: int | Non
         tracker_id=tracker_id,
     ).values("role_id")
     return {int(row["role_id"]) for row in rows if row.get("role_id")}
+
+
+async def _is_initial_issue_status(status_id: int | None) -> bool:
+    status_id = _coerce_int(status_id)
+    if not status_id:
+        return False
+    status = await IssueStatus.filter(id=status_id).first()
+    return bool(status and (status.is_default or status.name == "新建"))
+
+
+async def _is_field_verification_status(status_id: int | None) -> bool:
+    status_id = _coerce_int(status_id)
+    if not status_id:
+        return False
+    status = await IssueStatus.filter(id=status_id).first()
+    return bool(status and status.name == "现场验证")
 
 
 async def _issue_assignee_ids(
@@ -1068,6 +1091,25 @@ async def get_issue_assignees(
         return _issue_not_found()
     if ticket and not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="您暂无权限查看该Issue")
+    if ticket and await _is_initial_issue_status(status_id):
+        submitter_id = _coerce_int(getattr(ticket, "submitter_id", None))
+        rows = await User.filter(id__in=[submitter_id] if submitter_id else [], is_active=True).values(
+            "id", "username", "alias", "email"
+        )
+        return Success(data=[_json_row(row) for row in rows])
+    if ticket and await _is_field_verification_status(status_id):
+        submitter_id = _coerce_int(getattr(ticket, "submitter_id", None))
+        tech_role = await Role.filter(name=ROLE_TECH).first()
+        q = Q(id__in=[submitter_id] if submitter_id else [])
+        if tech_role:
+            q |= Q(roles__id=tech_role.id)
+        rows = (
+            await User.filter(q, is_active=True)
+            .distinct()
+            .order_by("id")
+            .values("id", "username", "alias", "email")
+        )
+        return Success(data=[_json_row(row) for row in rows])
     target_role_ids = await _target_assignee_role_ids(
         status_id,
         tracker_id or getattr(ticket, "issue_tracker_id", None),

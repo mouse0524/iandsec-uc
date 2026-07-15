@@ -633,14 +633,14 @@ async def init_menus():
             "name": "工单列表",
             "path": "issues",
             "order": 1,
-            "icon": "mdi:clipboard-list-outline",
+            "icon": "material-symbols:format-list-bulleted-rounded",
             "component": "/issue/list",
         },
         {
             "name": "工单配置",
             "path": "config",
             "order": 2,
-            "icon": "mdi:cog-outline",
+            "icon": "material-symbols:fact-check-outline-rounded",
             "component": "/issue/config",
         },
     ]
@@ -1512,10 +1512,11 @@ async def init_roles():
                     role_name=role_name,
                     api_paths=_issue_update_api_paths(),
                 )
-            await _backfill_existing_role_permissions(
-                role_name="测试",
-                api_paths=_test_role_extra_api_paths(),
-            )
+            for role_name in ["产品", "测试", "研发"]:
+                await _backfill_existing_role_permissions(
+                    role_name=role_name,
+                    api_paths=_test_role_extra_api_paths(),
+                )
             await _ensure_issue_defaults({role.name: role for role in existing_roles})
             logger.info("[init_roles] detected existing role permissions, skip default role permission backfill")
             return
@@ -1662,7 +1663,8 @@ async def init_roles():
     for role_name in ["产品", "测试", "研发"]:
         await role_map[role_name].apis.add(*ticket_read_apis)
         await role_map[role_name].apis.add(*issue_update_apis)
-    await role_map["测试"].apis.add(*await Api.filter(path__in=_test_role_extra_api_paths()))
+    for role_name in ["产品", "测试", "研发"]:
+        await role_map[role_name].apis.add(*await Api.filter(path__in=_test_role_extra_api_paths()))
 
     await role_map["管理员"].apis.add(*settings_apis)
     await role_map["管理员"].apis.add(*monitor_apis)

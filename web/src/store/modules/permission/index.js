@@ -8,6 +8,14 @@ const Layout = () => import('@/layout/index.vue')
 
 // * 后端路由相关函数
 // 根据后端传来数据构建出前端路由
+const issueMenuIcons = {
+  '/issue/list': 'material-symbols:format-list-bulleted-rounded',
+  '/issue/config': 'material-symbols:fact-check-outline-rounded',
+}
+
+function menuIcon(item) {
+  return issueMenuIcons[item.component] || item.icon
+}
 
 function buildRoutes(routes = []) {
   return routes.map((e) => {
@@ -20,7 +28,7 @@ function buildRoutes(routes = []) {
       redirect: e.redirect,
       meta: {
         title: e.name,
-        icon: e.icon,
+        icon: menuIcon(e),
         order: e.order,
         keepAlive: e.keepalive,
       },
@@ -40,7 +48,7 @@ function buildRoutes(routes = []) {
             isHidden: e_child.is_hidden,
             meta: {
               title: e_child.name,
-              icon: e_child.icon,
+              icon: menuIcon(e_child),
               order: e_child.order,
               keepAlive: e_child.keepalive,
             },
@@ -60,7 +68,7 @@ function buildRoutes(routes = []) {
         isHidden: true,
         meta: {
           title: e.name,
-          icon: e.icon,
+          icon: menuIcon(e),
           order: e.order,
           keepAlive: e.keepalive,
         },

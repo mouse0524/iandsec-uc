@@ -19,6 +19,7 @@ from app.controllers.ticket import ticket_controller
 from app.controllers.webdav import webdav_controller
 from app.core import init_app
 from app.core.init_app import _ticket_submit_api_paths
+from app.models.enums import TicketStatus
 from app.settings import settings
 from app.utils.file_signature import detect_file_type
 
@@ -410,6 +411,88 @@ async def test_assigned_tech_can_download_ticket_attachment(monkeypatch, tmp_pat
     )
 
     assert os.path.normcase(data["abs_path"]) == os.path.normcase(str(source))
+
+
+@pytest.mark.anyio
+async def test_issue_assignee_can_download_ticket_attachment(monkeypatch, tmp_path):
+    source = tmp_path / "demo.docx"
+    source.write_bytes(b"PK\x03\x04demo")
+    attachment = Obj(ticket_id=9, file_path="demo.docx", origin_name="demo.docx", mime_type="application/octet-stream")
+    ticket = Obj(submitter_id=99, tech_id=None, assigned_to_id=7)
+
+    class FirstQuery:
+        def __init__(self, value):
+            self.value = value
+
+        async def first(self):
+            return self.value
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(ticket_module.TicketAttachment, "filter", lambda **kwargs: FirstQuery(attachment))
+    monkeypatch.setattr(ticket_module.Ticket, "filter", lambda **kwargs: FirstQuery(ticket))
+
+    data = await ticket_controller.get_attachment_download(
+        attachment_id=1,
+        user=Obj(id=7, username="tester", is_superuser=False),
+        role_names=["测试"],
+    )
+
+    assert os.path.normcase(data["abs_path"]) == os.path.normcase(str(source))
+
+
+@pytest.mark.anyio
+async def test_issue_role_can_download_ticket_attachment_in_matching_status(monkeypatch, tmp_path):
+    source = tmp_path / "demo.docx"
+    source.write_bytes(b"PK\x03\x04demo")
+    attachment = Obj(ticket_id=9, file_path="demo.docx", origin_name="demo.docx", mime_type="application/octet-stream")
+    ticket = Obj(submitter_id=99, tech_id=None, assigned_to_id=8, status=TicketStatus.RD_PROCESSING)
+
+    class FirstQuery:
+        def __init__(self, value):
+            self.value = value
+
+        async def first(self):
+            return self.value
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(ticket_module.TicketAttachment, "filter", lambda **kwargs: FirstQuery(attachment))
+    monkeypatch.setattr(ticket_module.Ticket, "filter", lambda **kwargs: FirstQuery(ticket))
+
+    data = await ticket_controller.get_attachment_download(
+        attachment_id=1,
+        user=Obj(id=7, username="rd", is_superuser=False),
+        role_names=["研发"],
+    )
+
+    assert os.path.normcase(data["abs_path"]) == os.path.normcase(str(source))
+
+
+@pytest.mark.anyio
+async def test_issue_role_cannot_download_ticket_attachment_outside_matching_status(monkeypatch, tmp_path):
+    source = tmp_path / "demo.docx"
+    source.write_bytes(b"PK\x03\x04demo")
+    attachment = Obj(ticket_id=9, file_path="demo.docx", origin_name="demo.docx", mime_type="application/octet-stream")
+    ticket = Obj(submitter_id=99, tech_id=None, assigned_to_id=8, status=TicketStatus.TEST_FILTERING)
+
+    class FirstQuery:
+        def __init__(self, value):
+            self.value = value
+
+        async def first(self):
+            return self.value
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(ticket_module.TicketAttachment, "filter", lambda **kwargs: FirstQuery(attachment))
+    monkeypatch.setattr(ticket_module.Ticket, "filter", lambda **kwargs: FirstQuery(ticket))
+
+    with pytest.raises(HTTPException) as exc:
+        await ticket_controller.get_attachment_download(
+            attachment_id=1,
+            user=Obj(id=7, username="rd", is_superuser=False),
+            role_names=["研发"],
+        )
+
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.anyio

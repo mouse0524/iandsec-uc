@@ -119,6 +119,106 @@ async def test_issue_assignee_role_ids_come_from_workflow(monkeypatch):
     ]
 
 
+@pytest.mark.anyio
+async def test_issue_assignees_for_initial_status_only_return_submitter(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    ticket = SimpleNamespace(id=9, submitter_id=3, assigned_to_id=7)
+    user = SimpleNamespace(id=7, username="rd", is_superuser=False)
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["研发"]
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    async def fake_can_access(current_ticket, current_user, role_names):
+        return True
+
+    class StatusQuery:
+        async def first(self):
+            return SimpleNamespace(name="新建", is_default=True)
+
+    class UserQuery:
+        async def values(self, *fields):
+            return [{"id": 3, "username": "submitter", "alias": "提交人", "email": "s@example.com"}]
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_can_access)
+    monkeypatch.setattr(issue_api.IssueStatus, "filter", lambda **kwargs: StatusQuery())
+    monkeypatch.setattr(issue_api.User, "filter", lambda **kwargs: UserQuery())
+
+    body = _response_body(await issue_api.get_issue_assignees(issue_id=9, status_id=1))
+
+    assert body["data"] == [{"id": 3, "username": "submitter", "alias": "提交人", "email": "s@example.com"}]
+
+
+@pytest.mark.anyio
+async def test_issue_assignees_for_field_verification_return_submitter_and_tech(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    ticket = SimpleNamespace(id=9, submitter_id=3, assigned_to_id=7)
+    user = SimpleNamespace(id=7, username="rd", is_superuser=False)
+    user_filter_calls = []
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return ["研发"]
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    async def fake_can_access(current_ticket, current_user, role_names):
+        return True
+
+    class StatusQuery:
+        async def first(self):
+            return SimpleNamespace(name="现场验证", is_default=False)
+
+    class RoleQuery:
+        async def first(self):
+            return SimpleNamespace(id=4, name="技术")
+
+    class UserQuery:
+        def distinct(self):
+            return self
+
+        def order_by(self, *fields):
+            return self
+
+        async def values(self, *fields):
+            return [
+                {"id": 3, "username": "submitter", "alias": "提交人", "email": "s@example.com"},
+                {"id": 4, "username": "tech", "alias": "技术", "email": "t@example.com"},
+            ]
+
+    def fake_user_filter(*args, **kwargs):
+        user_filter_calls.append((args, kwargs))
+        return UserQuery()
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_can_access)
+    monkeypatch.setattr(issue_api.IssueStatus, "filter", lambda **kwargs: StatusQuery())
+    monkeypatch.setattr(issue_api.Role, "filter", lambda **kwargs: RoleQuery())
+    monkeypatch.setattr(issue_api.User, "filter", fake_user_filter)
+
+    body = _response_body(await issue_api.get_issue_assignees(issue_id=9, status_id=6, tracker_id=1))
+
+    assert [item["id"] for item in body["data"]] == [3, 4]
+    filters = _q_filters(user_filter_calls[0][0][0])
+    assert {"id__in": [3]} in filters
+    assert {"roles__id": 4} in filters
+
+
 def test_issue_attachment_file_exists_rejects_missing_and_escaped_paths(monkeypatch, tmp_path):
     from app.api.v1.issues import issues as issue_api
 

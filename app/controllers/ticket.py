@@ -1001,7 +1001,21 @@ class TicketController:
         if not ticket:
             raise HTTPException(status_code=404, detail="所属工单不存在")
 
-        if not user.is_superuser and user.username != "admin" and not {"管理员", "客服"}.intersection(role_names):
+        role_statuses = {
+            "产品": {TicketStatus.PRODUCT_EVALUATION},
+            "测试": {TicketStatus.TEST_FILTERING, TicketStatus.TEST_VERIFICATION},
+            "研发": {TicketStatus.RD_PROCESSING},
+        }
+        role_status_allowed = any(
+            getattr(ticket, "status", None) in statuses for role, statuses in role_statuses.items() if role in role_names
+        )
+        if (
+            not user.is_superuser
+            and user.username != "admin"
+            and getattr(ticket, "assigned_to_id", None) != user.id
+            and not {"管理员", "客服"}.intersection(role_names)
+            and not role_status_allowed
+        ):
             if "技术" in role_names:
                 related_submitter_ids = await self._tech_related_submitter_ids(user.id)
                 if ticket.submitter_id != user.id and ticket.tech_id != user.id and ticket.submitter_id not in related_submitter_ids:

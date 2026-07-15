@@ -241,7 +241,17 @@ const trackerOptions = computed(() => {
   )
 })
 const roleOptions = computed(() => toOptions(config.value.roles))
-const fieldFormatOptions = computed(() => config.value.field_formats || [])
+const fieldFormatLabels = {
+  string: '单行文本',
+  text: '多行文本',
+  date: '日期',
+  list: '列表',
+}
+const fieldFormatOptions = computed(() =>
+  (config.value.field_formats || [])
+    .filter((item) => Object.prototype.hasOwnProperty.call(fieldFormatLabels, item.value))
+    .map((item) => ({ ...item, label: fieldFormatLabels[item.value] })),
+)
 const statusMap = computed(() => toNameMap(config.value.statuses))
 const trackerMap = computed(() => toNameMap(config.value.trackers))
 const roleMap = computed(() => toNameMap(config.value.roles))
@@ -358,7 +368,7 @@ const customFieldColumns = [
     title: '格式',
     key: 'field_format',
     width: 110,
-    render: (row) => valueTag(row.field_format, 'default'),
+    render: (row) => valueTag(fieldFormatLabels[row.field_format] || row.field_format, 'default'),
   },
   {
     title: '必填',
@@ -869,6 +879,9 @@ async function deleteWorkflow(row) {
                   :loading="settingsSaving"
                   @click="saveIssueSettings"
                 >
+                  <template #icon>
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                  </template>
                   保存配置
                 </NButton>
               </div>
@@ -914,6 +927,9 @@ async function deleteWorkflow(row) {
                   :loading="settingsSaving"
                   @click="saveIssueSettings"
                 >
+                  <template #icon>
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                  </template>
                   保存配置
                 </NButton>
               </div>
@@ -1003,6 +1019,9 @@ async function deleteWorkflow(row) {
                   :loading="settingsSaving"
                   @click="saveIssueSettings"
                 >
+                  <template #icon>
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                  </template>
                   保存配置
                 </NButton>
               </div>
@@ -1047,6 +1066,9 @@ async function deleteWorkflow(row) {
                   :loading="settingsSaving"
                   @click="saveIssueSettings"
                 >
+                  <template #icon>
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                  </template>
                   保存配置
                 </NButton>
               </div>
@@ -1086,7 +1108,7 @@ async function deleteWorkflow(row) {
                 </div>
                 <NButton type="primary" @click="openEditor('workflows')">
                   <template #icon>
-                    <TheIcon icon="material-symbols:add" :size="18" />
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="18" />
                   </template>
                   {{ sectionMap.workflows.button }}
                 </NButton>
@@ -1136,7 +1158,7 @@ async function deleteWorkflow(row) {
                 </div>
                 <NButton type="primary" @click="openEditor('custom_fields')">
                   <template #icon>
-                    <TheIcon icon="material-symbols:add" :size="18" />
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="18" />
                   </template>
                   {{ sectionMap.custom_fields.button }}
                 </NButton>
@@ -1273,8 +1295,18 @@ async function deleteWorkflow(row) {
 
           <template #footer>
             <NSpace justify="end">
-              <NButton @click="modalVisible = false">取消</NButton>
-              <NButton type="primary" :loading="saving" @click="saveCurrent">保存</NButton>
+              <NButton @click="modalVisible = false">
+                <template #icon>
+                  <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
+                </template>
+                取消
+              </NButton>
+              <NButton type="primary" :loading="saving" @click="saveCurrent">
+                <template #icon>
+                  <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                </template>
+                保存
+              </NButton>
             </NSpace>
           </template>
         </NDrawerContent>

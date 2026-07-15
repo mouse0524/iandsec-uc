@@ -588,11 +588,11 @@ onBeforeUnmount(() => {
                 >
                 <span class="issue-pill">创建：{{ issue.created_at || '-' }}</span>
                 <span class="issue-pill">更新：{{ issue.updated_at || '-' }}</span>
-                <span class="issue-pill is-phase">项目阶段：{{ issue.project_phase || '-' }}</span>
-                <span class="issue-pill is-tracker">
+                <span class="issue-pill">项目阶段：{{ issue.project_phase || '-' }}</span>
+                <span class="issue-pill">
                   跟踪：{{ issue.tracker_name || issue.issue_type || '-' }}
                 </span>
-                <span class="issue-pill is-status">
+                <span class="issue-pill">
                   状态：{{ issue.status_name || issue.issue_status_id || '-' }}
                 </span>
               </div>
@@ -725,6 +725,75 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <NForm class="update-form" label-placement="top">
+                <NFormItem label="项目名称">
+                  <NInput
+                    v-model:value="form.company_name"
+                    clearable
+                    placeholder="请输入项目或客户名称"
+                  />
+                </NFormItem>
+                <NFormItem label="标题">
+                  <NInput v-model:value="form.title" clearable placeholder="请输入标题" />
+                </NFormItem>
+                <NFormItem label="项目阶段">
+                  <NSelect
+                    v-model:value="form.project_phase"
+                    :options="projectPhaseOptions"
+                    placeholder="请选择项目阶段"
+                  />
+                </NFormItem>
+                <NFormItem label="跟踪">
+                  <NSelect
+                    v-model:value="form.issue_tracker_id"
+                    :options="trackerOptions"
+                    placeholder="请选择跟踪"
+                  />
+                </NFormItem>
+                <NFormItem label="影响范围">
+                  <NSelect
+                    v-model:value="form.impact_scope"
+                    :options="impactScopeOptions"
+                    placeholder="请选择影响范围"
+                  />
+                </NFormItem>
+                <NFormItem label="问题分类">
+                  <NSelect
+                    v-model:value="form.category"
+                    :options="categoryOptions"
+                    placeholder="请选择问题分类"
+                  />
+                </NFormItem>
+                <NFormItem label="状态">
+                  <NSelect v-model:value="form.issue_status_id" :options="statusOptions" />
+                </NFormItem>
+                <NFormItem label="当前指派人">
+                  <NSelect
+                    v-model:value="form.assigned_to_id"
+                    :options="assigneeOptions"
+                    clearable
+                    filterable
+                    placeholder="请选择当前指派人"
+                    style="width: 100%"
+                  />
+                </NFormItem>
+                <NFormItem v-if="isClosingStatus" label="问题根因" required>
+                  <NSelect
+                    v-if="rootCauseOptions.length"
+                    v-model:value="form.root_cause"
+                    :options="rootCauseOptions"
+                    clearable
+                    placeholder="请选择问题根因"
+                  />
+                  <NInput
+                    v-else
+                    v-model:value="form.root_cause"
+                    clearable
+                    placeholder="请输入问题根因"
+                  />
+                </NFormItem>
+                <NFormItem label="优先级">
+                  <NSelect v-model:value="form.issue_priority_id" :options="priorityOptions" />
+                </NFormItem>
                 <NFormItem
                   v-for="field in customFields"
                   :key="field.id"
@@ -773,75 +842,6 @@ onBeforeUnmount(() => {
                     placeholder="请输入"
                   />
                 </NFormItem>
-                <NFormItem label="项目名称">
-                  <NInput
-                    v-model:value="form.company_name"
-                    clearable
-                    placeholder="请输入项目或客户名称"
-                  />
-                </NFormItem>
-                <NFormItem label="项目阶段">
-                  <NSelect
-                    v-model:value="form.project_phase"
-                    :options="projectPhaseOptions"
-                    placeholder="请选择项目阶段"
-                  />
-                </NFormItem>
-                <NFormItem label="跟踪">
-                  <NSelect
-                    v-model:value="form.issue_tracker_id"
-                    :options="trackerOptions"
-                    placeholder="请选择跟踪"
-                  />
-                </NFormItem>
-                <NFormItem label="状态">
-                  <NSelect v-model:value="form.issue_status_id" :options="statusOptions" />
-                </NFormItem>
-                <NFormItem label="影响范围">
-                  <NSelect
-                    v-model:value="form.impact_scope"
-                    :options="impactScopeOptions"
-                    placeholder="请选择影响范围"
-                  />
-                </NFormItem>
-                <NFormItem label="问题分类">
-                  <NSelect
-                    v-model:value="form.category"
-                    :options="categoryOptions"
-                    placeholder="请选择问题分类"
-                  />
-                </NFormItem>
-                <NFormItem label="当前指派人">
-                  <NSelect
-                    v-model:value="form.assigned_to_id"
-                    :options="assigneeOptions"
-                    clearable
-                    filterable
-                    placeholder="请选择当前指派人"
-                    style="width: 100%"
-                  />
-                </NFormItem>
-                <NFormItem label="优先级">
-                  <NSelect v-model:value="form.issue_priority_id" :options="priorityOptions" />
-                </NFormItem>
-                <NFormItem v-if="isClosingStatus" label="问题根因" required>
-                  <NSelect
-                    v-if="rootCauseOptions.length"
-                    v-model:value="form.root_cause"
-                    :options="rootCauseOptions"
-                    clearable
-                    placeholder="请选择问题根因"
-                  />
-                  <NInput
-                    v-else
-                    v-model:value="form.root_cause"
-                    clearable
-                    placeholder="请输入问题根因"
-                  />
-                </NFormItem>
-                <NFormItem class="span-full" label="标题">
-                  <NInput v-model:value="form.title" clearable placeholder="请输入标题" />
-                </NFormItem>
                 <NFormItem class="span-full" label="描述">
                   <RichTextEditor
                     v-if="editDescriptionVisible"
@@ -859,15 +859,20 @@ onBeforeUnmount(() => {
                     v-model:value="form.notes"
                     type="textarea"
                     :autosize="{ minRows: 4, maxRows: 8 }"
-                    placeholder="可只填写说明，不修改其他字段"
+                    placeholder=""
                   />
                 </NFormItem>
               </NForm>
               <div class="actions">
-                <NButton @click="editing = false">取消</NButton>
+                <NButton @click="editing = false">
+                  <template #icon>
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
+                  </template>
+                  取消
+                </NButton>
                 <NButton :loading="saving" type="primary" @click="submitUpdate">
                   <template #icon>
-                    <TheIcon icon="material-symbols:send-outline-rounded" :size="17" />
+                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
                   </template>
                   提交更新
                 </NButton>
