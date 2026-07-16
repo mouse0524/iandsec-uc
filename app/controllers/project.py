@@ -308,7 +308,10 @@ class ProjectController:
                         **value_filter,
                     ).values_list("customized_id", flat=True)
                 }
-                ids = current_ids if ids is None else ids & current_ids
+                if field_format == IssueCustomFieldFormat.LIST and field.get("multiple"):
+                    ids = current_ids if ids is None else ids | current_ids
+                else:
+                    ids = current_ids if ids is None else ids & current_ids
             if ids is None:
                 continue
             matched_ids = ids if matched_ids is None else matched_ids & ids
