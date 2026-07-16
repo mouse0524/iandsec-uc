@@ -12,6 +12,7 @@ const issueMenuIcons = {
   '/issue/dashboard': 'material-symbols:fact-check-outline-rounded',
   '/issue/list': 'material-symbols:format-list-bulleted-rounded',
   '/issue/config': 'material-symbols:fact-check-outline-rounded',
+  '/project/config': 'material-symbols:settings-outline',
 }
 
 function menuIcon(item) {

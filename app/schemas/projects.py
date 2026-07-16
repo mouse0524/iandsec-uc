@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -25,6 +27,7 @@ class ProjectCreateIn(BaseModel):
     assignee_id: int | None = Field(default=None, description="负责人ID")
     remark: str | None = Field(default=None, description="项目日志")
     attachment_ids: list[int] = Field(default_factory=list, description="附件ID列表")
+    custom_values: dict[str, Any] = Field(default_factory=dict, description="自定义字段值")
 
 
 class ProjectUpdateIn(ProjectCreateIn):

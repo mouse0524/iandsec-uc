@@ -160,6 +160,7 @@ def _project_api_paths() -> list[str]:
     return [
         "/api/v1/project/list",
         "/api/v1/project/get",
+        "/api/v1/project/metadata",
         "/api/v1/project/upload",
         "/api/v1/project/attachment/download",
         "/api/v1/project/create",
@@ -708,6 +709,13 @@ async def init_menus():
             "order": 2,
             "icon": "material-symbols:fact-check-outline-rounded",
             "component": "/project/activity",
+        },
+        {
+            "name": "项目配置",
+            "path": "config",
+            "order": 3,
+            "icon": "material-symbols:settings-outline",
+            "component": "/project/config",
         },
     ]
     for child in project_children:
@@ -1458,6 +1466,11 @@ async def init_roles():
                     component_paths=["/project", "/project/list", "/project/activity"],
                 )
             await _backfill_existing_role_permissions(
+                role_name="管理员",
+                api_paths=[*_issue_admin_api_paths(), "/api/v1/settings/get", "/api/v1/settings/update"],
+                component_paths=["/project/config"],
+            )
+            await _backfill_existing_role_permissions(
                 role_name="客服",
                 api_paths=[*_ticket_read_api_paths(), "/api/v1/ticket/export"],
             )
@@ -1619,6 +1632,7 @@ async def init_roles():
     monitor_menus = await Menu.filter(Q(component="/system/monitor"))
     terminal_menus = await Menu.filter(Q(path="/terminal") | Q(component__in=["/terminal/auth", "/terminal/upgrade"]))
     project_menus = await Menu.filter(Q(path="/project") | Q(component__in=["/project/list", "/project/activity"]))
+    project_config_menus = await Menu.filter(Q(component="/project/config"))
     wiki_read_menus = await Menu.filter(Q(path="/wiki") | Q(component__in=["/wiki/search", "/wiki/view"]))
     wiki_edit_menus = await Menu.filter(Q(component="/wiki/sources"))
     wiki_admin_menus = await Menu.filter(Q(component="/wiki/records"))
@@ -1691,6 +1705,7 @@ async def init_roles():
     await role_map["管理员"].menus.add(*monitor_menus)
     await role_map["管理员"].menus.add(*terminal_menus)
     await role_map["管理员"].menus.add(*project_menus)
+    await role_map["管理员"].menus.add(*project_config_menus)
     await role_map["管理员"].menus.add(*issue_menus)
     await role_map["管理员"].menus.add(*issue_config_menus)
     await role_map["管理员"].menus.add(*wiki_edit_menus)

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
@@ -66,6 +68,7 @@ async def list_projects(
     product_name: str | None = Query(None, description="使用产品"),
     server_version: str | None = Query(None, description="服务器版本"),
     client_version: str | None = Query(None, description="客户端版本"),
+    custom_values: str | None = Query(None, description="自定义字段筛选JSON"),
 ):
     user = await _require_project_manager()
     if not await _can_view_all_projects(user):
@@ -80,6 +83,11 @@ async def list_projects(
         "server_version": server_version,
         "client_version": client_version,
     }
+    if custom_values:
+        try:
+            filters["custom_values"] = json.loads(custom_values)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="自定义字段筛选格式不正确") from None
     total, rows = await project_controller.list_projects(
         page=page,
         page_size=page_size,
@@ -99,6 +107,12 @@ async def get_project(project_id: int = Query(..., description="项目ID")):
     user = await _require_project_manager()
     await _ensure_project_visible(user, project_id)
     return Success(data=await project_controller.get_project(project_id))
+
+
+@router.get("/metadata", summary="项目元数据", dependencies=[DependAuth])
+async def get_project_metadata():
+    await _require_project_manager()
+    return Success(data={"custom_fields": await project_controller.custom_fields()})
 
 
 @router.post("/upload", summary="上传项目附件", dependencies=[DependAuth])
@@ -136,6 +150,8 @@ async def update_project(payload: ProjectUpdateIn):
     data = payload.model_dump(exclude={"project_id"})
     if "attachment_ids" not in payload.model_fields_set:
         data.pop("attachment_ids", None)
+    if "custom_values" not in payload.model_fields_set:
+        data.pop("custom_values", None)
     project = await project_controller.update_project(project_id=payload.project_id, user_id=user.id, payload=data)
     return Success(data=await project_controller.get_project(project.id))
 

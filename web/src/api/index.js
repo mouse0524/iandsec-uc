@@ -123,6 +123,7 @@ export default {
   // project
   projectList: (params = {}) => request.get('/project/list', { params }),
   projectGet: (params = {}) => request.get('/project/get', { params }),
+  getProjectMetadata: () => request.get('/project/metadata'),
   uploadProjectAttachment: (file) => {
     const formData = new FormData()
     formData.append('file', file)

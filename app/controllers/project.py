@@ -15,7 +15,8 @@ from app.controllers.dept import dept_controller
 from app.controllers.system_setting import system_setting_controller
 from app.controllers.user import user_controller
 from app.log import logger
-from app.models.admin import Dept, Project, ProjectActivity, ProjectAttachment, Ticket, User
+from app.models.admin import Dept, IssueCustomField, IssueCustomValue, Project, ProjectActivity, ProjectAttachment, Ticket, User
+from app.models.enums import IssueCustomFieldFormat
 from app.settings import settings
 from app.utils.company_name import company_name_search_q
 from app.utils.file_signature import detect_file_type, normalize_ext
@@ -197,6 +198,150 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="使用产品不能为空")
         return rows
 
+    async def custom_fields(self) -> list[dict]:
+        rows = (
+            await IssueCustomField.filter(type="project", visible=True)
+            .order_by("position", "id")
+            .values(
+                "id",
+                "type",
+                "name",
+                "field_format",
+                "possible_values",
+                "default_value",
+                "is_required",
+                "is_filter",
+                "searchable",
+                "multiple",
+                "visible",
+                "position",
+            )
+        )
+        return [self._json_field(row) for row in rows]
+
+    @staticmethod
+    def _json_field(row: dict) -> dict:
+        row = dict(row)
+        row["field_format"] = str(row.get("field_format") or "")
+        return row
+
+    @staticmethod
+    def _custom_value_is_empty(value) -> bool:
+        return value is None or value == "" or value == []
+
+    def _custom_value_to_text(self, field: dict, value) -> str | None:
+        if self._custom_value_is_empty(value):
+            return None
+        field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
+        if field_format == IssueCustomFieldFormat.DATE:
+            return self._clean(value)
+        if field_format == IssueCustomFieldFormat.LIST:
+            if field.get("multiple"):
+                values = [self._clean(item) for item in (value or []) if self._clean(item)]
+                return json.dumps(values, ensure_ascii=False) if values else None
+            return self._clean(value) or None
+        return self._clean(value) or None
+
+    def _custom_text_to_api(self, field: dict, value: str | None):
+        field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
+        if value is None:
+            return [] if field_format == IssueCustomFieldFormat.LIST and field.get("multiple") else ""
+        if field_format == IssueCustomFieldFormat.LIST and field.get("multiple"):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return value
+
+    async def _custom_values_by_project(self, project_ids: list[int], fields: list[dict] | None = None) -> dict[int, dict[str, object]]:
+        fields = fields if fields is not None else await self.custom_fields()
+        field_map = {int(field["id"]): field for field in fields}
+        rows = await IssueCustomValue.filter(
+            customized_type="Project",
+            customized_id__in=project_ids,
+            custom_field_id__in=list(field_map),
+        ).values("customized_id", "custom_field_id", "value")
+        result: dict[int, dict[str, object]] = {int(project_id): {} for project_id in project_ids}
+        for row in rows:
+            field = field_map.get(int(row["custom_field_id"]))
+            if field:
+                result[int(row["customized_id"])][str(row["custom_field_id"])] = self._custom_text_to_api(field, row["value"])
+        return result
+
+    async def _custom_filter_project_ids(self, filters: dict) -> set[int] | None:
+        custom_filters = filters.get("custom_values")
+        if not isinstance(custom_filters, dict):
+            return None
+        fields = {int(field["id"]): field for field in await self.custom_fields()}
+        matched_ids: set[int] | None = None
+        for raw_id, value in custom_filters.items():
+            if self._custom_value_is_empty(value):
+                continue
+            try:
+                field_id = int(raw_id or 0)
+            except (TypeError, ValueError):
+                continue
+            field = fields.get(field_id)
+            if not field:
+                continue
+            texts = (
+                [self._clean(item) for item in value if self._clean(item)]
+                if field.get("multiple") and isinstance(value, list)
+                else [self._custom_value_to_text(field, value)]
+            )
+            ids = None
+            for text in [item for item in texts if item is not None]:
+                field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
+                value_filter = (
+                    {"value__contains": json.dumps(text, ensure_ascii=False)}
+                    if field_format == IssueCustomFieldFormat.LIST and field.get("multiple")
+                    else {"value__contains": text}
+                    if field_format in {IssueCustomFieldFormat.STRING, IssueCustomFieldFormat.TEXT}
+                    else {"value": text}
+                )
+                current_ids = {
+                    int(item)
+                    for item in await IssueCustomValue.filter(
+                        customized_type="Project",
+                        custom_field_id=field_id,
+                        **value_filter,
+                    ).values_list("customized_id", flat=True)
+                }
+                ids = current_ids if ids is None else ids & current_ids
+            if ids is None:
+                continue
+            matched_ids = ids if matched_ids is None else matched_ids & ids
+        return matched_ids
+
+    async def save_custom_values(self, project_id: int, values: dict | None) -> None:
+        fields = await self.custom_fields()
+        field_map = {int(field["id"]): field for field in fields}
+        seen_ids = set()
+        for raw_id, value in (values or {}).items():
+            try:
+                field_id = int(raw_id or 0)
+            except (TypeError, ValueError):
+                continue
+            field = field_map.get(field_id)
+            if not field:
+                continue
+            text = self._custom_value_to_text(field, value)
+            if field.get("is_required") and text is None:
+                raise HTTPException(status_code=400, detail=f"请填写自定义字段：{field['name']}")
+            seen_ids.add(field_id)
+            obj, _ = await IssueCustomValue.get_or_create(
+                customized_type="Project",
+                customized_id=project_id,
+                custom_field_id=field_id,
+                defaults={"value": text},
+            )
+            obj.value = text
+            await obj.save()
+        for field in fields:
+            if field.get("is_required") and int(field["id"]) not in seen_ids:
+                raise HTTPException(status_code=400, detail=f"请填写自定义字段：{field['name']}")
+
     def _import_point_products(self, products: list[str], size: int) -> list[str]:
         by_lower = {item.lower(): item for item in products}
         fixed = [by_lower.get(item.lower()) for item in IMPORT_POINT_PRODUCTS[:size]]
@@ -377,8 +522,10 @@ class ProjectController:
         finally:
             wb.close()
 
+    @atomic()
     async def create_project(self, *, user_id: int, payload: dict) -> Project:
         attachment_ids = payload.pop("attachment_ids", [])
+        custom_values = payload.pop("custom_values", {})
         data = await self._validate_payload(payload)
         assignee_id = data.get("assignee_id")
         project = await Project.create(
@@ -387,13 +534,16 @@ class ProjectController:
             assigned_by=user_id if assignee_id else None,
             assigned_at=datetime.now() if assignee_id else None,
         )
+        await self.save_custom_values(project.id, custom_values)
         await self._bind_attachments(project_id=project.id, attachment_ids=attachment_ids, owner_ids=[user_id])
         await self.clear_summary_cache()
         return project
 
+    @atomic()
     async def update_project(self, *, project_id: int, user_id: int, payload: dict) -> Project:
         sync_attachments = "attachment_ids" in payload
         attachment_ids = payload.pop("attachment_ids", [])
+        custom_values = payload.pop("custom_values", None)
         project = await Project.get(id=project_id)
         data = await self._validate_payload(payload)
         old_assignee_id = project.assignee_id
@@ -403,6 +553,8 @@ class ProjectController:
             project.assigned_by = user_id if project.assignee_id else None
             project.assigned_at = datetime.now() if project.assignee_id else None
         await project.save()
+        if custom_values is not None:
+            await self.save_custom_values(project.id, custom_values)
         if sync_attachments:
             await self._sync_attachments(project_id=project.id, attachment_ids=attachment_ids, owner_ids=[user_id, project.created_by])
         await self.clear_summary_cache()
@@ -461,6 +613,7 @@ class ProjectController:
             raise HTTPException(status_code=400, detail="请选择项目")
         await ProjectActivity.filter(project_id__in=ids).delete()
         await ProjectAttachment.filter(project_id__in=ids).update(project_id=None)
+        await IssueCustomValue.filter(customized_type="Project", customized_id__in=ids).delete()
         count = await Project.filter(id__in=ids).delete()
         if count:
             await self.clear_summary_cache()
@@ -468,6 +621,9 @@ class ProjectController:
 
     async def list_projects(self, *, page: int, page_size: int, filters: dict) -> tuple[int, list[dict]]:
         q = self._project_q(filters)
+        custom_project_ids = await self._custom_filter_project_ids(filters)
+        if custom_project_ids is not None:
+            q &= Q(id__in=list(custom_project_ids))
         query = Project.filter(q)
         product_name = filters.get("product_name")
         if product_name:
@@ -501,6 +657,9 @@ class ProjectController:
 
     async def _project_summary_uncached(self, filters: dict) -> dict:
         q = self._project_q(filters)
+        custom_project_ids = await self._custom_filter_project_ids(filters)
+        if custom_project_ids is not None:
+            q &= Q(id__in=list(custom_project_ids))
         product_name = filters.get("product_name")
         projects = await Project.filter(q).all()
         if product_name:
@@ -543,6 +702,7 @@ class ProjectController:
                 "agent_name": await self._agent_name(project.agent_id),
                 "assignee_name": await self._user_name(project.assignee_id),
                 "creator_name": await self._user_name(project.created_by),
+                "custom_values": (await self._custom_values_by_project([project.id])).get(project.id, {}),
             }
         )
         return data

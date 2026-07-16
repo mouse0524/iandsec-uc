@@ -161,12 +161,6 @@ const settingsRules = {
   ticket_issue_types: listRule('请至少配置一个跟踪'),
   ticket_statuses: listRule('请至少配置一个状态'),
   ticket_priorities: listRule('请至少配置一个优先级'),
-  project_products: listRule('请至少配置一个项目产品'),
-  project_statuses: listRule('请至少配置一个项目状态'),
-  project_regions: listRule('请至少配置一个项目区域'),
-  project_activity_types: listRule('请至少配置一个运维类型'),
-  project_server_versions: listRule('请至少配置一个服务器版本'),
-  project_client_versions: listRule('请至少配置一个客户端版本'),
 }
 
 const sectionMap = {
@@ -214,10 +208,6 @@ const submitSectionMap = {
   issue_config: {
     title: '工单配置',
     hint: '维护工单选项顺序、分类、根因和描述模板',
-  },
-  submit_project: {
-    title: '项目管理',
-    hint: '维护项目、区域、运维类型和版本字典',
   },
   submit_notify: {
     title: '提醒规则',
@@ -285,16 +275,6 @@ const submitContentCount = computed(() =>
     'ticket_categories',
     'ticket_root_causes',
     'ticket_description_templates',
-  ]),
-)
-const submitProjectCount = computed(() =>
-  settingListCount([
-    'project_products',
-    'project_statuses',
-    'project_regions',
-    'project_activity_types',
-    'project_server_versions',
-    'project_client_versions',
   ]),
 )
 const submitNotifyCount = computed(() =>
@@ -737,6 +717,7 @@ async function loadConfig() {
   try {
     const res = await api.getIssueAdminConfig()
     config.value = { ...emptyConfig(), ...(res?.data || {}) }
+    config.value.custom_fields = (config.value.custom_fields || []).filter((item) => item.type === 'issue')
   } finally {
     loading.value = false
   }
@@ -997,53 +978,6 @@ async function deleteWorkflow(row) {
                       </div>
                       <NButton dashed @click="addDescriptionTemplate">新增模板</NButton>
                     </div>
-                  </NFormItem>
-                </div>
-              </section>
-            </NTabPane>
-
-            <NTabPane name="submit_project">
-              <template #tab>
-                <span class="tab-label"
-                  >项目管理 <em>{{ submitProjectCount }}</em></span
-                >
-              </template>
-              <div class="section-toolbar">
-                <div class="section-copy">
-                  <strong>{{ activeSection.title }}</strong>
-                  <span>{{ activeSection.hint }}</span>
-                </div>
-                <NButton
-                  type="primary"
-                  :disabled="settingsLoading"
-                  :loading="settingsSaving"
-                  @click="saveIssueSettings"
-                >
-                  <template #icon>
-                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
-                  </template>
-                  保存配置
-                </NButton>
-              </div>
-              <section class="submit-section">
-                <div class="settings-grid">
-                  <NFormItem label="项目产品" path="project_products">
-                    <SortableTags v-model:value="issueSettings.project_products" />
-                  </NFormItem>
-                  <NFormItem label="项目状态" path="project_statuses">
-                    <SortableTags v-model:value="issueSettings.project_statuses" />
-                  </NFormItem>
-                  <NFormItem label="项目区域" path="project_regions">
-                    <SortableTags v-model:value="issueSettings.project_regions" />
-                  </NFormItem>
-                  <NFormItem label="运维类型" path="project_activity_types">
-                    <SortableTags v-model:value="issueSettings.project_activity_types" />
-                  </NFormItem>
-                  <NFormItem label="服务器版本" path="project_server_versions">
-                    <SortableTags v-model:value="issueSettings.project_server_versions" />
-                  </NFormItem>
-                  <NFormItem label="客户端版本" path="project_client_versions">
-                    <SortableTags v-model:value="issueSettings.project_client_versions" />
                   </NFormItem>
                 </div>
               </section>

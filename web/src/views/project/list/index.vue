@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton,
@@ -36,12 +36,13 @@ const $table = ref(null)
 const modalVisible = ref(false)
 const editingId = ref(null)
 const readonly = ref(false)
-const queryItems = ref({})
+const queryItems = ref({ custom_values: {} })
 const productOptions = ref([])
 const statusOptions = ref([])
 const regionOptions = ref([])
 const serverVersionOptions = ref([])
 const clientVersionOptions = ref([])
+const customFields = ref([])
 const userOptions = ref([])
 const agentOptions = ref([])
 const uploadLoading = ref(false)
@@ -82,11 +83,17 @@ const activityForm = computed(() => ({
 const defaultSummary = { total: 0, presale: 0, pending: 0, implementing: 0, pending_acceptance: 0, accepted: 0, lost: 0, product_points: [] }
 const summary = ref({ ...defaultSummary })
 const form = ref(defaultForm())
+const customFilterFields = computed(() => customFields.value.filter((item) => item.is_filter))
+const tableScrollX = computed(() => 1568 + customFields.value.length * 140)
 let optionsPromise = null
 
 onMounted(async () => {
   await loadOptions()
   $table.value?.handleSearch()
+})
+
+watchEffect(() => {
+  if (!queryItems.value.custom_values) queryItems.value.custom_values = {}
 })
 
 function defaultForm() {
@@ -108,6 +115,7 @@ function defaultForm() {
     status: null,
     assignee_id: null,
     attachment_ids: [],
+    custom_values: {},
     remark: '',
   }
 }
@@ -129,7 +137,7 @@ function defaultRemarkForm() {
 async function loadOptions() {
   if (optionsPromise) return optionsPromise
   optionsPromise = (async () => {
-    const configRes = await api.getAppConfig()
+    const [configRes, metadataRes] = await Promise.all([api.getAppConfig(), api.getProjectMetadata()])
     const config = configRes?.data || {}
     const products = config.project_products?.length ? config.project_products : ['安得卫士']
     const statuses = config.project_statuses?.length
@@ -143,6 +151,7 @@ async function loadOptions() {
     regionOptions.value = regions.map((item) => ({ label: item, value: item }))
     serverVersionOptions.value = serverVersions.map((item) => ({ label: item, value: item }))
     clientVersionOptions.value = clientVersions.map((item) => ({ label: item, value: item }))
+    customFields.value = metadataRes?.data?.custom_fields || []
   })()
   return optionsPromise
 }
@@ -183,7 +192,14 @@ function channelDeptOptions(rows) {
 }
 
 async function getProjectList(params) {
-  const res = await api.projectList(params)
+  const customValues = params.custom_values || {}
+  const cleanCustomValues = Object.fromEntries(
+    Object.entries(customValues).filter(([, value]) => !isEmptyCustomValue(value)),
+  )
+  const res = await api.projectList({
+    ...params,
+    custom_values: Object.keys(cleanCustomValues).length ? JSON.stringify(cleanCustomValues) : undefined,
+  })
   summary.value = normalizeSummary(res?.summary)
   return res
 }
@@ -229,6 +245,7 @@ async function openCreate() {
     status: statusOptions.value[0]?.value,
   }
   fileList.value = []
+  ensureCustomDefaults()
   modalVisible.value = true
 }
 
@@ -246,6 +263,7 @@ function openProject(row, isReadonly) {
     end_time: row.end_time ? Date.parse(row.end_time) : null,
     maintenance_time: row.maintenance_time ? Date.parse(row.maintenance_time) : null,
     attachment_ids: attachments.map((item) => Number(item.id)).filter((id) => id > 0),
+    custom_values: row.custom_values || {},
   }
   fileList.value = attachments.map((item) => ({
     id: String(item.id),
@@ -254,6 +272,7 @@ function openProject(row, isReadonly) {
     attachmentId: Number(item.id),
   }))
   remarkForm.value = defaultRemarkForm()
+  ensureCustomDefaults()
   loadRemarkTimeline(row.id)
   modalVisible.value = true
 }
@@ -317,6 +336,7 @@ async function submitProject() {
     $message.warning('请填写项目名称并选择使用产品')
     return
   }
+  if (!validateCustomFields()) return
   const payload = {
     ...form.value,
     product_points: (form.value.product_points || []).map((item) => ({
@@ -337,6 +357,40 @@ async function submitProject() {
   }
   modalVisible.value = false
   $table.value?.handleSearch()
+}
+
+function ensureCustomDefaults() {
+  form.value.custom_values = form.value.custom_values || {}
+  for (const field of customFields.value) {
+    const key = String(field.id)
+    if (form.value.custom_values[key] == null && field.default_value != null) {
+      form.value.custom_values[key] = field.multiple ? [field.default_value] : field.default_value
+    }
+  }
+}
+
+function isEmptyCustomValue(value) {
+  return value == null || value === '' || (Array.isArray(value) && !value.length)
+}
+
+function validateCustomFields() {
+  const values = form.value.custom_values || {}
+  const missing = customFields.value.find((field) => field.is_required && isEmptyCustomValue(values[field.id]))
+  if (missing) {
+    $message.warning(`请填写自定义字段：${missing.name}`)
+    return false
+  }
+  return true
+}
+
+function customFieldOptions(field) {
+  return (field.possible_values || []).map((item) => ({ label: item, value: item }))
+}
+
+function customFieldValue(field, values = {}) {
+  const value = values?.[field.id] ?? values?.[String(field.id)]
+  if (Array.isArray(value)) return value.join('、') || '-'
+  return value == null || value === '' ? '-' : value
 }
 
 async function customUpload({ file, onFinish, onError }) {
@@ -555,7 +609,7 @@ const activityColumns = [
   },
 ]
 
-const columns = [
+const baseColumns = [
   { type: 'selection', fixed: 'left', width: 48 },
   { title: '区域', key: 'region', align: 'center', width: 90, render: (row) => row.region || '-' },
   { title: '所属代理商', key: 'agent_name', align: 'center', width: 150, render: (row) => row.agent_name || '-' },
@@ -580,29 +634,43 @@ const columns = [
   { title: '状态', key: 'status', align: 'center', width: 110, render: (row) => row.status || '-' },
   { title: '负责人', key: 'assignee_name', align: 'center', width: 120, render: (row) => row.assignee_name || '-' },
   { title: '创建时间', key: 'created_at', align: 'center', width: 170, render: (row) => row.created_at || '-' },
-  {
-    title: '操作',
-    key: 'actions',
-    align: 'center',
-    fixed: 'right',
-    width: 180,
-    render(row) {
-      return [
-        h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
-        h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 6px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-        h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 6px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
-        h(
-          NPopconfirm,
-          { onPositiveClick: () => deleteProjects([row.id]) },
-          {
-            trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 6px' }, { default: () => '删除' }),
-            default: () => '删除后不可恢复，是否继续？',
-          }
-        ),
-      ]
-    },
-  },
 ]
+
+const actionColumn = {
+  title: '操作',
+  key: 'actions',
+  align: 'center',
+  fixed: 'right',
+  width: 180,
+  render(row) {
+    return [
+      h(NButton, { size: 'small', type: 'primary', text: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
+      h(NButton, { size: 'small', type: 'warning', text: true, style: 'margin-left: 6px', onClick: () => openEdit(row) }, { default: () => '编辑' }),
+      h(NButton, { size: 'small', type: 'info', text: true, style: 'margin-left: 6px', onClick: () => openWorkOrders(row) }, { default: () => '工单' }),
+      h(
+        NPopconfirm,
+        { onPositiveClick: () => deleteProjects([row.id]) },
+        {
+          trigger: () => h(NButton, { size: 'small', type: 'error', text: true, style: 'margin-left: 6px' }, { default: () => '删除' }),
+          default: () => '删除后不可恢复，是否继续？',
+        }
+      ),
+    ]
+  },
+}
+
+const displayColumns = computed(() => [
+  ...baseColumns,
+  ...customFields.value.map((field) => ({
+    title: field.name,
+    key: `custom_${field.id}`,
+    align: 'center',
+    width: 140,
+    ellipsis: { tooltip: true },
+    render: (row) => customFieldValue(field, row.custom_values),
+  })),
+  actionColumn,
+])
 </script>
 
 <template>
@@ -652,9 +720,9 @@ const columns = [
     <CrudTable
       ref="$table"
       v-model:query-items="queryItems"
-      :columns="columns"
+      :columns="displayColumns"
       :get-data="getProjectList"
-      :scroll-x="1568"
+      :scroll-x="tableScrollX"
       @on-checked="handleChecked"
     >
       <template #queryBar>
@@ -699,6 +767,35 @@ const columns = [
         <QueryBarItem label="客户端版本" :label-width="72">
           <NSelect v-model:value="queryItems.client_version" :options="clientVersionOptions" clearable filterable style="width: 160px" @focus="loadOptions" />
         </QueryBarItem>
+        <QueryBarItem
+          v-for="field in customFilterFields"
+          :key="field.id"
+          :label="field.name"
+          :label-width="72"
+        >
+          <NSelect
+            v-if="field.field_format === 'list'"
+            v-model:value="queryItems.custom_values[field.id]"
+            :options="customFieldOptions(field)"
+            :multiple="field.multiple"
+            clearable
+            filterable
+            style="width: 160px"
+          />
+          <input
+            v-else-if="field.field_format === 'date'"
+            v-model="queryItems.custom_values[field.id]"
+            class="native-date-input query-date-input"
+            type="date"
+          />
+          <NInput
+            v-else
+            v-model:value="queryItems.custom_values[field.id]"
+            clearable
+            placeholder="请输入"
+            style="width: 160px"
+          />
+        </QueryBarItem>
         <QueryBarItem label="" :label-width="0">
           <div class="toolbar-actions">
             <NButton type="primary" @click="openCreate">新增项目</NButton>
@@ -721,13 +818,12 @@ const columns = [
       </template>
     </CrudTable>
 
-    <CrudModal
-      v-model:visible="modalVisible"
-      :title="readonly ? '项目详情' : editingId ? '编辑项目' : '新增项目'"
-      width="min(1280px, 96vw)"
-      :show-footer="!readonly"
-      @save="submitProject"
-    >
+    <NDrawer v-model:show="modalVisible" placement="right" :width="1180">
+      <NDrawerContent
+        :title="readonly ? '项目详情' : editingId ? '编辑项目' : '新增项目'"
+        closable
+        :native-scrollbar="false"
+      >
       <div class="project-modal-head">
         <div>
           <div class="modal-eyebrow">{{ readonly ? '项目详情' : editingId ? '编辑项目' : '创建项目' }}</div>
@@ -777,6 +873,50 @@ const columns = [
                 <NFormItem label="客户对接人"><NInput v-model:value="form.customer_contact" placeholder="请输入客户对接人" :disabled="readonly" /></NFormItem>
                 <NFormItem label="联系电话"><NInput v-model:value="form.customer_phone" placeholder="请输入联系电话" :disabled="readonly" /></NFormItem>
                 <NFormItem label="联系邮箱"><NInput v-model:value="form.customer_email" placeholder="请输入联系邮箱" :disabled="readonly" /></NFormItem>
+              </div>
+            </div>
+
+            <div v-if="customFields.length" class="form-section custom-section">
+              <div class="section-title"><span>自定义字段</span></div>
+              <div class="form-grid contact-grid">
+                <NFormItem
+                  v-for="field in customFields"
+                  :key="field.id"
+                  :label="field.name"
+                  :required="field.is_required"
+                >
+                  <NSelect
+                    v-if="field.field_format === 'list'"
+                    v-model:value="form.custom_values[field.id]"
+                    :options="customFieldOptions(field)"
+                    :multiple="field.multiple"
+                    clearable
+                    placeholder="请选择"
+                    :disabled="readonly"
+                  />
+                  <input
+                    v-else-if="field.field_format === 'date'"
+                    v-model="form.custom_values[field.id]"
+                    class="native-date-input"
+                    type="date"
+                    :disabled="readonly"
+                  />
+                  <NInput
+                    v-else-if="field.field_format === 'text'"
+                    v-model:value="form.custom_values[field.id]"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 5 }"
+                    placeholder="请输入"
+                    :disabled="readonly"
+                  />
+                  <NInput
+                    v-else
+                    v-model:value="form.custom_values[field.id]"
+                    clearable
+                    placeholder="请输入"
+                    :disabled="readonly"
+                  />
+                </NFormItem>
               </div>
             </div>
           </div>
@@ -840,7 +980,14 @@ const columns = [
           </div>
         </div>
       </NForm>
-    </CrudModal>
+        <template v-if="!readonly" #footer>
+          <div class="drawer-footer">
+            <NButton @click="modalVisible = false">取消</NButton>
+            <NButton type="primary" @click="submitProject">保存</NButton>
+          </div>
+        </template>
+      </NDrawerContent>
+    </NDrawer>
 
     <CrudModal
       v-model:visible="batchModalVisible"
@@ -1056,6 +1203,11 @@ const columns = [
   background: #fff;
 }
 
+.custom-section {
+  border-color: #eadcf8;
+  background: #fffbff;
+}
+
 .remark-section {
   border-color: #d5eadf;
   background: #fbfffd;
@@ -1111,6 +1263,28 @@ const columns = [
 
 .span-2 {
   grid-column: 1 / -1;
+}
+
+.native-date-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 3px;
+  color: #333639;
+  outline: none;
+}
+
+.native-date-input:disabled {
+  color: #c2c2c2;
+  background: #f5f7fa;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .remark-timeline {
