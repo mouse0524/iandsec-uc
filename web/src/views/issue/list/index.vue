@@ -83,11 +83,12 @@ const tableScrollX = computed(
 )
 const builtInQueries = computed(() => {
   const userId = Number(userStore.userId || 0)
+  const userName = userStore.name
   return [
     {
       label: '我提交',
       value: 'builtin:submitted-by-me',
-      filters: userId ? { submitter_id: userId } : {},
+      filters: userName ? { submitter_name: userName } : {},
     },
     {
       label: '指派给我',
@@ -475,19 +476,22 @@ function compactFilters() {
 }
 
 async function applySavedQuery(queryId) {
-  const currentCustomFilters = Object.fromEntries(
-    Object.entries(queryItems.value || {}).filter(([key]) => key.startsWith('cf_')),
-  )
+  if (!queryId) {
+    queryItems.value = { assigned_to_id: [] }
+    await nextTick()
+    $table.value?.handleSearch?.()
+    return
+  }
   const builtInQuery = builtInQueries.value.find((item) => item.value === queryId)
   if (builtInQuery) {
-    queryItems.value = { ...currentCustomFilters, ...builtInQuery.filters }
+    queryItems.value = normalizedQueryFilters(builtInQuery.filters)
     await nextTick()
     $table.value?.handleSearch?.()
     return
   }
   const query = queries.value.find((item) => Number(item.id) === Number(queryId))
   if (!query) {
-    queryItems.value = { ...currentCustomFilters }
+    queryItems.value = { assigned_to_id: [] }
     await nextTick()
     $table.value?.handleSearch?.()
     return
@@ -496,12 +500,23 @@ async function applySavedQuery(queryId) {
   const customValues = filters.custom_values || {}
   delete filters.custom_values
   queryItems.value = {
-    ...filters,
-    assigned_to_id: normalizeAssigneeFilter(filters.assigned_to_id),
+    ...normalizedQueryFilters(filters),
     ...Object.fromEntries(Object.entries(customValues).map(([key, value]) => [`cf_${key}`, value])),
   }
   await nextTick()
   $table.value?.handleSearch?.()
+}
+
+function handleQueryReset() {
+  selectedQueryId.value = null
+  queryItems.value = { assigned_to_id: [] }
+}
+
+function normalizedQueryFilters(filters = {}) {
+  return {
+    ...filters,
+    assigned_to_id: normalizeAssigneeFilter(filters.assigned_to_id),
+  }
 }
 
 function savedQueryId(value) {
@@ -724,7 +739,9 @@ const columns = computed(() => [
           v-model:query-items="queryItems"
           :columns="columns"
           :get-data="getIssueList"
+          :reset-to-initial="false"
           :scroll-x="tableScrollX"
+          @on-reset="handleQueryReset"
         >
           <template #queryBar>
             <QueryBarItem label="标题" :label-width="40">
@@ -783,12 +800,12 @@ const columns = computed(() => [
             <QueryBarItem label="当前指派人" :label-width="82">
               <NSelect
                 v-model:value="queryItems.assigned_to_id"
+                class="assignee-query-select"
                 :options="assigneeOptions"
                 clearable
                 filterable
                 multiple
                 placeholder="选择用户"
-                style="width: 180px"
               />
             </QueryBarItem>
             <QueryBarItem
@@ -1140,6 +1157,10 @@ const columns = computed(() => [
 
 .query-tools :deep(.n-select) {
   width: 220px;
+}
+
+.query-tools :deep(.assignee-query-select) {
+  width: 320px;
 }
 
 :deep(.n-data-table-th) {

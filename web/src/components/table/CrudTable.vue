@@ -60,6 +60,10 @@ const props = defineProps({
       return {}
     },
   },
+  resetToInitial: {
+    type: Boolean,
+    default: true,
+  },
   /**
    * ! 约定接口入参出参
    * * 分页模式需约定分页接口入参
@@ -72,7 +76,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:queryItems', 'onChecked', 'onDataChange'])
+const emit = defineEmits(['update:queryItems', 'onChecked', 'onDataChange', 'onReset'])
 const loading = ref(false)
 const initQuery = { ...props.queryItems }
 const tableData = ref([])
@@ -141,7 +145,8 @@ async function handleReset() {
   for (const key in queryItems) {
     queryItems[key] = null
   }
-  emit('update:queryItems', { ...queryItems, ...initQuery })
+  emit('update:queryItems', props.resetToInitial ? { ...queryItems, ...initQuery } : queryItems)
+  emit('onReset')
   await nextTick()
   pagination.page = 1
   handleQuery()

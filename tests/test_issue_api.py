@@ -351,7 +351,6 @@ async def test_issue_name_filter_q_maps_names_to_search_conditions(monkeypatch):
     assert {"issue_status_id__in": [22]} in filters
     assert {"assigned_to_id__in": [33]} in filters
     assert {"submitter_id__in": [33]} in filters
-    assert {"submitter_id": 33} in _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"submitter_id": 33}))
 
 
 @pytest.mark.anyio
@@ -367,11 +366,56 @@ async def test_issue_name_filter_q_ignores_empty_name_matches(monkeypatch):
         {
             "issue_status_name": "不存在",
             "assigned_to_name": "不存在",
-            "submitter_name": "不存在",
         }
     )
 
     assert {"id": 0} not in _q_filters(q)
+
+
+@pytest.mark.anyio
+async def test_issue_submitter_name_filter_returns_empty_when_no_user_matches(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    async def fake_ids(model, text, fields):
+        return []
+
+    monkeypatch.setattr(issue_api, "_ids_by_contains", fake_ids)
+
+    q = await issue_api._issue_name_filter_q({"submitter_name": "222"})
+
+    assert {"id": 0} in _q_filters(q)
+
+
+@pytest.mark.anyio
+async def test_legacy_saved_submitter_id_maps_to_name(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    class UserQuery:
+        def values(self, *fields):
+            return self
+
+        async def first(self):
+            return {"alias": "提交人", "username": "submitter", "email": "s@example.com"}
+
+    monkeypatch.setattr(issue_api.User, "filter", lambda **kwargs: UserQuery())
+
+    assert await issue_api._legacy_submitter_name_filter({"submitter_id": "3"}) == "提交人"
+
+
+@pytest.mark.anyio
+async def test_legacy_saved_submitter_id_missing_keeps_empty_match(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    class UserQuery:
+        def values(self, *fields):
+            return self
+
+        async def first(self):
+            return None
+
+    monkeypatch.setattr(issue_api.User, "filter", lambda **kwargs: UserQuery())
+
+    assert await issue_api._legacy_submitter_name_filter({"submitter_id": "3"}) == "__legacy_submitter_id_3__"
 
 
 @pytest.mark.anyio
@@ -418,12 +462,10 @@ def test_issue_assignee_filter_accepts_multiple_ids():
     assert {"assigned_to_id__in": [7, 8]} in filters
 
 
-def test_issue_submitter_filter_keeps_numeric_id():
+def test_issue_query_filters_exclude_submitter_id():
     from app.api.v1.issues import issues as issue_api
 
-    filters = _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"submitter_id": "3"}))
-
-    assert {"submitter_id": 3} in filters
+    assert "submitter_id" not in issue_api.ISSUE_QUERY_FILTER_FIELDS
 
 
 def test_issue_assignee_filter_permission_scope():

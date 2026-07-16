@@ -124,7 +124,6 @@ ISSUE_QUERY_FILTER_FIELDS = {
     "issue_status_id",
     "issue_priority_id",
     "assigned_to_id",
-    "submitter_id",
 }
 ISSUE_SORT_FIELDS = {
     "id",
@@ -737,6 +736,16 @@ async def _ids_by_contains(model, text: Any, fields: tuple[str, ...]) -> list[in
     return [int(row["id"]) for row in await model.filter(q).values("id")]
 
 
+async def _legacy_submitter_name_filter(saved_filters: dict[str, Any]) -> str | None:
+    submitter_id = _coerce_int(saved_filters.get("submitter_id"))
+    if submitter_id is None:
+        return None
+    row = await User.filter(id=submitter_id, is_active=True).values("alias", "username", "email").first()
+    if not row:
+        return f"__legacy_submitter_id_{submitter_id}__"
+    return row.get("alias") or row.get("username") or row.get("email") or ""
+
+
 async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
     q = Q()
     project_name = str(filters.get("issue_project_name") or "").strip()
@@ -762,8 +771,7 @@ async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
     submitter_name = str(filters.get("submitter_name") or "").strip()
     if submitter_name:
         user_ids = await _ids_by_contains(User, submitter_name, ("alias", "username", "email"))
-        if user_ids:
-            q &= Q(submitter_id__in=user_ids)
+        q &= Q(submitter_id__in=user_ids) if user_ids else Q(id=0)
     return q
 
 
@@ -888,7 +896,6 @@ async def list_issues(
     issue_status_id: int | None = Query(None, description="状态ID"),
     issue_priority_id: int | None = Query(None, description="优先级ID"),
     assigned_to_id: str | None = Query(None, description="指派人ID，多个用逗号分隔"),
-    submitter_id: str | None = Query(None, description="提交者ID或姓名"),
     issue_project_name: str | None = Query(None, description="项目名称"),
     issue_status_name: str | None = Query(None, description="状态"),
     assigned_to_name: str | None = Query(None, description="用户名称"),
@@ -912,6 +919,9 @@ async def list_issues(
     title = title if title is not None else saved_filters.get("title")
     scope = scope if scope is not None else saved_filters.get("scope")
     q = await _issue_visibility_q(user, role_names, scope)
+    saved_submitter_name = saved_filters.get("submitter_name")
+    if saved_submitter_name is None:
+        saved_submitter_name = await _legacy_submitter_name_filter(saved_filters)
     issue_filters = {
         "issue_project_id": issue_project_id if issue_project_id is not None else saved_filters.get("issue_project_id"),
         "issue_tracker_id": issue_tracker_id if issue_tracker_id is not None else saved_filters.get("issue_tracker_id"),
@@ -920,7 +930,6 @@ async def list_issues(
             issue_priority_id if issue_priority_id is not None else saved_filters.get("issue_priority_id")
         ),
         "assigned_to_id": assigned_to_id if assigned_to_id is not None else saved_filters.get("assigned_to_id"),
-        "submitter_id": submitter_id if submitter_id is not None else saved_filters.get("submitter_id"),
         "issue_project_name": (
             issue_project_name if issue_project_name is not None else saved_filters.get("issue_project_name")
         ),
@@ -928,11 +937,8 @@ async def list_issues(
             issue_status_name if issue_status_name is not None else saved_filters.get("issue_status_name")
         ),
         "assigned_to_name": assigned_to_name if assigned_to_name is not None else saved_filters.get("assigned_to_name"),
-        "submitter_name": submitter_name if submitter_name is not None else saved_filters.get("submitter_name"),
+        "submitter_name": submitter_name if submitter_name is not None else saved_submitter_name,
     }
-    if issue_filters.get("submitter_id") and _coerce_int(issue_filters.get("submitter_id")) is None:
-        issue_filters["submitter_name"] = issue_filters["submitter_id"]
-        issue_filters["submitter_id"] = None
     issue_filters["assigned_to_id"] = _allowed_assignee_filter(user, role_names, issue_filters.get("assigned_to_id"))
     q = _apply_query_filters(q, {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
     q &= await _issue_name_filter_q(issue_filters)
