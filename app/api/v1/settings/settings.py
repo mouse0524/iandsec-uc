@@ -34,6 +34,7 @@ async def update_system_setting(payload: SystemSettingUpdateIn):
     optional_preserve_keys = (
         "allow_channel_register",
         "allow_user_register",
+        "site_base_url",
         "db_backup_enabled",
         "db_backup_directory",
         "db_backup_mysql_container",

@@ -2,8 +2,6 @@
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NButton,
-  NCheckbox,
-  NCheckboxGroup,
   NDataTable,
   NDynamicTags,
   NDrawer,
@@ -101,42 +99,6 @@ const SortableTags = {
   },
 }
 
-const ticketNotifyRoles = [
-  { label: '用户', value: '用户' },
-  { label: '渠道商', value: '代理商' },
-  { label: '客服', value: '客服' },
-  { label: '技术', value: '技术' },
-  { label: '产品', value: '产品' },
-  { label: '测试', value: '测试' },
-  { label: '研发', value: '研发' },
-]
-
-const ticketNotifyRoleOptions = {
-  用户: [
-    { label: '客服驳回', value: 'cs_rejected' },
-    { label: '技术驳回', value: 'tech_rejected' },
-    { label: '待关闭', value: 'pending_close' },
-    { label: '处理完成', value: 'done' },
-  ],
-  代理商: [
-    { label: '客服驳回', value: 'cs_rejected' },
-    { label: '技术驳回', value: 'tech_rejected' },
-    { label: '待关闭', value: 'pending_close' },
-    { label: '处理完成', value: 'done' },
-  ],
-  客服: [{ label: '商务审核', value: 'pending_review' }],
-  技术: [
-    { label: '待技术处理', value: 'tech_processing' },
-    { label: '现场验证', value: 'field_verification' },
-  ],
-  产品: [{ label: '产品评估', value: 'product_evaluation' }],
-  测试: [
-    { label: '测试过滤', value: 'test_filtering' },
-    { label: '测试验证', value: 'test_verification' },
-  ],
-  研发: [{ label: '研发修改', value: 'rd_processing' }],
-}
-
 const settingsRules = {
   ticket_attachment_extensions: listRule('请至少配置一个允许上传类型'),
   ticket_project_phases: listRule('请至少配置一个项目阶段'),
@@ -210,10 +172,6 @@ const submitSectionMap = {
     title: '工单配置',
     hint: '维护工单选项顺序、分类、根因和描述模板',
   },
-  submit_notify: {
-    title: '提醒规则',
-    hint: '按角色维护需要触达的工单节点',
-  },
 }
 
 const activeStatuses = computed(() =>
@@ -277,12 +235,6 @@ const submitContentCount = computed(() =>
     'ticket_root_causes',
     'ticket_description_templates',
   ]),
-)
-const submitNotifyCount = computed(() =>
-  Object.values(issueSettings.value.ticket_notify_by_role || {}).reduce(
-    (total, items) => total + cleanList(items).length,
-    0,
-  ),
 )
 const possibleValueText = computed({
   get: () => (modalForm.value.possible_values || []).join('\n'),
@@ -439,15 +391,6 @@ function defaultIssueSettings() {
     project_activity_types: ['迁移库', '重做系统', '运维', '其他'],
     project_server_versions: ['5.6.1'],
     project_client_versions: ['2.25'],
-    ticket_notify_by_role: {
-      用户: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
-      代理商: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
-      客服: ['pending_review'],
-      技术: ['tech_processing', 'field_verification'],
-      产品: ['product_evaluation'],
-      测试: ['test_filtering', 'test_verification'],
-      研发: ['rd_processing'],
-    },
   }
 }
 
@@ -467,20 +410,6 @@ function listRule(message) {
     validator: (_rule, value) => (cleanList(value).length ? true : new Error(message)),
     trigger: ['change', 'blur'],
   }
-}
-
-function normalizeTicketNotifyByRole(raw = {}) {
-  const normalized = {}
-  ticketNotifyRoles.forEach((role) => {
-    const allowed = new Set((ticketNotifyRoleOptions[role.value] || []).map((item) => item.value))
-    const selected = Array.isArray(raw[role.value])
-      ? raw[role.value]
-      : role.value === '代理商' && Array.isArray(raw['渠道商'])
-        ? raw['渠道商']
-        : []
-    normalized[role.value] = selected.filter((item) => allowed.has(item))
-  })
-  return normalized
 }
 
 function mergeIssueSettings(data = {}) {
@@ -551,9 +480,6 @@ function mergeIssueSettings(data = {}) {
         ? data.project_client_versions
         : defaults.project_client_versions,
     ),
-    ticket_notify_by_role: normalizeTicketNotifyByRole(
-      data.ticket_notify_by_role || defaults.ticket_notify_by_role,
-    ),
   }
 }
 
@@ -578,7 +504,6 @@ function issueSettingsPayload() {
     project_activity_types: cleanList(issueSettings.value.project_activity_types),
     project_server_versions: cleanList(issueSettings.value.project_server_versions),
     project_client_versions: cleanList(issueSettings.value.project_client_versions),
-    ticket_notify_by_role: normalizeTicketNotifyByRole(issueSettings.value.ticket_notify_by_role),
   }
 }
 
@@ -985,52 +910,6 @@ async function deleteWorkflow(row) {
               </section>
             </NTabPane>
 
-            <NTabPane name="submit_notify">
-              <template #tab>
-                <span class="tab-label"
-                  >提醒规则 <em>{{ submitNotifyCount }}</em></span
-                >
-              </template>
-              <div class="section-toolbar">
-                <div class="section-copy">
-                  <strong>{{ activeSection.title }}</strong>
-                  <span>{{ activeSection.hint }}</span>
-                </div>
-                <NButton
-                  type="primary"
-                  :disabled="settingsLoading"
-                  :loading="settingsSaving"
-                  @click="saveIssueSettings"
-                >
-                  <template #icon>
-                    <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
-                  </template>
-                  保存配置
-                </NButton>
-              </div>
-              <section class="submit-section">
-                <div class="notify-grid">
-                  <NFormItem
-                    v-for="role in ticketNotifyRoles"
-                    :key="role.value"
-                    :label="`${role.label}提醒节点`"
-                  >
-                    <NCheckboxGroup v-model:value="issueSettings.ticket_notify_by_role[role.value]">
-                      <div class="notify-options">
-                        <NCheckbox
-                          v-for="item in ticketNotifyRoleOptions[role.value]"
-                          :key="item.value"
-                          :value="item.value"
-                        >
-                          {{ item.label }}
-                        </NCheckbox>
-                      </div>
-                    </NCheckboxGroup>
-                  </NFormItem>
-                </div>
-              </section>
-            </NTabPane>
-
             <NTabPane name="workflows">
               <template #tab>
                 <span class="tab-label"
@@ -1379,18 +1258,6 @@ async function deleteWorkflow(row) {
   padding: 4px 0;
 }
 
-.notify-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
-}
-
-.notify-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(140px, 1fr));
-  gap: 8px 12px;
-}
-
 :deep(.n-data-table-th) {
   color: #475569;
   font-size: 12px;
@@ -1510,8 +1377,6 @@ async function deleteWorkflow(row) {
   }
 
   .settings-grid,
-  .notify-grid,
-  .notify-options,
   .template-item,
   .workflow-role-grid,
   .drawer-grid,

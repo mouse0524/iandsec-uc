@@ -376,12 +376,16 @@ class IssueUpdateService:
             if not assignee_id:
                 raise HTTPException(status_code=400, detail="状态变更时必须指定当前指派人")
 
-    async def _apply_status_side_effects(self, *, issue, status_id: int) -> None:
+    async def _apply_status_side_effects(self, *, issue, status_id: int, user_id: int) -> None:
         status = await self._read_status(status_id)
         if not status:
             return
         status_name = str(_get_value(status, "name") or "")
-        legacy_status = ISSUE_STATUS_TO_TICKET_STATUS.get(status_name)
+        legacy_status = (
+            TicketStatus.CS_REJECTED
+            if status_name == "新建" and _int_value(getattr(issue, "submitter_id", None)) != int(user_id)
+            else ISSUE_STATUS_TO_TICKET_STATUS.get(status_name)
+        )
         if legacy_status and hasattr(issue, "status"):
             issue.status = legacy_status
         if hasattr(issue, "closed_at"):
@@ -452,7 +456,7 @@ class IssueUpdateService:
                     changes=changes,
                     bypass=bypass_workflow,
                 )
-                await self._apply_status_side_effects(issue=issue, status_id=int(new_value))
+                await self._apply_status_side_effects(issue=issue, status_id=int(new_value), user_id=user_id)
             setattr(issue, field, new_value)
             changed.append((field, _string_value(old_value), _string_value(new_value)))
 

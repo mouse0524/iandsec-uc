@@ -83,7 +83,6 @@ ISSUE_LIST_FIELDS = [
     "id",
     "ticket_no",
     "title",
-    "description",
     "status",
     "issue_type",
     "project_phase",
@@ -230,7 +229,7 @@ def _issue_dashboard_data(rows: list[dict], statuses: list[dict]) -> dict[str, A
             for row in sorted(stale_rows, key=lambda item: _as_datetime(item.get("updated_at")) or datetime.max)[:10]
         ],
     }
-ISSUE_VIEW_ALL_ROLES = {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}
+ISSUE_VIEW_ALL_ROLES = {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_TECH, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}
 
 
 async def _maybe_await(value):
@@ -711,6 +710,23 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def _coerce_int_list(value: Any) -> list[int]:
+    values = value if isinstance(value, (list, tuple, set)) else str(value or "").split(",")
+    result = []
+    for item in values:
+        int_value = _coerce_int(item)
+        if int_value is not None and int_value not in result:
+            result.append(int_value)
+    return result
+
+
+def _allowed_assignee_filter(user: User, role_names: list[str], value: Any) -> list[int]:
+    values = _coerce_int_list(value)
+    if values and not _can_view_all_issues(user, role_names):
+        return [int(user.id)]
+    return values
+
+
 async def _ids_by_contains(model, text: Any, fields: tuple[str, ...]) -> list[int]:
     value = str(text or "").strip()
     if not value or not fields:
@@ -756,6 +772,11 @@ def _apply_query_filters(q: Q, filters: dict[str, Any]) -> Q:
     if title:
         q &= Q(title__contains=title)
     for field in ISSUE_QUERY_FILTER_FIELDS:
+        if field == "assigned_to_id":
+            values = _coerce_int_list(filters.get(field))
+            if values:
+                q &= Q(assigned_to_id__in=values)
+            continue
         value = _coerce_int(filters.get(field))
         if value is not None:
             q &= Q(**{field: value})
@@ -866,7 +887,7 @@ async def list_issues(
     issue_tracker_id: int | None = Query(None, description="Tracker ID"),
     issue_status_id: int | None = Query(None, description="状态ID"),
     issue_priority_id: int | None = Query(None, description="优先级ID"),
-    assigned_to_id: int | None = Query(None, description="指派人ID"),
+    assigned_to_id: str | None = Query(None, description="指派人ID，多个用逗号分隔"),
     submitter_id: int | None = Query(None, description="提交者ID"),
     issue_project_name: str | None = Query(None, description="项目名称"),
     issue_status_name: str | None = Query(None, description="状态"),
@@ -909,10 +930,8 @@ async def list_issues(
         "assigned_to_name": assigned_to_name if assigned_to_name is not None else saved_filters.get("assigned_to_name"),
         "submitter_name": submitter_name if submitter_name is not None else saved_filters.get("submitter_name"),
     }
-    for field, value in {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS}.items():
-        int_value = _coerce_int(value)
-        if int_value is not None:
-            q &= Q(**{field: int_value})
+    issue_filters["assigned_to_id"] = _allowed_assignee_filter(user, role_names, issue_filters.get("assigned_to_id"))
+    q = _apply_query_filters(q, {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
     q &= await _issue_name_filter_q(issue_filters)
     if title:
         q &= Q(title__contains=title)
@@ -1116,7 +1135,7 @@ async def create_issue(payload: IssueCreateIn):
     body = _create_issue_payload(payload, user)
     if not payload.company_name and body.get("issue_project_id"):
         body["company_name"] = await _issue_project_name(body.get("issue_project_id")) or "内部"
-    ticket = await ticket_controller.create_ticket(submitter_id=user.id, payload=body)
+    ticket = await ticket_controller.create_ticket(submitter_id=user.id, payload=body, notify_pending_review=False)
     ticket = await issue_default_service.apply_defaults(ticket)
     await _save_issue_custom_values(ticket.id, payload.custom_values, validate_required=True)
     if payload.notes:
@@ -1262,11 +1281,13 @@ async def update_issue(payload: IssueUpdateIn):
         return _issue_not_found()
     if not await _can_access_ticket(ticket, user, role_names):
         return Fail(code=403, msg="您暂无权限操作该Issue")
-    assigned_to_id = _coerce_int((payload.changes or {}).get("assigned_to_id"))
-    target_status_id = _coerce_int((payload.changes or {}).get("issue_status_id")) or _coerce_int(
-        getattr(ticket, "issue_status_id", None)
-    )
-    target_tracker_id = _coerce_int((payload.changes or {}).get("issue_tracker_id")) or _coerce_int(
+    changes = payload.changes or {}
+    assigned_to_id = _coerce_int(changes.get("assigned_to_id"))
+    old_assigned_to_id = _coerce_int(getattr(ticket, "assigned_to_id", None))
+    old_status_id = _coerce_int(getattr(ticket, "issue_status_id", None))
+    changed_status_id = _coerce_int(changes.get("issue_status_id"))
+    target_status_id = changed_status_id or old_status_id
+    target_tracker_id = _coerce_int(changes.get("issue_tracker_id")) or _coerce_int(
         getattr(ticket, "issue_tracker_id", None)
     )
     if assigned_to_id and assigned_to_id not in await _issue_assignee_ids(
@@ -1278,7 +1299,7 @@ async def update_issue(payload: IssueUpdateIn):
         issue_id=payload.issue_id,
         user_id=user.id,
         role_ids=await _role_ids(user),
-        changes=payload.changes,
+        changes=changes,
         notes=payload.notes,
         private_notes=payload.private_notes,
         bypass_workflow=bool(user.is_superuser or ROLE_ADMIN in role_names),
@@ -1288,6 +1309,10 @@ async def update_issue(payload: IssueUpdateIn):
     )
     if custom_details:
         await _write_issue_journal(payload.issue_id, user.id, None, custom_details)
+    if (changed_status_id and changed_status_id != old_status_id) or (
+        assigned_to_id and assigned_to_id != old_assigned_to_id
+    ):
+        await ticket_controller._notify_ticket_status_if_needed(ticket=issue, operator_id=user.id)
     decorated = await _maybe_await(_decorate_issue_rows([await _model_dict(issue)]))
     return Success(msg="更新成功", data=decorated[0])
 

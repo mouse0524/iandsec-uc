@@ -92,7 +92,7 @@ const builtInQueries = computed(() => {
     {
       label: '指派给我',
       value: 'builtin:assigned-to-me',
-      filters: userId ? { assigned_to_id: userId } : {},
+      filters: userId ? { assigned_to_id: [userId] } : {},
     },
   ]
 })
@@ -135,6 +135,9 @@ onMounted(async () => {
 
 function getIssueList(params) {
   const { filters, customValues } = splitListParams(params)
+  if (Array.isArray(filters.assigned_to_id)) {
+    filters.assigned_to_id = filters.assigned_to_id.join(',')
+  }
   const queryId = savedQueryId(selectedQueryId.value)
   return api.getIssueList({
     ...filters,
@@ -270,7 +273,7 @@ function defaultQueryId() {
 
 function defaultQueryFilters() {
   const userId = Number(userStore.userId || 0)
-  return userId ? { assigned_to_id: userId } : {}
+  return userId ? { assigned_to_id: [userId] } : {}
 }
 
 async function loadAssigneeOptions() {
@@ -494,6 +497,7 @@ async function applySavedQuery(queryId) {
   delete filters.custom_values
   queryItems.value = {
     ...filters,
+    assigned_to_id: normalizeAssigneeFilter(filters.assigned_to_id),
     ...Object.fromEntries(Object.entries(customValues).map(([key, value]) => [`cf_${key}`, value])),
   }
   await nextTick()
@@ -504,6 +508,12 @@ function savedQueryId(value) {
   if (!value || String(value).startsWith('builtin:')) return null
   const id = Number(value)
   return Number.isFinite(id) ? id : null
+}
+
+function normalizeAssigneeFilter(value) {
+  if (Array.isArray(value)) return value.map(Number).filter(Boolean)
+  const id = Number(value || 0)
+  return id ? [id] : []
 }
 
 function splitListParams(params = {}) {
@@ -771,12 +781,14 @@ const columns = computed(() => [
               />
             </QueryBarItem>
             <QueryBarItem label="当前指派人" :label-width="82">
-              <NInput
-                v-model:value="queryItems.assigned_to_name"
+              <NSelect
+                v-model:value="queryItems.assigned_to_id"
+                :options="assigneeOptions"
                 clearable
-                placeholder="输入用户名称"
-                style="width: 140px"
-                @keypress.enter="$table?.handleSearch()"
+                filterable
+                multiple
+                placeholder="选择用户"
+                style="width: 180px"
               />
             </QueryBarItem>
             <QueryBarItem

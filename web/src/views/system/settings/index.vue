@@ -40,6 +40,7 @@ const MASKED_SECRET = '******'
 const form = ref({
   site_title: '安得和众用户服务中心',
   site_logo: '',
+  site_base_url: '',
   allow_partner_register: true,
   allow_channel_register: true,
   allow_user_register: true,
@@ -80,12 +81,6 @@ const form = ref({
   time_sync_interval_minutes: 60,
   time_sync_max_offset_seconds: 5,
   time_sync_timezone: 'Asia/Shanghai',
-  ticket_notify_by_role: {
-    用户: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
-    代理商: ['cs_rejected', 'tech_rejected', 'pending_close', 'done'],
-    客服: ['pending_review'],
-    技术: ['tech_processing', 'field_verification'],
-  },
   smtp_host: '',
   smtp_port: 465,
   smtp_username: '',
@@ -116,7 +111,7 @@ const form = ref({
   ticket_notify_subject: '工单状态提醒：{ticket_no}',
   ticket_notify_is_html: true,
   ticket_notify_template:
-    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
+    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
   webdav_enabled: false,
   webdav_base_url: '',
   webdav_username: '',
@@ -149,6 +144,7 @@ const previewParams = ref({
   minutes: 10,
   username: 'zhangsan',
   password: 'Tmp#8291',
+  ticket_url: 'http://localhost:3100/issue/detail?issue_id=1001',
 })
 
 const presetTemplates = {
@@ -188,33 +184,7 @@ const presetTemplates = {
     '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#fffaf0;border:1px solid #fde68a;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#b45309;">账号密码已重置</h2><p style="margin:0 0 8px;">您好，<b>{username}</b>：</p><p style="margin:0 0 8px;">管理员已重置您的账号密码，请使用以下临时密码登录：</p><div style="display:inline-block;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:20px;font-weight:700;color:#c2410c;">{password}</div><p style="margin:12px 0 0;color:#6b7280;">登录后请尽快在个人中心修改密码。</p></div>',
   ticketNotifySubject: '【系统通知】工单状态提醒',
   ticketNotifyHtml:
-    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
-}
-
-const ticketNotifyRoleOptions = {
-  用户: [
-    { label: '客服驳回', value: 'cs_rejected' },
-    { label: '技术驳回', value: 'tech_rejected' },
-    { label: '待关闭', value: 'pending_close' },
-    { label: '处理完成', value: 'done' },
-  ],
-  代理商: [
-    { label: '客服驳回', value: 'cs_rejected' },
-    { label: '技术驳回', value: 'tech_rejected' },
-    { label: '待关闭', value: 'pending_close' },
-    { label: '处理完成', value: 'done' },
-  ],
-  客服: [{ label: '商务审核', value: 'pending_review' }],
-  技术: [
-    { label: '通过后待技术处理', value: 'tech_processing' },
-    { label: '现场验证', value: 'field_verification' },
-  ],
-  产品: [{ label: '产品评估', value: 'product_evaluation' }],
-  测试: [
-    { label: '测试过滤', value: 'test_filtering' },
-    { label: '测试验证', value: 'test_verification' },
-  ],
-  研发: [{ label: '研发修改', value: 'rd_processing' }],
+    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
 }
 
 const passwordCategoryOptions = [
@@ -233,18 +203,6 @@ const llmProviderOptions = [
   { label: 'OpenAI兼容接口', value: 'openai' },
   { label: 'Ollama本地模型', value: 'ollama' },
 ]
-
-const ticketNotifyRoles = ['用户', '代理商', '客服', '技术', '产品', '测试', '研发']
-
-function normalizeTicketNotifyByRole(raw = {}) {
-  const normalized = {}
-  ticketNotifyRoles.forEach((roleName) => {
-    const allowed = new Set((ticketNotifyRoleOptions[roleName] || []).map((item) => item.value))
-    const selected = Array.isArray(raw[roleName]) ? raw[roleName] : []
-    normalized[roleName] = selected.filter((item) => allowed.has(item))
-  })
-  return normalized
-}
 
 const rules = {
   site_title: { required: true, message: '请输入网站标题', trigger: ['input', 'blur'] },
@@ -556,9 +514,6 @@ async function loadData() {
       project_client_versions: res.data?.project_client_versions?.length
         ? res.data.project_client_versions
         : form.value.project_client_versions,
-      ticket_notify_by_role: normalizeTicketNotifyByRole(
-        res.data?.ticket_notify_by_role || form.value.ticket_notify_by_role,
-      ),
       login_challenge_enabled:
         typeof res.data?.login_challenge_enabled === 'boolean'
           ? res.data.login_challenge_enabled
@@ -583,7 +538,6 @@ function save() {
       const payload = {
         ...form.value,
         allow_partner_register: form.value.allow_channel_register || form.value.allow_user_register,
-        ticket_notify_by_role: normalizeTicketNotifyByRole(form.value.ticket_notify_by_role),
       }
       if (payload.turnstile_secret_key === MASKED_SECRET) {
         delete payload.turnstile_secret_key
@@ -750,6 +704,9 @@ function applyPresetHtmlTemplates() {
                     style="height: 36px; width: 36px"
                   />
                 </div>
+              </NFormItem>
+              <NFormItem label="系统访问地址" path="site_base_url">
+                <NInput v-model:value="form.site_base_url" placeholder="例如 http://192.168.10.115:3100" />
               </NFormItem>
               <NFormItem label="开放渠道商注册">
                 <NSwitch v-model:value="form.allow_channel_register" />
@@ -1093,7 +1050,7 @@ function applyPresetHtmlTemplates() {
 
           <NTabPane name="template" tab="邮件模板">
             <NAlert type="info" class="mb-12">
-              验证码模板支持变量：{code}、{minutes}；审核模板支持变量：{contact_name}、{register_type}、{reason}；管理员重置通知支持变量：{username}、{password}、{email}；工单提醒支持变量：{name}、{ticket_no}、{title}、{status}、{operator}
+              验证码模板支持变量：{code}、{minutes}；审核模板支持变量：{contact_name}、{register_type}、{reason}；管理员重置通知支持变量：{username}、{password}、{email}；工单提醒支持变量：{name}、{ticket_no}、{title}、{status}、{operator}、{ticket_url}
             </NAlert>
             <div class="mb-12" flex items-center gap-12>
               <NButton type="primary" ghost @click="applyPresetHtmlTemplates"
@@ -1194,7 +1151,7 @@ function applyPresetHtmlTemplates() {
                   v-model:value="form.ticket_notify_template"
                   type="textarea"
                   :autosize="{ minRows: 4, maxRows: 8 }"
-                  placeholder="支持变量 {name}、{ticket_no}、{title}、{status}、{operator}"
+                  placeholder="支持变量 {name}、{ticket_no}、{title}、{status}、{operator}、{ticket_url}"
                 />
               </NFormItem>
             </NCard>

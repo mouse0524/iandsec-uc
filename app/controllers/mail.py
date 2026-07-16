@@ -4,6 +4,7 @@ import smtplib
 import time
 from email.mime.text import MIMEText
 from email.utils import formataddr
+from urllib.parse import urlencode
 
 from fastapi import HTTPException
 from email_validator import EmailNotValidError, validate_email
@@ -38,6 +39,14 @@ class MailController:
         for key, value in params.items():
             content = content.replace("{" + key + "}", str(value if value is not None else ""))
         return content
+
+    @staticmethod
+    def _ticket_url(ticket: Ticket, setting: dict) -> str:
+        base_url = str(setting.get("site_base_url") or settings.APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
+        if not base_url and settings.CORS_ORIGINS:
+            base_url = str(settings.CORS_ORIGINS[0]).rstrip("/")
+        path = f"/issue/detail?{urlencode({'issue_id': getattr(ticket, 'id', '')})}"
+        return f"{base_url}{path}" if base_url else path
 
     @staticmethod
     def _register_type_label(register_type: str) -> str:
@@ -247,11 +256,11 @@ class MailController:
     ) -> None:
         status_label_map = {
             TicketStatus.PENDING_REVIEW.value: "待客服审核",
-            TicketStatus.CS_REJECTED.value: "客服驳回",
+            TicketStatus.CS_REJECTED.value: "驳回",
             TicketStatus.TECH_PROCESSING.value: "待技术处理",
             TicketStatus.FIELD_VERIFICATION.value: "现场验证",
             TicketStatus.PENDING_CLOSE.value: "待关闭",
-            TicketStatus.TECH_REJECTED.value: "技术驳回",
+            TicketStatus.TECH_REJECTED.value: "驳回",
             TicketStatus.DONE.value: "已关闭",
         }
         setting = await self._get_setting()
@@ -259,9 +268,10 @@ class MailController:
         subject_template = setting.get("ticket_notify_subject") or "工单状态提醒：{ticket_no}"
         content_template = (
             setting.get("ticket_notify_template")
-            or "您好，{name}：\n工单编号：{ticket_no}\n工单标题：{title}\n当前状态：{status}\n操作人：{operator}\n请及时登录系统处理。"
+            or "您好，{name}：\n工单编号：{ticket_no}\n工单标题：{title}\n当前状态：{status}\n操作人：{operator}\n查看链接：{ticket_url}\n请及时登录系统处理。"
         )
         subject = self._render_template(subject_template, {"ticket_no": ticket.ticket_no})
+        ticket_url = self._ticket_url(ticket, setting)
         content = self._render_template(
             content_template,
             {
@@ -270,14 +280,22 @@ class MailController:
                 "title": ticket.title,
                 "status": status_label,
                 "operator": operator_name or "-",
+                "ticket_url": ticket_url,
             },
         )
+        is_html = bool(setting.get("ticket_notify_is_html", True))
+        if "{ticket_url}" not in content_template:
+            content += (
+                f'<p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p>'
+                if is_html
+                else f"\n查看链接：{ticket_url}"
+            )
         self._schedule(
             self._send_email(
                 to_email=to_user.email,
                 subject=subject,
                 content=content,
-                is_html=bool(setting.get("ticket_notify_is_html", True)),
+                is_html=is_html,
             ),
             tag="ticket_notify",
         )

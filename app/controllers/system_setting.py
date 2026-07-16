@@ -70,6 +70,7 @@ class SystemSettingController:
         "site": {
             "site_title": "安得和众用户服务中心",
             "site_logo": None,
+            "site_base_url": os.getenv("APP_PUBLIC_BASE_URL") or "",
             "allow_partner_register": True,
             "allow_channel_register": True,
             "allow_user_register": True,
@@ -122,17 +123,6 @@ class SystemSettingController:
             "time_sync_max_offset_seconds": 5,
             "time_sync_timezone": "Asia/Shanghai",
         },
-        "ticket_notify": {
-            "ticket_notify_by_role": {
-                "用户": ["cs_rejected", "tech_rejected", "pending_close", "done"],
-                "代理商": ["cs_rejected", "tech_rejected", "pending_close", "done"],
-                "客服": ["pending_review"],
-                "技术": ["tech_processing", "field_verification"],
-                "产品": ["product_evaluation"],
-                "测试": ["test_filtering", "test_verification"],
-                "研发": ["rd_processing"],
-            }
-        },
         "mail": {
             "smtp_host": None,
             "smtp_port": 465,
@@ -161,7 +151,7 @@ class SystemSettingController:
             "admin_reset_password_template": '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#fffaf0;border:1px solid #fde68a;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#b45309;">账号密码已重置</h2><p style="margin:0 0 8px;">您好，<b>{username}</b>：</p><p style="margin:0 0 8px;">管理员已重置您的账号密码，请使用以下临时密码登录：</p><div style="display:inline-block;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:20px;font-weight:700;color:#c2410c;">{password}</div><p style="margin:12px 0 0;color:#6b7280;">登录后请尽快在个人中心修改密码。</p></div>',
             "ticket_notify_subject": "工单状态提醒：{ticket_no}",
             "ticket_notify_is_html": True,
-            "ticket_notify_template": '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
+            "ticket_notify_template": '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
         },
         "webdav": {
             "webdav_enabled": False,
@@ -268,6 +258,7 @@ class SystemSettingController:
         result = {
             "site_title": site.get("site_title"),
             "site_logo": logo_url,
+            "site_base_url": site.get("site_base_url") or "",
             "allow_partner_register": allow_channel_register or allow_user_register,
             "allow_channel_register": allow_channel_register,
             "allow_user_register": allow_user_register,
@@ -487,6 +478,8 @@ class SystemSettingController:
             payload["webdav_base_url"] = normalize_webdav_base_url(payload.get("webdav_base_url"))
         if payload.get("db_backup_webdav_base_url"):
             payload["db_backup_webdav_base_url"] = normalize_webdav_base_url(payload.get("db_backup_webdav_base_url"))
+        if payload.get("site_base_url"):
+            payload["site_base_url"] = str(payload.get("site_base_url") or "").strip().rstrip("/")
 
         if (
             "allow_channel_register" not in payload
@@ -521,6 +514,7 @@ class SystemSettingController:
         site_keys = {
             "site_title",
             "site_logo",
+            "site_base_url",
             "allow_partner_register",
             "allow_channel_register",
             "allow_user_register",
@@ -570,7 +564,6 @@ class SystemSettingController:
             "time_sync_max_offset_seconds",
             "time_sync_timezone",
         }
-        ticket_notify_keys = {"ticket_notify_by_role"}
         mail_keys = {
             "smtp_host",
             "smtp_port",
@@ -634,7 +627,6 @@ class SystemSettingController:
             "ticket": ticket_keys,
             "login_security": login_keys,
             "time_sync": time_sync_keys,
-            "ticket_notify": ticket_notify_keys,
             "mail": mail_keys,
             "mail_template": mail_template_keys,
             "webdav": webdav_keys,

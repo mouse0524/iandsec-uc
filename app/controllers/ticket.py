@@ -26,88 +26,33 @@ from app.utils.http_headers import build_download_content_disposition
 
 
 class TicketController:
-    _ROLE_NOTIFY_MAP = {
-        "用户": "用户",
-        "渠道商": "代理商",
-        "代理商": "代理商",
-        "客服": "客服",
-        "技术": "技术",
-        "管理员": "客服",
-    }
-
-    @staticmethod
-    def _status_notify_recipients(status: TicketStatus, ticket: Ticket) -> list[int]:
-        if status == TicketStatus.PENDING_REVIEW:
-            return []
-        if status in {TicketStatus.TECH_PROCESSING, TicketStatus.FIELD_VERIFICATION}:
-            return [ticket.tech_id] if ticket.tech_id else []
-        if status in {TicketStatus.CS_REJECTED, TicketStatus.TECH_REJECTED, TicketStatus.PENDING_CLOSE, TicketStatus.DONE}:
-            return [ticket.submitter_id] if ticket.submitter_id else []
-        return []
-
     async def _notify_ticket_status_if_needed(self, *, ticket: Ticket, operator_id: int) -> None:
-        setting = await system_setting_controller.get_safe_dict()
-        notify_map = setting.get("ticket_notify_by_role") or {}
-        all_users = await User.filter(is_active=True).prefetch_related("roles")
-        recipients: list[User] = []
-        current_status = str(ticket.status)
-
-        for item in all_users:
-            if item.id == operator_id or not item.email:
-                continue
-            role_names = [role.name for role in await item.roles]
-            if item.is_superuser:
-                role_names.append("管理员")
-
-            normalized_roles = {self._ROLE_NOTIFY_MAP.get(role, role) for role in role_names}
-            should_notify = False
-            for role_name in normalized_roles:
-                statuses = notify_map.get(role_name) or []
-                if current_status in statuses:
-                    should_notify = True
-                    break
-            if not should_notify:
-                continue
-
-            if current_status in {
-                TicketStatus.CS_REJECTED.value,
-                TicketStatus.TECH_REJECTED.value,
-                TicketStatus.PENDING_CLOSE.value,
-                TicketStatus.DONE.value,
-            }:
-                if item.id != ticket.submitter_id:
-                    continue
-            if (
-                current_status in {TicketStatus.TECH_PROCESSING.value, TicketStatus.FIELD_VERIFICATION.value}
-                and ticket.tech_id
-                and item.id != ticket.tech_id
-            ):
-                continue
-            recipients.append(item)
-
-        if not recipients:
+        if ticket.status in {TicketStatus.DONE, TicketStatus.PENDING_CLOSE}:
+            return
+        assigned_to_id = int(getattr(ticket, "assigned_to_id", None) or 0)
+        if not assigned_to_id or assigned_to_id == int(operator_id):
+            return
+        target = await User.filter(id=assigned_to_id, is_active=True).first()
+        if not target or not target.email:
             return
 
         operator = await User.filter(id=operator_id).first()
         operator_name = (operator.alias or operator.username) if operator else str(operator_id)
-        for target in recipients:
-            if not target.email:
-                continue
-            try:
-                await mail_controller.send_ticket_status_notice(
-                    ticket=ticket,
-                    to_user=target,
-                    status=ticket.status,
-                    operator_name=operator_name,
-                )
-            except Exception:
-                logger.warning(
-                    "[ticket.notify] send_failed ticket_id={} status={} to_user_id={}",
-                    ticket.id,
-                    ticket.status,
-                    target.id,
-                    exc_info=True,
-                )
+        try:
+            await mail_controller.send_ticket_status_notice(
+                ticket=ticket,
+                to_user=target,
+                status=ticket.status,
+                operator_name=operator_name,
+            )
+        except Exception:
+            logger.warning(
+                "[ticket.notify] send_failed ticket_id={} status={} to_user_id={}",
+                ticket.id,
+                ticket.status,
+                target.id,
+                exc_info=True,
+            )
     @staticmethod
     def _sanitize_rich_html(value: str | None) -> str:
         text = str(value or "")

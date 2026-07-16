@@ -172,7 +172,7 @@ def test_issue_assignee_scope_follows_role_rules():
         issue_api._issue_assignee_q(admin, [], ticket, {2, 1})
     )
     assert {"id__in": [5, 8]} in _q_filters(issue_api._issue_assignee_q(user, ["渠道商"], ticket))
-    assert {"id__in": [5, 7]} in _q_filters(issue_api._issue_assignee_q(tech, ["技术"], ticket))
+    assert _q_filters(issue_api._issue_assignee_q(tech, ["技术"], ticket)) == []
 
 
 @pytest.mark.anyio
@@ -392,11 +392,7 @@ async def test_issue_visibility_scope_follows_role_rules(monkeypatch):
     assert _q_filters(await issue_api._issue_visibility_q(all_user, ["产品"], None)) == []
     assert _q_filters(await issue_api._issue_visibility_q(all_user, ["测试"], None)) == []
     assert _q_filters(await issue_api._issue_visibility_q(all_user, ["研发"], None)) == []
-
-    tech_filters = _q_filters(await issue_api._issue_visibility_q(tech_user, ["技术"], None))
-    assert {"submitter_id": 7} in tech_filters
-    assert {"assigned_to_id": 7} in tech_filters
-    assert {"submitter_id__in": [11, 12]} in tech_filters
+    assert _q_filters(await issue_api._issue_visibility_q(tech_user, ["技术"], None)) == []
 
     channel_filters = _q_filters(await issue_api._issue_visibility_q(normal_user, ["渠道商"], None))
     user_filters = _q_filters(await issue_api._issue_visibility_q(normal_user, ["用户"], None))
@@ -408,10 +404,37 @@ async def test_issue_visibility_scope_follows_role_rules(monkeypatch):
     assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=11), tech_user, ["技术"])
     assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99, assigned_to_id=7), tech_user, ["技术"])
     assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99, assigned_to_id=8), normal_user, ["用户"])
-    assert not await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), tech_user, ["技术"])
+    assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), tech_user, ["技术"])
     assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), all_user, ["客服"])
     assert await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), all_user, ["研发"])
     assert not await issue_api._can_access_ticket(SimpleNamespace(submitter_id=99), normal_user, ["用户"])
+
+
+def test_issue_assignee_filter_accepts_multiple_ids():
+    from app.api.v1.issues import issues as issue_api
+
+    filters = _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"assigned_to_id": "7,8"}))
+
+    assert {"assigned_to_id__in": [7, 8]} in filters
+
+
+def test_issue_assignee_filter_permission_scope():
+    from app.api.v1.issues import issues as issue_api
+
+    user = SimpleNamespace(id=3, is_superuser=False, username="u")
+
+    assert issue_api._allowed_assignee_filter(user, ["用户"], "7,8") == [3]
+    assert issue_api._allowed_assignee_filter(user, ["渠道商"], [7, 8]) == [3]
+    assert issue_api._allowed_assignee_filter(user, ["技术"], "7,8") == [7, 8]
+    assert issue_api._allowed_assignee_filter(user, ["产品"], "7,8") == [7, 8]
+    assert issue_api._allowed_assignee_filter(user, ["测试"], "7,8") == [7, 8]
+    assert issue_api._allowed_assignee_filter(user, ["研发"], "7,8") == [7, 8]
+
+
+def test_issue_list_fields_exclude_heavy_description():
+    from app.api.v1.issues import issues as issue_api
+
+    assert "description" not in issue_api.ISSUE_LIST_FIELDS
 
 
 @pytest.mark.anyio
@@ -636,6 +659,7 @@ async def test_create_issue_api_saves_custom_values(monkeypatch):
 
     body = _response_body(response)
     assert body["data"]["custom_values"] == {"12": "高危"}
+    assert created[0]["notify_pending_review"] is False
     assert created[0]["payload"]["assigned_to_id"] == 3
     assert saved == [(7, {"12": "高危"}, True)]
 
@@ -788,6 +812,7 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
     user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
     ticket = SimpleNamespace(id=7)
     calls = []
+    notifications = []
 
     async def fake_current_user():
         return user
@@ -808,12 +833,16 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
     async def fake_assignee_ids(current_user, role_names, current_ticket, status_id=None, tracker_id=None):
         return {3, 4}
 
+    async def fake_notify(**kwargs):
+        notifications.append(kwargs)
+
     monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
     monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
     monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
     monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
     monkeypatch.setattr(issue_api, "_issue_assignee_ids", fake_assignee_ids)
     monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+    monkeypatch.setattr(issue_api.ticket_controller, "_notify_ticket_status_if_needed", fake_notify)
     monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
 
     response = await issue_api.update_issue(
@@ -837,6 +866,7 @@ async def test_update_issue_api_records_notes_and_changes(monkeypatch):
             "bypass_workflow": False,
         }
     ]
+    assert notifications[0]["operator_id"] == 3
 
 
 @pytest.mark.anyio
@@ -873,6 +903,50 @@ async def test_update_issue_api_rejects_disallowed_assignee(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_update_issue_api_notifies_when_only_assignee_changes(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+    from app.schemas.issues import IssueUpdateIn
+
+    user = SimpleNamespace(id=3, is_superuser=True, roles=[])
+    ticket = SimpleNamespace(id=7, issue_status_id=20, assigned_to_id=4)
+    notifications = []
+
+    async def fake_current_user():
+        return user
+
+    async def fake_role_names(current_user):
+        return []
+
+    async def fake_access(current_ticket, current_user, role_names):
+        return True
+
+    async def fake_get_issue(issue_id):
+        return ticket
+
+    async def fake_assignee_ids(*args, **kwargs):
+        return {5}
+
+    async def fake_update_issue(**kwargs):
+        return SimpleNamespace(to_dict=lambda: {"id": 7, "assigned_to_id": 5})
+
+    async def fake_notify(**kwargs):
+        notifications.append(kwargs)
+
+    monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
+    monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
+    monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
+    monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
+    monkeypatch.setattr(issue_api, "_issue_assignee_ids", fake_assignee_ids)
+    monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+    monkeypatch.setattr(issue_api.ticket_controller, "_notify_ticket_status_if_needed", fake_notify)
+    monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
+
+    await issue_api.update_issue(IssueUpdateIn(issue_id=7, changes={"assigned_to_id": 5}))
+
+    assert notifications[0]["operator_id"] == 3
+
+
+@pytest.mark.anyio
 async def test_update_issue_api_allows_submitter_role_when_issue_is_accessible(monkeypatch):
     from app.api.v1.issues import issues as issue_api
     from app.schemas.issues import IssueUpdateIn
@@ -881,6 +955,7 @@ async def test_update_issue_api_allows_submitter_role_when_issue_is_accessible(m
     user = SimpleNamespace(id=3, is_superuser=False, roles=[role])
     ticket = SimpleNamespace(id=7)
     calls = []
+    notifications = []
 
     async def fake_current_user():
         return user
@@ -898,11 +973,15 @@ async def test_update_issue_api_allows_submitter_role_when_issue_is_accessible(m
     async def fake_get_issue(issue_id):
         return ticket
 
+    async def fake_notify(**kwargs):
+        notifications.append(kwargs)
+
     monkeypatch.setattr(issue_api, "_get_current_user", fake_current_user)
     monkeypatch.setattr(issue_api, "_get_user_role_names", fake_role_names)
     monkeypatch.setattr(issue_api, "_can_access_ticket", fake_access)
     monkeypatch.setattr(issue_api, "_get_issue_or_none", fake_get_issue)
     monkeypatch.setattr(issue_api.issue_update_service, "update_issue", fake_update_issue)
+    monkeypatch.setattr(issue_api.ticket_controller, "_notify_ticket_status_if_needed", fake_notify)
     monkeypatch.setattr(issue_api, "_decorate_issue_rows", lambda rows: rows)
 
     response = await issue_api.update_issue(
@@ -922,6 +1001,7 @@ async def test_update_issue_api_allows_submitter_role_when_issue_is_accessible(m
             "bypass_workflow": False,
         }
     ]
+    assert notifications[0]["operator_id"] == 3
 
 
 @pytest.mark.anyio
@@ -985,6 +1065,7 @@ async def test_create_issue_api_reuses_ticket_creation_and_current_user_defaults
     body = _response_body(response)
     assert body["data"]["id"] == 9
     assert calls[0]["submitter_id"] == 3
+    assert calls[0]["notify_pending_review"] is False
     assert calls[0]["payload"]["company_name"] == "安得内部"
     assert calls[0]["payload"]["contact_name"] == "用户同学"
     assert calls[0]["payload"]["email"] == "user@example.com"

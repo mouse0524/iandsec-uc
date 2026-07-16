@@ -1,11 +1,9 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.enums import TicketStatus
-
-
 class SystemSettingUpdateIn(BaseModel):
     site_title: str = Field(..., description="网站标题")
     site_logo: str | None = Field(default=None, description="网站Logo")
+    site_base_url: str | None = Field(default=None, description="系统访问地址")
     allow_partner_register: bool = Field(default=True, description="是否开放代理商注册")
     allow_channel_register: bool = Field(default=True, description="是否开放渠道商注册")
     allow_user_register: bool = Field(default=True, description="是否开放用户注册")
@@ -51,8 +49,6 @@ class SystemSettingUpdateIn(BaseModel):
     time_sync_max_offset_seconds: int = Field(default=5, description="最大允许偏差(秒)")
     time_sync_timezone: str = Field(default="Asia/Shanghai", description="系统时区")
 
-    ticket_notify_by_role: dict[str, list[str]] = Field(default_factory=dict, description="按角色配置工单提醒节点")
-
     smtp_host: str | None = None
     smtp_port: int = 465
     smtp_username: str | None = None
@@ -86,7 +82,7 @@ class SystemSettingUpdateIn(BaseModel):
     ticket_notify_subject: str = "工单状态提醒：{ticket_no}"
     ticket_notify_is_html: bool = True
     ticket_notify_template: str = (
-        '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>'
+        '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>'
     )
 
     webdav_enabled: bool = False
@@ -238,6 +234,14 @@ class SystemSettingUpdateIn(BaseModel):
             raise ValueError("密码类别至少选择一项")
         return normalized
 
+    @field_validator("site_base_url")
+    @classmethod
+    def validate_site_base_url(cls, value: str | None):
+        text = str(value or "").strip().rstrip("/")
+        if text and not text.startswith(("http://", "https://")):
+            raise ValueError("系统访问地址必须以 http:// 或 https:// 开头")
+        return text
+
     @field_validator("time_sync_server", "time_sync_timezone")
     @classmethod
     def validate_time_sync_text(cls, value: str, info):
@@ -254,27 +258,6 @@ class SystemSettingUpdateIn(BaseModel):
         if value < 1:
             raise ValueError(f"{info.field_name} 必须大于等于 1")
         return value
-
-    @field_validator("ticket_notify_by_role")
-    @classmethod
-    def validate_ticket_notify_by_role(cls, value: dict[str, list[str]]):
-        valid_statuses = {item.value for item in TicketStatus}
-        normalized: dict[str, list[str]] = {}
-        for role_name, statuses in (value or {}).items():
-            role = str(role_name or "").strip()
-            if not role:
-                continue
-            role_statuses: list[str] = []
-            for item in statuses or []:
-                status = str(item or "").strip()
-                if not status:
-                    continue
-                if status not in valid_statuses:
-                    raise ValueError("工单邮件通知节点包含非法状态")
-                if status not in role_statuses:
-                    role_statuses.append(status)
-            normalized[role] = role_statuses
-        return normalized
 
     @field_validator("webdav_share_default_expire_hours", "webdav_signature_ttl", "webdav_max_upload_size")
     @classmethod
@@ -390,6 +373,7 @@ class SystemSettingUpdateIn(BaseModel):
 class PublicSiteConfigOut(BaseModel):
     site_title: str
     site_logo: str | None = None
+    site_base_url: str | None = None
     allow_partner_register: bool
     allow_channel_register: bool
     allow_user_register: bool
@@ -425,8 +409,6 @@ class PublicSiteConfigOut(BaseModel):
     inactive_user_auto_disable_days: int
     password_min_length: int
     password_required_categories: list[str]
-    ticket_notify_by_role: dict[str, list[str]]
-
 
 class WebDavTestIn(BaseModel):
     webdav_enabled: bool = True

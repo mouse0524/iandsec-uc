@@ -386,6 +386,11 @@ class FakeStatus:
     is_closed = True
 
 
+class FakeNewStatus:
+    name = "新建"
+    is_closed = False
+
+
 @pytest.mark.anyio
 async def test_update_issue_skips_workflow_check_when_status_is_unchanged():
     from app.controllers.issue import IssueUpdateService
@@ -435,6 +440,31 @@ async def test_update_issue_syncs_closed_status_side_effects():
 
     assert updated.status == TicketStatus.DONE
     assert updated.closed_at is not None
+
+
+@pytest.mark.anyio
+async def test_update_issue_marks_new_status_by_other_user_as_rejected():
+    from app.controllers.issue import IssueUpdateService
+    from app.models.enums import TicketStatus
+
+    issue = FakeIssue()
+
+    service = IssueUpdateService(
+        issue_getter=lambda issue_id: issue,
+        journal_writer=lambda **kwargs: {"id": 103},
+        detail_writer=lambda **kwargs: None,
+        status_reader=lambda status_id: FakeNewStatus(),
+        workflow_service=None,
+    )
+
+    updated = await service.update_issue(
+        issue_id=7,
+        user_id=4,
+        role_ids=[1],
+        changes={"issue_status_id": 30},
+    )
+
+    assert updated.status == TicketStatus.CS_REJECTED
 
 
 @pytest.mark.anyio
