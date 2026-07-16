@@ -58,7 +58,6 @@ class SystemSettingController:
         "ticket",
         "login_security",
         "time_sync",
-        "ticket_notify",
         "mail",
         "mail_template",
         "webdav",
