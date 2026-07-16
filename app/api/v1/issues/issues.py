@@ -306,7 +306,7 @@ def _custom_value_to_text(field: dict, value: Any) -> str:
     field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
     if _custom_value_is_empty(value):
         return ""
-    if bool(field.get("multiple")):
+    if field_format == IssueCustomFieldFormat.LIST and bool(field.get("multiple")):
         values = value if isinstance(value, list) else [value]
         return json.dumps([str(item) for item in values if not _custom_value_is_empty(item)], ensure_ascii=False)
     if field_format == IssueCustomFieldFormat.BOOL:
@@ -323,8 +323,8 @@ def _custom_value_to_text(field: dict, value: Any) -> str:
 def _custom_text_to_api(field: dict, value: Any):
     field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
     if value in (None, ""):
-        return [] if bool(field.get("multiple")) else None
-    if bool(field.get("multiple")):
+        return [] if field_format == IssueCustomFieldFormat.LIST and bool(field.get("multiple")) else None
+    if field_format == IssueCustomFieldFormat.LIST and bool(field.get("multiple")):
         try:
             parsed = json.loads(value)
         except (TypeError, ValueError):
@@ -343,6 +343,21 @@ def _custom_text_to_api(field: dict, value: Any):
         except (TypeError, ValueError):
             return value
     return value
+
+
+def _custom_value_q(field: dict, value: Any) -> Q:
+    field_format = str(field.get("field_format") or IssueCustomFieldFormat.STRING)
+    if field_format == IssueCustomFieldFormat.LIST and field.get("multiple"):
+        q = None
+        for item in value if isinstance(value, list) else [value]:
+            if not _custom_value_is_empty(item):
+                item_q = Q(value__contains=json.dumps(str(item), ensure_ascii=False))
+                q = item_q if q is None else q | item_q
+        return q or Q(value="")
+    text = _custom_value_to_text(field, value)
+    if field_format in {IssueCustomFieldFormat.STRING, IssueCustomFieldFormat.TEXT}:
+        return Q(value__contains=text)
+    return Q(value=text)
 
 
 async def _visible_custom_fields() -> list[dict]:
@@ -919,13 +934,11 @@ async def list_issues(
                 if custom_field_id is None or not field:
                     continue
                 try:
-                    query_value = _custom_value_to_text(field, value)
+                    custom_value_q = _custom_value_q(field, value)
                 except (TypeError, ValueError):
                     continue
                 ticket_ids = await IssueCustomValue.filter(
-                    customized_type="Issue",
-                    custom_field_id=custom_field_id,
-                    value__contains=query_value,
+                    Q(customized_type="Issue", custom_field_id=custom_field_id) & custom_value_q
                 ).values_list("customized_id", flat=True)
                 q &= Q(id__in=[int(item) for item in ticket_ids])
 

@@ -299,6 +299,14 @@ function richTextPlain(value) {
   return (div.textContent || '').replace(/\s+/g, ' ').trim()
 }
 
+function hasRichText(value) {
+  const html = sanitizeHtml(value || '')
+  if (!html) return false
+  const div = document.createElement('div')
+  div.innerHTML = html
+  return Boolean((div.textContent || '').replace(/\s+/g, ' ').trim() || div.querySelector('img'))
+}
+
 function validateIssueFields(changes) {
   for (const [field, label] of Object.entries(requiredIdLabels)) {
     if (Object.hasOwn(changes, field) && !normalizeNumber(changes[field])) {
@@ -337,7 +345,7 @@ async function submitUpdate() {
   if (
     !Object.keys(changes).length &&
     !Object.keys(customValues).length &&
-    !form.value.notes?.trim()
+    !hasRichText(form.value.notes)
   ) {
     $message.warning('没有需要提交的变更')
     return
@@ -349,7 +357,7 @@ async function submitUpdate() {
       issue_id: issueId.value,
       changes,
       custom_values: customValues,
-      notes: form.value.notes?.trim() || null,
+      notes: hasRichText(form.value.notes) ? form.value.notes : null,
     })
     $message.success('工单已更新')
     await loadIssue()
@@ -855,11 +863,11 @@ onBeforeUnmount(() => {
                   </NButton>
                 </NFormItem>
                 <NFormItem label="说明" class="span-full">
-                  <NInput
-                    v-model:value="form.notes"
-                    type="textarea"
-                    :autosize="{ minRows: 4, maxRows: 8 }"
-                    placeholder=""
+                  <RichTextEditor
+                    v-model="form.notes"
+                    placeholder="请输入说明，可直接粘贴图片"
+                    :min-height="180"
+                    :max-height="380"
                   />
                 </NFormItem>
               </NForm>
@@ -899,6 +907,7 @@ onBeforeUnmount(() => {
                   <div
                     v-if="journal.notes"
                     class="journal-notes"
+                    @click="openDescriptionImagePreview"
                     v-html="sanitizeHtml(journal.notes)"
                   ></div>
                   <!-- eslint-enable vue/no-v-html -->
@@ -1099,7 +1108,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.description :deep(img) {
+.description :deep(img),
+.journal-notes :deep(img) {
   display: inline-block;
   max-width: min(180px, 100%);
   max-height: 140px;

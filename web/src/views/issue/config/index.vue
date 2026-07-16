@@ -811,6 +811,7 @@ async function saveCurrent() {
     }
     if (editingType.value === 'custom_fields' && payload.field_format !== 'list') {
       payload.possible_values = []
+      payload.multiple = false
     }
     await currentSection.value.save(payload)
     $message.success('保存成功')
@@ -1218,7 +1219,7 @@ async function deleteWorkflow(row) {
                     <NSwitch v-model:value="modalForm.show_in_list" />
                   </NFormItem>
                   <NFormItem label="多选">
-                    <NSwitch v-model:value="modalForm.multiple" />
+                    <NSwitch v-model:value="modalForm.multiple" :disabled="modalForm.field_format !== 'list'" />
                   </NFormItem>
                   <NFormItem label="可见">
                     <NSwitch v-model:value="modalForm.visible" />

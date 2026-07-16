@@ -78,7 +78,9 @@ const detailDrawerTitle = computed(() =>
 )
 const customFields = computed(() => metadata.value.custom_fields || [])
 const customFilterFields = computed(() => customFields.value.filter((item) => item.is_filter))
-const tableScrollX = computed(() => 1020 + customFields.value.length * 140)
+const tableScrollX = computed(
+  () => 1140 + customFields.value.filter((field) => field.show_in_list).length * 140,
+)
 const builtInQueries = computed(() => {
   const userId = Number(userStore.userId || 0)
   return [
@@ -470,14 +472,23 @@ function compactFilters() {
 }
 
 async function applySavedQuery(queryId) {
+  const currentCustomFilters = Object.fromEntries(
+    Object.entries(queryItems.value || {}).filter(([key]) => key.startsWith('cf_')),
+  )
   const builtInQuery = builtInQueries.value.find((item) => item.value === queryId)
   if (builtInQuery) {
-    queryItems.value = { ...builtInQuery.filters }
+    queryItems.value = { ...currentCustomFilters, ...builtInQuery.filters }
     await nextTick()
     $table.value?.handleSearch?.()
     return
   }
   const query = queries.value.find((item) => Number(item.id) === Number(queryId))
+  if (!query) {
+    queryItems.value = { ...currentCustomFilters }
+    await nextTick()
+    $table.value?.handleSearch?.()
+    return
+  }
   const filters = { ...(query?.filters || {}) }
   const customValues = filters.custom_values || {}
   delete filters.custom_values
@@ -496,7 +507,9 @@ function savedQueryId(value) {
 }
 
 function splitListParams(params = {}) {
-  const filters = { ...params }
+  const filters = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => !isEmptyCustomValue(value)),
+  )
   const customValues = {}
   for (const key of Object.keys(filters)) {
     if (key.startsWith('cf_')) {
@@ -645,6 +658,13 @@ const columns = computed(() => [
     minWidth: 140,
     render: (row) => customFieldValue(field, row.custom_values),
   })),
+  {
+    title: '提交人',
+    key: 'submitter_id',
+    align: 'center',
+    width: 120,
+    render: (row) => row.submitter_name || row.submitter_id || '-',
+  },
   {
     title: '当前指派人',
     key: 'assigned_to_id',
