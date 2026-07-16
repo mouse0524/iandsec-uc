@@ -94,6 +94,7 @@ export default {
   resubmitTicket: (data = {}) => request.post('/ticket/resubmit', data),
   getTicketActions: (params = {}) => request.get('/ticket/actions', { params }),
   createIssue: (data = {}) => request.post('/issue/create', data),
+  getIssueDashboard: () => request.get('/issue/dashboard'),
   getIssueList: (params = {}) => request.get('/issue/list', { params }),
   getIssueById: (params = {}) => request.get('/issue/get', { params }),
   getIssueMetadata: () => request.get('/issue/metadata'),

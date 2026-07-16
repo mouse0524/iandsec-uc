@@ -73,6 +73,7 @@ def _webdav_password_api_paths() -> list[str]:
 
 def _issue_read_api_paths() -> list[str]:
     return [
+        "/api/v1/issue/dashboard",
         "/api/v1/issue/list",
         "/api/v1/issue/get",
         "/api/v1/issue/metadata",
@@ -630,16 +631,23 @@ async def init_menus():
 
     ticket_children = [
         {
+            "name": "数据展板",
+            "path": "dashboard",
+            "order": 1,
+            "icon": "material-symbols:fact-check-outline-rounded",
+            "component": "/issue/dashboard",
+        },
+        {
             "name": "工单列表",
             "path": "issues",
-            "order": 1,
+            "order": 2,
             "icon": "material-symbols:format-list-bulleted-rounded",
             "component": "/issue/list",
         },
         {
             "name": "工单配置",
             "path": "config",
-            "order": 2,
+            "order": 3,
             "icon": "material-symbols:fact-check-outline-rounded",
             "component": "/issue/config",
         },
@@ -1494,13 +1502,13 @@ async def init_roles():
                         *_issue_create_api_paths(),
                         *_issue_update_api_paths(),
                     ],
-                    component_paths=["/ticket", "/issue/list"],
+                    component_paths=["/ticket", "/issue/dashboard", "/issue/list"],
                 )
             for role_name in ["用户", "渠道商", "客服", "技术"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=[*_issue_read_api_paths(), *_issue_create_api_paths()],
-                    component_paths=["/ticket", "/issue/list"],
+                    component_paths=["/ticket", "/issue/dashboard", "/issue/list"],
                 )
             for role_name in ["用户", "渠道商"]:
                 await _backfill_existing_role_permissions(
@@ -1603,7 +1611,7 @@ async def init_roles():
     )
     basic_apis = await Api.filter(_default_basic_api_filter())
 
-    issue_menus = await Menu.filter(Q(path="/ticket") | Q(component="/issue/list"))
+    issue_menus = await Menu.filter(Q(path="/ticket") | Q(component__in=["/issue/dashboard", "/issue/list"]))
     issue_config_menus = await Menu.filter(Q(component="/issue/config"))
     partner_review_menus = await Menu.filter(Q(path="/partner") | Q(component="/partner/review"))
     settings_menus = await Menu.filter(Q(component="/system/settings"))

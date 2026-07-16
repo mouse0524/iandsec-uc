@@ -1,7 +1,8 @@
 import inspect
 import json
 import os
-from datetime import date, datetime
+from collections import Counter
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -138,6 +139,97 @@ ISSUE_SORT_FIELDS = {
     "due_date",
     "done_ratio",
 }
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _daily_trend(rows: list[dict], field: str, today: date) -> list[dict[str, Any]]:
+    start = today - timedelta(days=6)
+    counts = Counter(
+        dt.date()
+        for row in rows
+        if (dt := _as_datetime(row.get(field))) and start <= dt.date() <= today
+    )
+    return [
+        {"date": day.isoformat(), "count": counts.get(day, 0)}
+        for day in (start + timedelta(days=index) for index in range(7))
+    ]
+
+
+def _weekly_trend(rows: list[dict], field: str, today: date) -> list[dict[str, Any]]:
+    week_start = today - timedelta(days=today.weekday())
+    starts = [week_start - timedelta(weeks=index) for index in range(6, -1, -1)]
+    counts = Counter(
+        dt.date() - timedelta(days=dt.date().weekday())
+        for row in rows
+        if (dt := _as_datetime(row.get(field))) and starts[0] <= dt.date() <= today
+    )
+    return [
+        {
+            "week": f"{start.isocalendar().year}-W{start.isocalendar().week:02d}",
+            "count": counts.get(start, 0),
+        }
+        for start in starts
+    ]
+
+
+def _issue_dashboard_data(rows: list[dict], statuses: list[dict]) -> dict[str, Any]:
+    today = datetime.now().date()
+    stale_before = datetime.now() - timedelta(days=7)
+    status_map = {int(row["id"]): row for row in statuses if row.get("id") is not None}
+    status_counts = Counter(_coerce_int(row.get("issue_status_id")) for row in rows)
+    project_counts = Counter((str(row.get("company_name") or "").strip() or "未填写项目") for row in rows)
+    stale_rows = [
+        row
+        for row in rows
+        if not status_map.get(_coerce_int(row.get("issue_status_id")) or 0, {}).get("is_closed")
+        and (updated_at := _as_datetime(row.get("updated_at")))
+        and updated_at < stale_before
+    ]
+    return {
+        "total": len(rows),
+        "status_counts": [
+            {
+                "status_id": status_id,
+                "name": status_map.get(status_id, {}).get("name") or "未设置",
+                "is_closed": bool(status_map.get(status_id, {}).get("is_closed")),
+                "count": count,
+            }
+            for status_id, count in status_counts.most_common()
+        ],
+        "top_projects": [
+            {"project_name": name, "count": count} for name, count in project_counts.most_common(10)
+        ],
+        "created_trend": {
+            "daily": _daily_trend(rows, "created_at", today),
+            "weekly": _weekly_trend(rows, "created_at", today),
+        },
+        "closed_trend": {
+            "daily": _daily_trend(rows, "closed_at", today),
+            "weekly": _weekly_trend(rows, "closed_at", today),
+        },
+        "stale_issues": [
+            {
+                "id": row.get("id"),
+                "title": row.get("title") or "-",
+                "project_name": row.get("company_name") or "未填写项目",
+                "updated_at": _json_value(row.get("updated_at")),
+                "days": (today - updated_at.date()).days if (updated_at := _as_datetime(row.get("updated_at"))) else 0,
+            }
+            for row in sorted(stale_rows, key=lambda item: _as_datetime(item.get("updated_at")) or datetime.max)[:10]
+        ],
+    }
 ISSUE_VIEW_ALL_ROLES = {ROLE_ADMIN, ROLE_CUSTOMER_SERVICE, ROLE_PRODUCT, ROLE_TEST, ROLE_RD}
 
 
@@ -849,6 +941,24 @@ async def list_issues(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/dashboard", summary="Issue数据展板", dependencies=[DependAuth])
+async def issue_dashboard():
+    user = await _get_current_user()
+    role_names = await _get_user_role_names(user)
+    q = await _issue_visibility_q(user, role_names, None)
+    rows = await Ticket.filter(q).values(
+        "id",
+        "title",
+        "issue_status_id",
+        "company_name",
+        "created_at",
+        "updated_at",
+        "closed_at",
+    )
+    statuses = await IssueStatus.all().values("id", "name", "is_closed")
+    return Success(data=_issue_dashboard_data([_json_row(row) for row in rows], [_json_row(row) for row in statuses]))
 
 
 @router.get("/metadata", summary="Issue元数据", dependencies=[DependAuth])

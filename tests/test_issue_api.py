@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ def test_issue_router_is_mounted():
     paths = {route.path for route in v1_router.routes}
 
     assert "/issue/create" in paths
+    assert "/issue/dashboard" in paths
     assert "/issue/list" in paths
     assert "/issue/get" in paths
     assert "/issue/metadata" in paths
@@ -60,6 +62,7 @@ def test_issue_admin_api_paths_are_registered_for_init_permissions():
 
     paths = set(_issue_admin_api_paths())
 
+    assert "/api/v1/issue/dashboard" in _issue_read_api_paths()
     assert "/api/v1/issue/assignees" in _issue_read_api_paths()
     assert "/api/v1/issue/admin/config" in paths
     assert "/api/v1/issue/admin/tracker/save" in paths
@@ -70,6 +73,83 @@ def test_issue_admin_api_paths_are_registered_for_init_permissions():
     assert _test_role_extra_api_paths() == ["/api/v1/user/list", "/api/v1/ticket/prefill"]
     assert _issue_create_api_paths() == ["/api/v1/issue/create"]
     assert "/api/v1/issue/create" not in _issue_update_api_paths()
+
+
+def test_issue_dashboard_data_counts_status_and_top_projects():
+    from app.api.v1.issues import issues as issue_api
+
+    now = datetime.now()
+    data = issue_api._issue_dashboard_data(
+        [
+            {
+                "id": 1,
+                "title": "问题A",
+                "issue_status_id": 1,
+                "company_name": "A项目",
+                "created_at": now,
+                "updated_at": now - timedelta(days=8),
+                "closed_at": None,
+            },
+            {
+                "id": 2,
+                "title": "问题B",
+                "issue_status_id": 1,
+                "company_name": "A项目",
+                "created_at": now - timedelta(days=1),
+                "updated_at": now,
+                "closed_at": None,
+            },
+            {
+                "id": 3,
+                "title": "问题C",
+                "issue_status_id": 2,
+                "company_name": "B项目",
+                "created_at": now - timedelta(days=2),
+                "updated_at": now - timedelta(days=9),
+                "closed_at": now,
+            },
+            {
+                "id": 4,
+                "title": "问题D",
+                "issue_status_id": None,
+                "company_name": "",
+                "created_at": now - timedelta(days=15),
+                "updated_at": now - timedelta(days=10),
+                "closed_at": None,
+            },
+            {
+                "id": 5,
+                "title": "问题E",
+                "issue_status_id": 1,
+                "company_name": "C项目",
+                "created_at": now,
+                "updated_at": "invalid",
+                "closed_at": None,
+            },
+        ],
+        [{"id": 1, "name": "新建", "is_closed": False}, {"id": 2, "name": "关闭", "is_closed": True}],
+    )
+
+    assert data["total"] == 5
+    assert data["status_counts"] == [
+        {"status_id": 1, "name": "新建", "is_closed": False, "count": 3},
+        {"status_id": 2, "name": "关闭", "is_closed": True, "count": 1},
+        {"status_id": None, "name": "未设置", "is_closed": False, "count": 1},
+    ]
+    assert data["top_projects"][:2] == [
+        {"project_name": "A项目", "count": 2},
+        {"project_name": "B项目", "count": 1},
+    ]
+    assert data["created_trend"]["daily"][-1]["count"] == 2
+    assert data["closed_trend"]["daily"][-1]["count"] == 1
+    assert data["created_trend"]["weekly"][-1]["count"] >= 1
+    assert len(data["created_trend"]["daily"]) == 7
+    assert len(data["created_trend"]["weekly"]) == 7
+    assert len(data["closed_trend"]["daily"]) == 7
+    assert len(data["closed_trend"]["weekly"]) == 7
+    assert [item["id"] for item in data["stale_issues"]] == [4, 1]
+    assert data["stale_issues"][0]["project_name"] == "未填写项目"
+    assert data["stale_issues"][0]["days"] >= data["stale_issues"][1]["days"] >= 7
 
 
 def test_issue_submitter_roles_can_update_for_workflow_verification():

@@ -9,7 +9,6 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
-  NModal,
   NSelect,
   NSpace,
   NTag,
@@ -544,6 +543,11 @@ function customFieldValue(field, values = {}) {
   return value == null || value === '' ? '-' : value
 }
 
+function openSaveQueryDrawer() {
+  queryName.value = ''
+  showQueryModal.value = true
+}
+
 async function saveCurrentQuery() {
   if (!queryName.value.trim()) {
     $message.warning('请输入查询名称')
@@ -671,7 +675,7 @@ const columns = computed(() => [
               placeholder="保存查询"
               @update:value="applySavedQuery"
             />
-            <NButton secondary @click="showQueryModal = true">
+            <NButton secondary @click="openSaveQueryDrawer">
               <template #icon>
                 <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
               </template>
@@ -1029,29 +1033,42 @@ const columns = computed(() => [
         </NDrawerContent>
       </NDrawer>
 
-      <NModal v-model:show="showQueryModal" preset="card" title="保存查询" class="query-modal">
-        <NForm label-placement="top">
-          <NFormItem label="名称">
-            <NInput v-model:value="queryName" clearable />
-          </NFormItem>
-        </NForm>
-        <template #footer>
-          <div class="modal-actions">
-            <NButton @click="showQueryModal = false">
-              <template #icon>
-                <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
-              </template>
-              取消
-            </NButton>
-            <NButton type="primary" :loading="savingQuery" @click="saveCurrentQuery">
-              <template #icon>
-                <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
-              </template>
-              保存
-            </NButton>
+      <NDrawer v-model:show="showQueryModal" placement="right" :width="420">
+        <NDrawerContent
+          title="保存查询"
+          closable
+          body-content-class="query-drawer-body"
+          body-content-style="padding: 0 18px;"
+        >
+          <div class="query-save-panel">
+            <div class="query-save-note">
+              <strong>保存当前筛选条件</strong>
+              <span>下次可直接从列表上方的保存查询下拉中快速切换。</span>
+            </div>
+            <NForm label-placement="top">
+              <NFormItem label="查询名称">
+                <NInput
+                  v-model:value="queryName"
+                  clearable
+                  placeholder="例如：我关注的高优先级问题"
+                  @keypress.enter="saveCurrentQuery"
+                />
+              </NFormItem>
+            </NForm>
           </div>
-        </template>
-      </NModal>
+          <template #footer>
+            <div class="query-drawer-footer">
+              <NButton @click="showQueryModal = false">取消</NButton>
+              <NButton type="primary" :loading="savingQuery" @click="saveCurrentQuery">
+                <template #icon>
+                  <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
+                </template>
+                保存
+              </NButton>
+            </div>
+          </template>
+        </NDrawerContent>
+      </NDrawer>
     </div>
   </CommonPage>
 </template>
@@ -1163,10 +1180,6 @@ const columns = computed(() => [
   width: min(980px, calc(100vw - 32px));
 }
 
-.query-modal {
-  width: min(420px, calc(100vw - 32px));
-}
-
 .issue-create-form {
   padding-right: 0;
 }
@@ -1179,6 +1192,37 @@ const columns = computed(() => [
 :deep(.issue-drawer-body::-webkit-scrollbar) {
   width: 0;
   height: 0;
+}
+
+.query-save-panel {
+  padding: 18px 0;
+}
+
+.query-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.query-save-note {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.query-save-note strong {
+  color: #1e3a8a;
+  font-size: 14px;
+}
+
+.query-save-note span {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .create-section {

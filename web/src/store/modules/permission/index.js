@@ -9,6 +9,7 @@ const Layout = () => import('@/layout/index.vue')
 // * 后端路由相关函数
 // 根据后端传来数据构建出前端路由
 const issueMenuIcons = {
+  '/issue/dashboard': 'material-symbols:fact-check-outline-rounded',
   '/issue/list': 'material-symbols:format-list-bulleted-rounded',
   '/issue/config': 'material-symbols:fact-check-outline-rounded',
 }
