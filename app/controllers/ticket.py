@@ -978,7 +978,7 @@ class TicketController:
             not user.is_superuser
             and user.username != "admin"
             and getattr(ticket, "assigned_to_id", None) != user.id
-            and not {"管理员", "客服"}.intersection(role_names)
+            and not {"管理员", "客服", "产品", "测试", "研发"}.intersection(role_names)
             and not role_status_allowed
         ):
             if "技术" in role_names:

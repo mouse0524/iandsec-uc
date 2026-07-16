@@ -468,7 +468,8 @@ async def test_issue_role_can_download_ticket_attachment_in_matching_status(monk
 
 
 @pytest.mark.anyio
-async def test_issue_role_cannot_download_ticket_attachment_outside_matching_status(monkeypatch, tmp_path):
+@pytest.mark.parametrize("role_name", ["产品", "测试", "研发"])
+async def test_issue_roles_can_download_ticket_attachment(monkeypatch, tmp_path, role_name):
     source = tmp_path / "demo.docx"
     source.write_bytes(b"PK\x03\x04demo")
     attachment = Obj(ticket_id=9, file_path="demo.docx", origin_name="demo.docx", mime_type="application/octet-stream")
@@ -485,14 +486,13 @@ async def test_issue_role_cannot_download_ticket_attachment_outside_matching_sta
     monkeypatch.setattr(ticket_module.TicketAttachment, "filter", lambda **kwargs: FirstQuery(attachment))
     monkeypatch.setattr(ticket_module.Ticket, "filter", lambda **kwargs: FirstQuery(ticket))
 
-    with pytest.raises(HTTPException) as exc:
-        await ticket_controller.get_attachment_download(
-            attachment_id=1,
-            user=Obj(id=7, username="rd", is_superuser=False),
-            role_names=["研发"],
-        )
+    data = await ticket_controller.get_attachment_download(
+        attachment_id=1,
+        user=Obj(id=7, username="issue-role", is_superuser=False),
+        role_names=[role_name],
+    )
 
-    assert exc.value.status_code == 403
+    assert os.path.normcase(data["abs_path"]) == os.path.normcase(str(source))
 
 
 @pytest.mark.anyio
