@@ -64,6 +64,8 @@ async def list_projects(
     status: str | None = Query(None, description="项目状态"),
     assignee_id: int | None = Query(None, description="负责人ID"),
     product_name: str | None = Query(None, description="使用产品"),
+    server_version: str | None = Query(None, description="服务器版本"),
+    client_version: str | None = Query(None, description="客户端版本"),
 ):
     user = await _require_project_manager()
     if not await _can_view_all_projects(user):
@@ -75,6 +77,8 @@ async def list_projects(
         "status": status,
         "assignee_id": assignee_id,
         "product_name": product_name,
+        "server_version": server_version,
+        "client_version": client_version,
     }
     total, rows = await project_controller.list_projects(
         page=page,

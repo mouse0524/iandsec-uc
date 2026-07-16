@@ -81,6 +81,10 @@ class ProjectController:
             q &= Q(agent_id=filters["agent_id"])
         if filters.get("assignee_id"):
             q &= Q(assignee_id=filters["assignee_id"])
+        if filters.get("server_version"):
+            q &= Q(server_version=filters["server_version"])
+        if filters.get("client_version"):
+            q &= Q(client_version=filters["client_version"])
         return q
 
     def _project_matches_product(self, project: Project, product_name: str | None) -> bool:

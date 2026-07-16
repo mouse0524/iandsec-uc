@@ -209,6 +209,16 @@ def test_project_query_supports_agent_filter():
     assert any(child.filters == {"agent_id": 11} for child in q.children)
 
 
+def test_project_query_supports_version_filters():
+    q = project_controller._project_q({"server_version": "6.0.8", "client_version": "6.0.8.206"})
+
+    def has_filter(node, value):
+        return node.filters == value or any(has_filter(child, value) for child in node.children)
+
+    assert has_filter(q, {"server_version": "6.0.8"})
+    assert has_filter(q, {"client_version": "6.0.8.206"})
+
+
 def test_project_matches_product():
     project = SimpleNamespace(product_points=[{"product_name": "EDG", "points": 2}])
 
