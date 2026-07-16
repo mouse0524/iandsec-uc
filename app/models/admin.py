@@ -253,6 +253,7 @@ class IssueCustomField(BaseModel, TimestampMixin):
     default_value = fields.TextField(null=True, description="默认值")
     is_required = fields.BooleanField(default=False, description="是否必填", index=True)
     is_filter = fields.BooleanField(default=False, description="是否可筛选", index=True)
+    show_in_list = fields.BooleanField(default=False, description="是否在列表显示", index=True)
     searchable = fields.BooleanField(default=False, description="是否可搜索", index=True)
     multiple = fields.BooleanField(default=False, description="是否多选")
     visible = fields.BooleanField(default=True, description="是否可见", index=True)

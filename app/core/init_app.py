@@ -171,6 +171,7 @@ def _project_api_paths() -> list[str]:
         "/api/v1/project/activity/create",
         "/api/v1/project/activity/update",
         "/api/v1/project/activity/delete",
+        "/api/v1/dept/create",
     ]
 
 
@@ -1274,6 +1275,7 @@ async def _add_column_if_missing(db, table: str, column: str, definition: str) -
 async def _ensure_department_tech_invite_schema() -> None:
     db = Tortoise.get_connection(settings.TORTOISE_ORM["apps"]["models"]["default_connection"])
     await _add_column_if_missing(db, "dept", "tech_ids", "JSON NULL")
+    await _add_column_if_missing(db, "issue_custom_field", "show_in_list", "BOOL NOT NULL DEFAULT 0")
     await _add_column_if_missing(db, "partner_registration", "invite_code", "VARCHAR(32) NULL")
     await db.execute_script("UPDATE `partner_registration` SET `status` = 'pending' WHERE `status` = '待审核'")
     await db.execute_script(

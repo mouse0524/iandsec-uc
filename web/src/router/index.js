@@ -48,6 +48,7 @@ export async function addDynamicRoutes(currentPath = window.location.pathname) {
     })
     router.hasRoute(EMPTY_ROUTE.name) && router.removeRoute(EMPTY_ROUTE.name)
     !router.hasRoute(NOT_FOUND_ROUTE.name) && router.addRoute(NOT_FOUND_ROUTE)
+    permissionStore.setRoutesLoaded()
   } catch (error) {
     console.error('error', error)
     const userStore = useUserStore()

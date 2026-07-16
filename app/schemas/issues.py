@@ -156,6 +156,7 @@ class IssueAdminCustomFieldSaveIn(BaseModel):
     default_value: str | None = Field(None, description="默认值")
     is_required: bool = Field(False, description="是否必填")
     is_filter: bool = Field(False, description="是否可筛选")
+    show_in_list: bool = Field(False, description="是否在列表显示")
     searchable: bool = Field(False, description="是否可搜索")
     multiple: bool = Field(False, description="是否多选")
     visible: bool = Field(True, description="是否可见")

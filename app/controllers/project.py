@@ -211,6 +211,7 @@ class ProjectController:
                 "default_value",
                 "is_required",
                 "is_filter",
+                "show_in_list",
                 "searchable",
                 "multiple",
                 "visible",

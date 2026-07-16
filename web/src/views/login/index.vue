@@ -524,6 +524,7 @@ const forgotRules = {
 
 function resolveRoleTargetPath(redirectPath) {
   const roleDefaultPath = getDefaultLoginPath()
+  if (!redirectPath || redirectPath === '/') return roleDefaultPath
   if (!isUsableRoute(redirectPath)) return roleDefaultPath
   if (!userStore.isSuperUser && redirectPath.startsWith('/workbench')) {
     return roleDefaultPath

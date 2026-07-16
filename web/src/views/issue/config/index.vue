@@ -192,6 +192,7 @@ const sectionMap = {
       default_value: '',
       is_required: false,
       is_filter: false,
+      show_in_list: false,
       searchable: false,
       multiple: false,
       visible: true,
@@ -365,11 +366,11 @@ const customFieldColumns = [
     render: (row) => booleanTag(row.is_filter),
   },
   {
-    title: '搜索',
-    key: 'searchable',
+    title: '列表',
+    key: 'show_in_list',
     width: 80,
     align: 'center',
-    render: (row) => booleanTag(row.searchable),
+    render: (row) => booleanTag(row.show_in_list),
   },
   {
     title: '可见',
@@ -1213,8 +1214,8 @@ async function deleteWorkflow(row) {
                   <NFormItem label="可筛选">
                     <NSwitch v-model:value="modalForm.is_filter" />
                   </NFormItem>
-                  <NFormItem label="可搜索">
-                    <NSwitch v-model:value="modalForm.searchable" />
+                  <NFormItem label="列表显示">
+                    <NSwitch v-model:value="modalForm.show_in_list" />
                   </NFormItem>
                   <NFormItem label="多选">
                     <NSwitch v-model:value="modalForm.multiple" />

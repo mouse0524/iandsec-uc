@@ -89,7 +89,7 @@ const columns = [
   },
   { title: '必填', key: 'is_required', width: 80, align: 'center', render: (row) => boolTag(row.is_required) },
   { title: '筛选', key: 'is_filter', width: 80, align: 'center', render: (row) => boolTag(row.is_filter) },
-  { title: '搜索', key: 'searchable', width: 80, align: 'center', render: (row) => boolTag(row.searchable) },
+  { title: '列表', key: 'show_in_list', width: 80, align: 'center', render: (row) => boolTag(row.show_in_list) },
   { title: '可见', key: 'visible', width: 80, align: 'center', render: (row) => boolTag(row.visible) },
   {
     title: '操作',
@@ -131,6 +131,7 @@ function defaultField() {
     default_value: '',
     is_required: false,
     is_filter: false,
+    show_in_list: false,
     searchable: false,
     multiple: false,
     visible: true,
@@ -319,7 +320,7 @@ async function saveField() {
             <NSpace>
               <NSwitch v-model:value="fieldForm.is_required" />必填
               <NSwitch v-model:value="fieldForm.is_filter" />筛选
-              <NSwitch v-model:value="fieldForm.searchable" />搜索
+              <NSwitch v-model:value="fieldForm.show_in_list" />列表显示
               <NSwitch v-model:value="fieldForm.multiple" :disabled="fieldForm.field_format !== 'list'" />多选
               <NSwitch v-model:value="fieldForm.visible" />可见
             </NSpace>

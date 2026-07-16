@@ -638,7 +638,7 @@ const columns = computed(() => [
         priorityTagType(row.priority_name),
       ),
   },
-  ...customFields.value.map((field) => ({
+  ...customFields.value.filter((field) => field.show_in_list).map((field) => ({
     title: field.name,
     key: `cf_${field.id}`,
     align: 'center',

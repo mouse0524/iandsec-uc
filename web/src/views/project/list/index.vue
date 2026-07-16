@@ -45,6 +45,12 @@ const clientVersionOptions = ref([])
 const customFields = ref([])
 const userOptions = ref([])
 const agentOptions = ref([])
+const agentDrawerVisible = ref(false)
+const agentSaving = ref(false)
+const agentForm = ref(defaultAgentForm())
+const agentTechOptions = ref([])
+const agentPromptVisible = ref(false)
+const agentCreateValue = '__create_agent__'
 const uploadLoading = ref(false)
 const importLoading = ref(false)
 const fileList = ref([])
@@ -134,6 +140,25 @@ function defaultRemarkForm() {
   }
 }
 
+function defaultAgentForm() {
+  return {
+    parent_id: null,
+    name: '',
+    desc: '',
+    channel_level: null,
+    tech_ids: [],
+    order: 0,
+  }
+}
+
+const channelLevelOptions = [
+  { label: '区域代理', value: '区域代理' },
+  { label: '钻石', value: '钻石' },
+  { label: '铂金', value: '铂金' },
+  { label: '金牌', value: '金牌' },
+  { label: '未签约', value: '未签约' },
+]
+
 async function loadOptions() {
   if (optionsPromise) return optionsPromise
   optionsPromise = (async () => {
@@ -156,10 +181,14 @@ async function loadOptions() {
   return optionsPromise
 }
 
-async function loadAgentOptions(keyword = '') {
+async function loadAgentOptions(keyword = '', allowCreate = false) {
   if (!keyword) return
   const res = await api.getDepts({ name: keyword })
   agentOptions.value = channelDeptOptions(res?.data || [])
+  const name = String(keyword || '').trim()
+  if (allowCreate && name && !agentOptions.value.length) {
+    agentOptions.value = [{ label: `新建代理商“${name}”`, value: agentCreateValue, createName: name }]
+  }
 }
 
 async function loadUserOptions(keyword = '') {
@@ -189,6 +218,95 @@ function seedAgentOption(row) {
 function channelDeptOptions(rows) {
   const channel = (rows || []).find((item) => item.name === '渠道部门')
   return (channel?.children || []).map((item) => ({ label: item.name, value: item.id }))
+}
+
+function findDept(rows, name) {
+  for (const row of rows || []) {
+    if (row.name === name) return row
+    const child = findDept(row.children || [], name)
+    if (child) return child
+  }
+  return null
+}
+
+async function ensureChannelDeptId() {
+  let rows = (await api.getDepts())?.data || []
+  let channel = findDept(rows, '渠道部门')
+  if (channel?.id) return channel.id
+  await api.createDept({ name: '渠道部门', parent_id: 0, order: 0, tech_ids: [] })
+  rows = (await api.getDepts())?.data || []
+  channel = findDept(rows, '渠道部门')
+  return channel?.id || 0
+}
+
+function promptCreateAgent(keyword) {
+  const name = String(keyword || '').trim()
+  if (!name || agentDrawerVisible.value || agentPromptVisible.value) return
+  agentPromptVisible.value = true
+  $dialog.confirm({
+    title: '新建代理商',
+    type: 'warning',
+    content: `未找到代理商“${name}”，是否新建？`,
+    positiveText: '新建',
+    negativeText: '取消',
+    async confirm() {
+      agentPromptVisible.value = false
+      await openCreateAgent(name)
+    },
+    cancel() {
+      agentPromptVisible.value = false
+    },
+  })
+}
+
+function handleAgentChange(value, option) {
+  if (value === agentCreateValue) {
+    form.value.agent_id = null
+    promptCreateAgent(option?.createName || option?.label)
+  }
+}
+
+async function openCreateAgent(name) {
+  const parentId = await ensureChannelDeptId()
+  if (!parentId) {
+    $message.error('渠道部门创建失败')
+    return
+  }
+  agentForm.value = { ...defaultAgentForm(), name, parent_id: parentId }
+  agentDrawerVisible.value = true
+  await loadAgentTechOptions()
+}
+
+async function loadAgentTechOptions(keyword = '') {
+  const res = await api.getUserList({ page: 1, page_size: 20, alias: keyword || undefined, role_name: '技术' })
+  agentTechOptions.value = (res?.data || [])
+    .filter((item) => item.is_active !== false)
+    .map((item) => ({ label: item.alias || item.username, value: item.id }))
+}
+
+async function submitAgent() {
+  if (!agentForm.value.name?.trim()) {
+    $message.warning('请输入代理商名称')
+    return
+  }
+  agentSaving.value = true
+  try {
+    await api.createDept({
+      ...agentForm.value,
+      name: agentForm.value.name.trim(),
+      tech_ids: agentForm.value.tech_ids || [],
+    })
+    const rows = (await api.getDepts())?.data || []
+    agentOptions.value = channelDeptOptions(rows)
+    const created = agentOptions.value.find((item) => item.label === agentForm.value.name.trim())
+    if (created) {
+      form.value.agent_id = created.value
+      agentDrawerVisible.value = false
+      $message.success('代理商已创建')
+    }
+  } finally {
+    agentSaving.value = false
+  }
 }
 
 async function getProjectList(params) {
@@ -661,7 +779,7 @@ const actionColumn = {
 
 const displayColumns = computed(() => [
   ...baseColumns,
-  ...customFields.value.map((field) => ({
+  ...customFields.value.filter((field) => field.show_in_list).map((field) => ({
     title: field.name,
     key: `custom_${field.id}`,
     align: 'center',
@@ -843,7 +961,7 @@ const displayColumns = computed(() => [
               <NFormItem label="创建时间"><NInput :value="formatDateTime(form.created_at)" disabled /></NFormItem>
               <NFormItem v-if="readonly" label="创建人"><NInput :value="form.creator_name || '-'" disabled /></NFormItem>
               <NFormItem label="区域"><NSelect v-model:value="form.region" :options="regionOptions" clearable placeholder="选择区域" :disabled="readonly" /></NFormItem>
-              <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote placeholder="搜索代理商" :disabled="readonly" @search="loadAgentOptions" /></NFormItem>
+              <NFormItem label="所属代理商"><NSelect v-model:value="form.agent_id" :options="agentOptions" clearable filterable remote placeholder="搜索代理商" :disabled="readonly" @update:value="handleAgentChange" @search="(keyword) => loadAgentOptions(keyword, !readonly)" /></NFormItem>
               <NFormItem label="项目状态"><NSelect v-model:value="form.status" :options="statusOptions" placeholder="选择状态" :disabled="readonly" /></NFormItem>
               <NFormItem label="服务器版本"><NSelect v-model:value="form.server_version" :options="serverVersionOptions" clearable filterable placeholder="选择服务器版本" :disabled="readonly" /></NFormItem>
               <NFormItem label="客户端版本"><NSelect v-model:value="form.client_version" :options="clientVersionOptions" clearable filterable placeholder="选择客户端版本" :disabled="readonly" /></NFormItem>
@@ -984,6 +1102,46 @@ const displayColumns = computed(() => [
           <div class="drawer-footer">
             <NButton @click="modalVisible = false">取消</NButton>
             <NButton type="primary" @click="submitProject">保存</NButton>
+          </div>
+        </template>
+      </NDrawerContent>
+    </NDrawer>
+
+    <NDrawer v-model:show="agentDrawerVisible" placement="right" :width="520">
+      <NDrawerContent title="新建代理商" closable>
+        <NForm label-placement="top" class="project-form">
+          <NFormItem label="父级部门">
+            <NInput value="渠道部门" disabled />
+          </NFormItem>
+          <NFormItem label="部门名称" required>
+            <NInput v-model:value="agentForm.name" clearable placeholder="请输入部门名称" />
+          </NFormItem>
+          <NFormItem label="备注">
+            <NInput v-model:value="agentForm.desc" type="textarea" clearable />
+          </NFormItem>
+          <NFormItem label="代理商级别">
+            <NSelect v-model:value="agentForm.channel_level" :options="channelLevelOptions" clearable />
+          </NFormItem>
+          <NFormItem label="关联技术">
+            <NSelect
+              v-model:value="agentForm.tech_ids"
+              :options="agentTechOptions"
+              multiple
+              clearable
+              filterable
+              remote
+              @focus="loadAgentTechOptions"
+              @search="loadAgentTechOptions"
+            />
+          </NFormItem>
+          <NFormItem label="排序">
+            <NInputNumber v-model:value="agentForm.order" :min="0" style="width: 100%" />
+          </NFormItem>
+        </NForm>
+        <template #footer>
+          <div class="drawer-footer">
+            <NButton @click="agentDrawerVisible = false">取消</NButton>
+            <NButton type="primary" :loading="agentSaving" @click="submitAgent">保存</NButton>
           </div>
         </template>
       </NDrawerContent>
