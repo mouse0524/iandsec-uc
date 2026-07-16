@@ -418,6 +418,14 @@ def test_issue_assignee_filter_accepts_multiple_ids():
     assert {"assigned_to_id__in": [7, 8]} in filters
 
 
+def test_issue_submitter_filter_keeps_numeric_id():
+    from app.api.v1.issues import issues as issue_api
+
+    filters = _q_filters(issue_api._apply_query_filters(issue_api.Q(), {"submitter_id": "3"}))
+
+    assert {"submitter_id": 3} in filters
+
+
 def test_issue_assignee_filter_permission_scope():
     from app.api.v1.issues import issues as issue_api
 

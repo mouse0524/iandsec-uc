@@ -888,7 +888,7 @@ async def list_issues(
     issue_status_id: int | None = Query(None, description="状态ID"),
     issue_priority_id: int | None = Query(None, description="优先级ID"),
     assigned_to_id: str | None = Query(None, description="指派人ID，多个用逗号分隔"),
-    submitter_id: int | None = Query(None, description="提交者ID"),
+    submitter_id: str | None = Query(None, description="提交者ID或姓名"),
     issue_project_name: str | None = Query(None, description="项目名称"),
     issue_status_name: str | None = Query(None, description="状态"),
     assigned_to_name: str | None = Query(None, description="用户名称"),
@@ -930,6 +930,9 @@ async def list_issues(
         "assigned_to_name": assigned_to_name if assigned_to_name is not None else saved_filters.get("assigned_to_name"),
         "submitter_name": submitter_name if submitter_name is not None else saved_filters.get("submitter_name"),
     }
+    if issue_filters.get("submitter_id") and _coerce_int(issue_filters.get("submitter_id")) is None:
+        issue_filters["submitter_name"] = issue_filters["submitter_id"]
+        issue_filters["submitter_id"] = None
     issue_filters["assigned_to_id"] = _allowed_assignee_filter(user, role_names, issue_filters.get("assigned_to_id"))
     q = _apply_query_filters(q, {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
     q &= await _issue_name_filter_q(issue_filters)

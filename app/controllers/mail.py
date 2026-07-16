@@ -43,8 +43,6 @@ class MailController:
     @staticmethod
     def _ticket_url(ticket: Ticket, setting: dict) -> str:
         base_url = str(setting.get("site_base_url") or settings.APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
-        if not base_url and settings.CORS_ORIGINS:
-            base_url = str(settings.CORS_ORIGINS[0]).rstrip("/")
         path = f"/issue/detail?{urlencode({'issue_id': getattr(ticket, 'id', '')})}"
         return f"{base_url}{path}" if base_url else path
 
@@ -258,6 +256,10 @@ class MailController:
             TicketStatus.PENDING_REVIEW.value: "待客服审核",
             TicketStatus.CS_REJECTED.value: "驳回",
             TicketStatus.TECH_PROCESSING.value: "待技术处理",
+            TicketStatus.TEST_FILTERING.value: "测试过滤",
+            TicketStatus.PRODUCT_EVALUATION.value: "产品评估",
+            TicketStatus.RD_PROCESSING.value: "研发处理",
+            TicketStatus.TEST_VERIFICATION.value: "测试验证",
             TicketStatus.FIELD_VERIFICATION.value: "现场验证",
             TicketStatus.PENDING_CLOSE.value: "待关闭",
             TicketStatus.TECH_REJECTED.value: "驳回",
