@@ -111,7 +111,7 @@ const form = ref({
   ticket_notify_subject: '工单状态提醒：{ticket_no}',
   ticket_notify_is_html: true,
   ticket_notify_template:
-    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
+    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单ID：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
   webdav_enabled: false,
   webdav_base_url: '',
   webdav_username: '',
@@ -184,7 +184,7 @@ const presetTemplates = {
     '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#fffaf0;border:1px solid #fde68a;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#b45309;">账号密码已重置</h2><p style="margin:0 0 8px;">您好，<b>{username}</b>：</p><p style="margin:0 0 8px;">管理员已重置您的账号密码，请使用以下临时密码登录：</p><div style="display:inline-block;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:20px;font-weight:700;color:#c2410c;">{password}</div><p style="margin:12px 0 0;color:#6b7280;">登录后请尽快在个人中心修改密码。</p></div>',
   ticketNotifySubject: '【系统通知】工单状态提醒',
   ticketNotifyHtml:
-    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
+    '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单ID：<b>{ticket_no}</b></p><p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;color:#6b7280;">请及时登录系统处理。</p></div>',
 }
 
 const passwordCategoryOptions = [
@@ -1050,7 +1050,7 @@ function applyPresetHtmlTemplates() {
 
           <NTabPane name="template" tab="邮件模板">
             <NAlert type="info" class="mb-12">
-              验证码模板支持变量：{code}、{minutes}；审核模板支持变量：{contact_name}、{register_type}、{reason}；管理员重置通知支持变量：{username}、{password}、{email}；工单提醒支持变量：{name}、{ticket_no}、{title}、{status}、{operator}、{ticket_url}
+              验证码模板支持变量：{code}、{minutes}；审核模板支持变量：{contact_name}、{register_type}、{reason}；管理员重置通知支持变量：{username}、{password}、{email}；工单提醒支持变量：{name}、{ticket_no}、{ticket_id}、{ticket_code}、{title}、{status}、{operator}、{ticket_url}
             </NAlert>
             <div class="mb-12" flex items-center gap-12>
               <NButton type="primary" ghost @click="applyPresetHtmlTemplates"
@@ -1151,7 +1151,7 @@ function applyPresetHtmlTemplates() {
                   v-model:value="form.ticket_notify_template"
                   type="textarea"
                   :autosize="{ minRows: 4, maxRows: 8 }"
-                  placeholder="支持变量 {name}、{ticket_no}、{title}、{status}、{operator}、{ticket_url}"
+                  placeholder="支持变量 {name}、{ticket_no}、{ticket_id}、{ticket_code}、{title}、{status}、{operator}、{ticket_url}"
                 />
               </NFormItem>
             </NCard>

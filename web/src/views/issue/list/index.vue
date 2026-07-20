@@ -1,5 +1,6 @@
 <script setup>
 import { computed, h, nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton,
   NCheckbox,
@@ -31,6 +32,7 @@ const OPEN_STATUS_FILTER = '__open__'
 
 const $table = ref(null)
 const formRef = ref(null)
+const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
 const queryItems = ref(defaultQueryFilters())
@@ -337,6 +339,11 @@ function openDetail(row) {
   detailIssueId.value = Number(row.id)
   detailIssueProjectName.value = row.company_name || ''
   detailVisible.value = true
+}
+
+function openDetailPage(row) {
+  if (!row?.id) return
+  router.push(`/issue/detail/issue_id/${row.id}`)
 }
 
 function openCreateModal() {
@@ -700,14 +707,26 @@ const columns = computed(() => [
     align: 'center',
     width: 86,
     render(row) {
-      return h('span', { class: 'issue-id-pill' }, `#${row.id}`)
+      return h(
+        'button',
+        {
+          class: 'issue-id-pill',
+          type: 'button',
+          onClick: (event) => {
+            event.preventDefault()
+            openDetailPage(row)
+          },
+        },
+        `#${row.id}`,
+      )
     },
   },
   {
     title: '标题',
     key: 'title',
-    align: 'center',
-    minWidth: 280,
+    align: 'left',
+    titleAlign: 'center',
+    width: 200,
     render: renderIssueTitle,
   },
   {
@@ -1245,26 +1264,33 @@ const columns = computed(() => [
 }
 
 :deep(.issue-id-pill) {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 52px;
   height: 24px;
+  border: 0;
   border-radius: 999px;
   background: var(--issue-accent-soft);
   color: var(--issue-accent);
+  cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+}
+
+:deep(.issue-id-pill:hover) {
+  text-decoration: underline;
 }
 
 :deep(.issue-title-cell) {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   min-width: 0;
   padding: 2px 0;
-  text-align: center;
+  text-align: left;
 }
 
 :deep(.issue-title-link) {
@@ -1276,7 +1302,7 @@ const columns = computed(() => [
   font-weight: 700;
   line-height: 1.4;
   padding: 0;
-  text-align: center;
+  text-align: left;
   text-decoration: none;
   white-space: normal;
 }
@@ -1288,7 +1314,7 @@ const columns = computed(() => [
 :deep(.issue-title-meta) {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
   color: var(--issue-muted);
   font-size: 12px;

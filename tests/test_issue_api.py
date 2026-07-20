@@ -480,6 +480,55 @@ def test_issue_assignee_filter_accepts_multiple_ids():
     assert {"assigned_to_id__in": [7, 8]} in filters
 
 
+@pytest.mark.anyio
+async def test_issue_title_filter_searches_title_description_id_and_journal_notes(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    calls = []
+
+    class JournalQuery:
+        def values_list(self, *args, **kwargs):
+            return self
+
+        def __await__(self):
+            async def _result():
+                return [109]
+
+            return _result().__await__()
+
+    def fake_journal_filter(**kwargs):
+        calls.append(kwargs)
+        return JournalQuery()
+
+    monkeypatch.setattr(issue_api.IssueJournal, "filter", fake_journal_filter)
+
+    q = await issue_api._issue_title_filter_q("108")
+    filters = _q_filters(q)
+
+    assert {"title__contains": "108"} in filters
+    assert {"description__contains": "108"} in filters
+    assert {"id": 108} in filters
+    assert {"id__in": [109]} in filters
+    assert calls == [
+        {"journalized_type": "Issue", "notes__contains": "108", "private_notes": False}
+    ]
+
+
+def test_numeric_issue_title_filter_bypasses_regular_filters_for_exact_id():
+    from app.api.v1.issues import issues as issue_api
+
+    q = issue_api._merge_issue_title_filter(
+        issue_api.Q(assigned_to_id=1),
+        "80",
+        issue_api.Q(title__contains="80"),
+    )
+
+    assert q.join_type == issue_api.Q.OR
+    assert {"id": 80} in _q_filters(q)
+    assert {"assigned_to_id": 1} in _q_filters(q)
+    assert {"title__contains": "80"} in _q_filters(q)
+
+
 def test_issue_query_filters_exclude_submitter_id():
     from app.api.v1.issues import issues as issue_api
 

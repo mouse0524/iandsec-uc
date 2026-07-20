@@ -784,10 +784,34 @@ async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
     return q
 
 
+async def _issue_title_filter_q(value: Any) -> Q:
+    keyword = str(value or "").strip()
+    if not keyword:
+        return Q()
+
+    q = Q(title__contains=keyword) | Q(description__contains=keyword)
+    issue_id = _coerce_int(keyword)
+    if issue_id is not None:
+        q |= Q(id=issue_id)
+
+    journal_issue_ids = await IssueJournal.filter(
+        journalized_type="Issue",
+        notes__contains=keyword,
+        private_notes=False,
+    ).values_list("journalized_id", flat=True)
+    if journal_issue_ids:
+        q |= Q(id__in=[int(item) for item in journal_issue_ids])
+    return q
+
+
+def _merge_issue_title_filter(filtered_q: Q, title: Any, title_q: Q) -> Q:
+    issue_id = _coerce_int(str(title or "").strip())
+    if issue_id is not None:
+        return (filtered_q & title_q) | Q(id=issue_id)
+    return filtered_q & title_q
+
+
 def _apply_query_filters(q: Q, filters: dict[str, Any]) -> Q:
-    title = str(filters.get("title") or "").strip()
-    if title:
-        q &= Q(title__contains=title)
     for field in ISSUE_QUERY_FILTER_FIELDS:
         if field == "assigned_to_id":
             values = _coerce_int_list(filters.get(field))
@@ -927,7 +951,7 @@ async def list_issues(
 
     title = title if title is not None else saved_filters.get("title")
     scope = scope if scope is not None else saved_filters.get("scope")
-    q = await _issue_visibility_q(user, role_names, scope)
+    visibility_q = await _issue_visibility_q(user, role_names, scope)
     saved_submitter_name = saved_filters.get("submitter_name")
     if saved_submitter_name is None:
         saved_submitter_name = await _legacy_submitter_name_filter(saved_filters)
@@ -949,10 +973,8 @@ async def list_issues(
         "submitter_name": submitter_name if submitter_name is not None else saved_submitter_name,
     }
     issue_filters["assigned_to_id"] = _allowed_assignee_filter(user, role_names, issue_filters.get("assigned_to_id"))
-    q = _apply_query_filters(q, {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
-    q &= await _issue_name_filter_q(issue_filters)
-    if title:
-        q &= Q(title__contains=title)
+    filtered_q = _apply_query_filters(Q(), {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
+    filtered_q &= await _issue_name_filter_q(issue_filters)
     raw_custom_filters = custom_values if custom_values is not None else saved_filters.get("custom_values")
     if raw_custom_filters:
         try:
@@ -977,7 +999,12 @@ async def list_issues(
                 ticket_ids = await IssueCustomValue.filter(
                     Q(customized_type="Issue", custom_field_id=custom_field_id) & custom_value_q
                 ).values_list("customized_id", flat=True)
-                q &= Q(id__in=[int(item) for item in ticket_ids])
+                filtered_q &= Q(id__in=[int(item) for item in ticket_ids])
+
+    if title:
+        title_q = await _issue_title_filter_q(title)
+        filtered_q = _merge_issue_title_filter(filtered_q, title, title_q)
+    q = visibility_q & filtered_q
 
     query = Ticket.filter(q)
     total = await query.count()

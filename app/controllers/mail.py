@@ -289,7 +289,11 @@ class MailController:
             setting.get("ticket_notify_template")
             or "您好，{name}：\n工单编号：{ticket_no}\n工单标题：{title}\n当前状态：{status}\n操作人：{operator}\n查看链接：{ticket_url}\n请及时登录系统处理。"
         )
-        subject = self._render_template(subject_template, {"ticket_no": ticket.ticket_no})
+        ticket_id = getattr(ticket, "id", "")
+        subject = self._render_template(
+            subject_template,
+            {"ticket_no": ticket_id, "ticket_id": ticket_id, "ticket_code": ticket.ticket_no},
+        )
         ticket_url = self._ticket_url(ticket, setting)
         logger.info(
             "[mail.ticket_notify] ticket_id={} ticket_url={}",
@@ -301,7 +305,9 @@ class MailController:
             content_template,
             {
                 "name": to_user.alias or to_user.username,
-                "ticket_no": ticket.ticket_no,
+                "ticket_no": ticket_id,
+                "ticket_id": ticket_id,
+                "ticket_code": ticket.ticket_no,
                 "title": ticket.title,
                 "status": status_label,
                 "operator": operator_name or "-",

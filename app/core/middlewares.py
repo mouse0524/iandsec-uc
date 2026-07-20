@@ -334,27 +334,10 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         req_id = uuid.uuid4().hex[:8]
         request.state.req_id = req_id
         client_ip = get_client_ip(request)
-        logger.info(
-            "[http.request] start req_id={} method={} path={} client_ip={} xff={}",
-            req_id,
-            request.method,
-            request.url.path,
-            client_ip,
-            request.headers.get("x-forwarded-for", ""),
-        )
         start_time: datetime = datetime.now()
         await self.before_request(request)
         response = await call_next(request)
         end_time: datetime = datetime.now()
         process_time = int((end_time.timestamp() - start_time.timestamp()) * 1000)
         await self.after_request(request, response, process_time)
-        logger.info(
-            "[http.request] end req_id={} method={} path={} status={} cost_ms={} client_ip={}",
-            req_id,
-            request.method,
-            request.url.path,
-            response.status_code,
-            process_time,
-            client_ip,
-        )
         return response

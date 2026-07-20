@@ -254,7 +254,7 @@ async def test_ticket_notice_template_replaces_ticket_url_in_href(monkeypatch):
                 'color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;'
                 'border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;'
                 'font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">'
-                '您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p>'
+                '您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单ID：<b>{ticket_no}</b></p>'
                 '<p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">'
                 '当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">'
                 '操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" '
@@ -276,7 +276,7 @@ async def test_ticket_notice_template_replaces_ticket_url_in_href(monkeypatch):
     monkeypatch.setattr(mail_controller, "_schedule", fake_schedule)
 
     await mail_controller.send_ticket_status_notice(
-        ticket=Obj(id=98, ticket_no="T-98", title="链接测试"),
+        ticket=Obj(id=98, ticket_no="T-98", title="链接测试 工单编号：原始内容"),
         to_user=Obj(id=7, username="user7", alias="用户7", email="user7@example.com"),
         status=TicketStatus.TEST_FILTERING,
         operator_name="op",
@@ -284,6 +284,9 @@ async def test_ticket_notice_template_replaces_ticket_url_in_href(monkeypatch):
     await scheduled[0]
 
     assert 'href="http://example.test/issue/detail/issue_id/98"' in sent[0]["content"]
+    assert "工单ID：<b>98</b>" in sent[0]["content"]
+    assert "工单标题：链接测试 工单编号：原始内容" in sent[0]["content"]
+    assert "T-98" not in sent[0]["content"]
     assert "{ticket_url}" not in sent[0]["content"]
 
 
