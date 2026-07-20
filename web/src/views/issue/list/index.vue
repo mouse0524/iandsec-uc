@@ -9,6 +9,7 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
+  NPopconfirm,
   NSelect,
   NSpace,
   NTag,
@@ -26,6 +27,8 @@ import { formatDateTime, isImageName } from '@/utils'
 
 defineOptions({ name: '工单列表' })
 
+const OPEN_STATUS_FILTER = '__open__'
+
 const $table = ref(null)
 const formRef = ref(null)
 const appStore = useAppStore()
@@ -39,6 +42,7 @@ const showQueryModal = ref(false)
 const creating = ref(false)
 const savingQuery = ref(false)
 const queryName = ref('')
+const queryEditId = ref(null)
 const createForm = ref(defaultCreateForm())
 const assigneeOptions = ref([])
 const uploadLoading = ref(false)
@@ -88,12 +92,12 @@ const builtInQueries = computed(() => {
     {
       label: '我提交',
       value: 'builtin:submitted-by-me',
-      filters: userName ? { submitter_name: userName } : {},
+      filters: userName ? { submitter_name: userName, issue_status_name: OPEN_STATUS_FILTER } : {},
     },
     {
       label: '指派给我',
       value: 'builtin:assigned-to-me',
-      filters: userId ? { assigned_to_id: [userId] } : {},
+      filters: userId ? { assigned_to_id: [userId], issue_status_name: OPEN_STATUS_FILTER } : {},
     },
   ]
 })
@@ -101,6 +105,10 @@ const queryOptions = computed(() => [
   ...builtInQueries.value,
   ...queries.value.map((item) => ({ label: item.name, value: item.id })),
 ])
+const selectedSavedQuery = computed(() => {
+  const id = savedQueryId(selectedQueryId.value)
+  return queries.value.find((item) => Number(item.id) === Number(id)) || null
+})
 
 const createRules = {
   company_name: { required: true, message: '请输入项目名称', trigger: ['blur', 'input'] },
@@ -274,7 +282,23 @@ function defaultQueryId() {
 
 function defaultQueryFilters() {
   const userId = Number(userStore.userId || 0)
-  return userId ? { assigned_to_id: [userId] } : {}
+  return {
+    issue_status_name: OPEN_STATUS_FILTER,
+    ...(userId ? { assigned_to_id: [userId] } : {}),
+  }
+}
+
+function emptyQueryFilters() {
+  return {
+    title: '',
+    submitter_name: '',
+    issue_project_name: '',
+    issue_tracker_id: null,
+    issue_status_name: null,
+    issue_priority_id: null,
+    assigned_to_id: [],
+    ...Object.fromEntries(customFilterFields.value.map((field) => [`cf_${field.id}`, field.multiple ? [] : null])),
+  }
 }
 
 async function loadAssigneeOptions() {
@@ -477,7 +501,7 @@ function compactFilters() {
 
 async function applySavedQuery(queryId) {
   if (!queryId) {
-    queryItems.value = { assigned_to_id: [] }
+    queryItems.value = emptyQueryFilters()
     await nextTick()
     $table.value?.handleSearch?.()
     return
@@ -491,7 +515,7 @@ async function applySavedQuery(queryId) {
   }
   const query = queries.value.find((item) => Number(item.id) === Number(queryId))
   if (!query) {
-    queryItems.value = { assigned_to_id: [] }
+    queryItems.value = emptyQueryFilters()
     await nextTick()
     $table.value?.handleSearch?.()
     return
@@ -509,7 +533,7 @@ async function applySavedQuery(queryId) {
 
 function handleQueryReset() {
   selectedQueryId.value = null
-  queryItems.value = { assigned_to_id: [] }
+  queryItems.value = emptyQueryFilters()
 }
 
 function normalizedQueryFilters(filters = {}) {
@@ -582,7 +606,9 @@ function customFieldValue(field, values = {}) {
 }
 
 function openSaveQueryDrawer() {
-  queryName.value = ''
+  const query = selectedSavedQuery.value
+  queryEditId.value = query ? Number(query.id) : null
+  queryName.value = query?.name || ''
   showQueryModal.value = true
 }
 
@@ -593,15 +619,49 @@ async function saveCurrentQuery() {
   }
   savingQuery.value = true
   try {
-    await api.createIssueQuery({
+    const payload = {
       name: queryName.value.trim(),
       filters: compactFilters(),
       sort_criteria: [{ field: 'updated_at', direction: 'desc' }],
-    })
-    $message.success('查询已保存')
+    }
+    if (queryEditId.value) {
+      const query = selectedSavedQuery.value || {}
+      await api.updateIssueQuery({
+        query_id: queryEditId.value,
+        visibility: query.visibility || 'private',
+        project_id: query.project_id ?? null,
+        columns: query.columns || [],
+        ...payload,
+      })
+      $message.success('查询已更新')
+    } else {
+      const res = await api.createIssueQuery(payload)
+      if (res?.data?.id) selectedQueryId.value = res.data.id
+      $message.success('查询已保存')
+    }
     showQueryModal.value = false
     queryName.value = ''
+    queryEditId.value = null
     await loadQueries()
+  } finally {
+    savingQuery.value = false
+  }
+}
+
+async function deleteCurrentQuery() {
+  if (!queryEditId.value) return
+  savingQuery.value = true
+  try {
+    await api.deleteIssueQuery({ query_id: queryEditId.value })
+    $message.success('查询已删除')
+    selectedQueryId.value = null
+    queryItems.value = emptyQueryFilters()
+    showQueryModal.value = false
+    queryName.value = ''
+    queryEditId.value = null
+    await loadQueries()
+    await nextTick()
+    $table.value?.handleSearch?.()
   } finally {
     savingQuery.value = false
   }
@@ -724,7 +784,7 @@ const columns = computed(() => [
               <template #icon>
                 <TheIcon icon="mdi-content-save-cog-outline" :size="16" />
               </template>
-              保存查询
+              {{ selectedSavedQuery ? '修改查询' : '保存查询' }}
             </NButton>
             <NButton type="primary" @click="openCreateModal">
               <template #icon>
@@ -782,7 +842,10 @@ const columns = computed(() => [
             <QueryBarItem label="状态" :label-width="58">
               <NSelect
                 v-model:value="queryItems.issue_status_name"
-                :options="metadata.statuses.map((item) => ({ label: item.name, value: item.name }))"
+                :options="[
+                  { label: '打开', value: OPEN_STATUS_FILTER },
+                  ...metadata.statuses.map((item) => ({ label: item.name, value: item.name })),
+                ]"
                 clearable
                 placeholder="状态"
                 style="width: 140px"
@@ -1084,15 +1147,19 @@ const columns = computed(() => [
 
       <NDrawer v-model:show="showQueryModal" placement="right" :width="420">
         <NDrawerContent
-          title="保存查询"
+          :title="queryEditId ? '修改查询' : '保存查询'"
           closable
           body-content-class="query-drawer-body"
           body-content-style="padding: 0 18px;"
         >
           <div class="query-save-panel">
             <div class="query-save-note">
-              <strong>保存当前筛选条件</strong>
-              <span>下次可直接从列表上方的保存查询下拉中快速切换。</span>
+              <strong>{{ queryEditId ? '更新当前保存查询' : '保存当前筛选条件' }}</strong>
+              <span>{{
+                queryEditId
+                  ? '会用当前列表筛选条件覆盖该查询。'
+                  : '下次可直接从列表上方的保存查询下拉中快速切换。'
+              }}</span>
             </div>
             <NForm label-placement="top">
               <NFormItem label="查询名称">
@@ -1107,12 +1174,20 @@ const columns = computed(() => [
           </div>
           <template #footer>
             <div class="query-drawer-footer">
+              <NPopconfirm v-if="queryEditId" @positive-click="deleteCurrentQuery">
+                <template #trigger>
+                  <NButton class="query-delete-btn" type="error" secondary :loading="savingQuery">
+                    删除
+                  </NButton>
+                </template>
+                确认删除该保存查询？
+              </NPopconfirm>
               <NButton @click="showQueryModal = false">取消</NButton>
               <NButton type="primary" :loading="savingQuery" @click="saveCurrentQuery">
                 <template #icon>
                   <TheIcon icon="mdi-content-save-cog-outline" :size="17" />
                 </template>
-                保存
+                {{ queryEditId ? '更新' : '保存' }}
               </NButton>
             </div>
           </template>
@@ -1255,6 +1330,10 @@ const columns = computed(() => [
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.query-delete-btn {
+  margin-right: auto;
 }
 
 .query-save-note {

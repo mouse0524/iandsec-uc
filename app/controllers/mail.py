@@ -1,10 +1,10 @@
 import asyncio
+import re
 import secrets
 import smtplib
 import time
 from email.mime.text import MIMEText
 from email.utils import formataddr
-from urllib.parse import urlencode
 
 from fastapi import HTTPException
 from email_validator import EmailNotValidError, validate_email
@@ -43,8 +43,24 @@ class MailController:
     @staticmethod
     def _ticket_url(ticket: Ticket, setting: dict) -> str:
         base_url = str(setting.get("site_base_url") or settings.APP_PUBLIC_BASE_URL or "").strip().rstrip("/")
-        path = f"/issue/detail?{urlencode({'issue_id': getattr(ticket, 'id', '')})}"
+        path = f"/issue/detail/issue_id/{getattr(ticket, 'id', '')}"
         return f"{base_url}{path}" if base_url else path
+
+    @staticmethod
+    def _ticket_link(ticket_url: str) -> str:
+        return (
+            f'<a href="{ticket_url}" style="display:inline-block;padding:8px 12px;'
+            f'border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;" '
+            f'target="_blank" rel="noopener noreferrer">查看工单</a>'
+        )
+
+    @staticmethod
+    def _ensure_ticket_link_href(content: str, ticket_url: str) -> str:
+        def replace_missing_href(match: re.Match) -> str:
+            link = match.group(0)
+            return link if re.search(r"\bhref\s*=", link, re.IGNORECASE) else MailController._ticket_link(ticket_url)
+
+        return re.sub(r"<a\b[^>]*>\s*查看工单\s*</a>", replace_missing_href, content, flags=re.IGNORECASE)
 
     @staticmethod
     def _register_type_label(register_type: str) -> str:
@@ -274,6 +290,7 @@ class MailController:
         )
         subject = self._render_template(subject_template, {"ticket_no": ticket.ticket_no})
         ticket_url = self._ticket_url(ticket, setting)
+        ticket_link = self._ticket_link(ticket_url)
         content = self._render_template(
             content_template,
             {
@@ -283,15 +300,18 @@ class MailController:
                 "status": status_label,
                 "operator": operator_name or "-",
                 "ticket_url": ticket_url,
+                "ticket_link": ticket_link,
             },
         )
         is_html = bool(setting.get("ticket_notify_is_html", True))
-        if "{ticket_url}" not in content_template:
+        if "{ticket_url}" not in content_template and "{ticket_link}" not in content_template:
             content += (
-                f'<p style="margin:10px 0 0;"><a href="{ticket_url}" style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;color:#fff;text-decoration:none;">查看工单</a></p>'
+                f'<p style="margin:10px 0 0;">{ticket_link}</p>'
                 if is_html
                 else f"\n查看链接：{ticket_url}"
             )
+        if is_html:
+            content = self._ensure_ticket_link_href(content, ticket_url)
         self._schedule(
             self._send_email(
                 to_email=to_user.email,

@@ -66,7 +66,8 @@ export const basicRoutes = [
   },
   {
     name: 'IssueDetail',
-    path: '/issue/detail',
+    path: '/issue/detail/issue_id/:issue_id?',
+    alias: '/issue/detail',
     component: () => import('@/views/issue/detail/index.vue'),
     isHidden: true,
     meta: {

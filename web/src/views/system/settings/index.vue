@@ -144,7 +144,7 @@ const previewParams = ref({
   minutes: 10,
   username: 'zhangsan',
   password: 'Tmp#8291',
-  ticket_url: 'http://localhost:3100/issue/detail?issue_id=1001',
+  ticket_url: 'http://localhost:3100/issue/detail/issue_id/1001',
 })
 
 const presetTemplates = {

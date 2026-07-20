@@ -137,6 +137,7 @@ ISSUE_SORT_FIELDS = {
     "due_date",
     "done_ratio",
 }
+ISSUE_OPEN_STATUS_FILTER = "__open__"
 
 
 def _as_datetime(value: Any) -> datetime | None:
@@ -758,9 +759,17 @@ async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
 
     status_name = str(filters.get("issue_status_name") or "").strip()
     if status_name:
-        status_ids = await _ids_by_contains(IssueStatus, status_name, ("name",))
+        if status_name == ISSUE_OPEN_STATUS_FILTER:
+            status_ids = [
+                int(row["id"])
+                for row in await IssueStatus.filter(active=True, is_closed=False).values("id")
+            ]
+        else:
+            status_ids = await _ids_by_contains(IssueStatus, status_name, ("name",))
         if status_ids:
             q &= Q(issue_status_id__in=status_ids)
+        else:
+            q &= Q(id=0)
 
     assignee_name = str(filters.get("assigned_to_name") or "").strip()
     if assignee_name:
@@ -770,7 +779,7 @@ async def _issue_name_filter_q(filters: dict[str, Any]) -> Q:
 
     submitter_name = str(filters.get("submitter_name") or "").strip()
     if submitter_name:
-        user_ids = await _ids_by_contains(User, submitter_name, ("alias", "username", "email"))
+        user_ids = await _ids_by_contains(User, submitter_name, ("alias",))
         q &= Q(submitter_id__in=user_ids) if user_ids else Q(id=0)
     return q
 

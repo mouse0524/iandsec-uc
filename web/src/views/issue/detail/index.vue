@@ -69,7 +69,7 @@ const form = ref({
   notes: '',
 })
 
-const issueId = computed(() => Number(props.issueId || route.query.issue_id || 0))
+const issueId = computed(() => Number(props.issueId || route.params.issue_id || route.query.issue_id || 0))
 const isEmbedded = computed(() => props.embedded)
 const pageShell = computed(() => (props.embedded ? 'div' : CommonPage))
 const pageShellProps = computed(() => (props.embedded ? {} : { showHeader: false }))

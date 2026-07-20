@@ -26,6 +26,7 @@ tests/*
 !tests/test_company_name_validation.py
 !tests/test_issue_core.py
 !tests/test_issue_api.py
+!tests/test_ticket_notify_rules.py
 docs/
 node_modules/
 db.sqlite3

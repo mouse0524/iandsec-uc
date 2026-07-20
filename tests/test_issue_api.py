@@ -325,7 +325,10 @@ def _q_filters(q):
 async def test_issue_name_filter_q_maps_names_to_search_conditions(monkeypatch):
     from app.api.v1.issues import issues as issue_api
 
+    calls = []
+
     async def fake_ids(model, text, fields):
+        calls.append((model, text, fields))
         if model is issue_api.Project:
             return [11]
         if model is issue_api.IssueStatus:
@@ -351,6 +354,7 @@ async def test_issue_name_filter_q_maps_names_to_search_conditions(monkeypatch):
     assert {"issue_status_id__in": [22]} in filters
     assert {"assigned_to_id__in": [33]} in filters
     assert {"submitter_id__in": [33]} in filters
+    assert (issue_api.User, "管理员", ("alias",)) in calls
 
 
 @pytest.mark.anyio
@@ -364,12 +368,26 @@ async def test_issue_name_filter_q_ignores_empty_name_matches(monkeypatch):
 
     q = await issue_api._issue_name_filter_q(
         {
-            "issue_status_name": "不存在",
             "assigned_to_name": "不存在",
         }
     )
 
     assert {"id": 0} not in _q_filters(q)
+
+
+@pytest.mark.anyio
+async def test_issue_open_status_filter_maps_to_not_closed_statuses(monkeypatch):
+    from app.api.v1.issues import issues as issue_api
+
+    class StatusQuery:
+        async def values(self, *fields):
+            return [{"id": 1}, {"id": 3}]
+
+    monkeypatch.setattr(issue_api.IssueStatus, "filter", lambda **kwargs: StatusQuery())
+
+    q = await issue_api._issue_name_filter_q({"issue_status_name": issue_api.ISSUE_OPEN_STATUS_FILTER})
+
+    assert {"issue_status_id__in": [1, 3]} in _q_filters(q)
 
 
 @pytest.mark.anyio
