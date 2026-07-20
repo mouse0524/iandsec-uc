@@ -291,6 +291,11 @@ class MailController:
         )
         subject = self._render_template(subject_template, {"ticket_no": ticket.ticket_no})
         ticket_url = self._ticket_url(ticket, setting)
+        logger.info(
+            "[mail.ticket_notify] ticket_id={} ticket_url={}",
+            getattr(ticket, "id", None),
+            ticket_url,
+        )
         ticket_link = self._ticket_link(ticket_url)
         content = self._render_template(
             content_template,
