@@ -56,11 +56,12 @@ class MailController:
 
     @staticmethod
     def _ensure_ticket_link_href(content: str, ticket_url: str) -> str:
-        def replace_missing_href(match: re.Match) -> str:
-            link = match.group(0)
-            return link if re.search(r"\bhref\s*=", link, re.IGNORECASE) else MailController._ticket_link(ticket_url)
-
-        return re.sub(r"<a\b[^>]*>\s*查看工单\s*</a>", replace_missing_href, content, flags=re.IGNORECASE)
+        return re.sub(
+            r"<a\b[^>]*>\s*查看工单\s*</a>",
+            MailController._ticket_link(ticket_url),
+            content,
+            flags=re.IGNORECASE,
+        )
 
     @staticmethod
     def _register_type_label(register_type: str) -> str:

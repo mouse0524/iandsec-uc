@@ -240,6 +240,53 @@ async def test_ticket_notice_repairs_view_ticket_link_without_href(monkeypatch):
     assert "查看工单" in sent[0]["content"]
 
 
+@pytest.mark.anyio
+async def test_ticket_notice_template_replaces_ticket_url_in_href(monkeypatch):
+    sent = []
+    scheduled = []
+
+    async def fake_setting():
+        return {
+            "site_base_url": "http://example.test",
+            "ticket_notify_subject": "工单状态提醒：{ticket_no}",
+            "ticket_notify_template": (
+                '<div style="font-family:Arial,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;'
+                'color:#1f2937;line-height:1.7;background:#f8fbff;border:1px solid #dbeafe;'
+                'border-radius:12px;padding:16px 18px;"><h2 style="margin:0 0 12px;'
+                'font-size:18px;color:#1d4ed8;">工单状态提醒</h2><p style="margin:0 0 8px;">'
+                '您好，<b>{name}</b>：</p><p style="margin:0 0 6px;">工单编号：<b>{ticket_no}</b></p>'
+                '<p style="margin:0 0 6px;">工单标题：{title}</p><p style="margin:0 0 6px;">'
+                '当前状态：<b style="color:#1d4ed8;">{status}</b></p><p style="margin:0 0 6px;">'
+                '操作人：{operator}</p><p style="margin:10px 0 0;"><a href="{ticket_url}" '
+                'style="display:inline-block;padding:8px 12px;border-radius:6px;background:#2563eb;'
+                'color:#fff;text-decoration:none;">查看工单</a></p><p style="margin:8px 0 0;'
+                'color:#6b7280;">请及时登录系统处理。</p></div>'
+            ),
+            "ticket_notify_is_html": True,
+        }
+
+    async def fake_send_email(**kwargs):
+        sent.append(kwargs)
+
+    def fake_schedule(coro, *, tag):
+        scheduled.append(coro)
+
+    monkeypatch.setattr(mail_module.system_setting_controller, "get_full_dict", fake_setting)
+    monkeypatch.setattr(mail_controller, "_send_email", fake_send_email)
+    monkeypatch.setattr(mail_controller, "_schedule", fake_schedule)
+
+    await mail_controller.send_ticket_status_notice(
+        ticket=Obj(id=98, ticket_no="T-98", title="链接测试"),
+        to_user=Obj(id=7, username="user7", alias="用户7", email="user7@example.com"),
+        status=TicketStatus.TEST_FILTERING,
+        operator_name="op",
+    )
+    await scheduled[0]
+
+    assert 'href="http://example.test/issue/detail/issue_id/98"' in sent[0]["content"]
+    assert "{ticket_url}" not in sent[0]["content"]
+
+
 def test_system_setting_sections_have_defaults():
     from app.controllers.system_setting import system_setting_controller
 
