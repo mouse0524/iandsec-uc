@@ -343,7 +343,8 @@ function openDetail(row) {
 
 function openDetailPage(row) {
   if (!row?.id) return
-  router.push(`/issue/detail/issue_id/${row.id}`)
+  const route = router.resolve(`/issue/detail/issue_id/${row.id}`)
+  window.open(route.href, '_blank', 'noopener,noreferrer')
 }
 
 function openCreateModal() {
