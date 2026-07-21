@@ -359,8 +359,8 @@ const validateAddUser = {
     {
       trigger: ['blur'],
       validator: (rule, value, callback) => {
-        const re = /^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$/
-        if (!re.test(modalForm.value.email)) {
+        const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!re.test(String(value || '').trim())) {
           callback('邮箱格式错误')
           return
         }

@@ -653,6 +653,13 @@ async def init_menus():
             "icon": "material-symbols:fact-check-outline-rounded",
             "component": "/issue/config",
         },
+        {
+            "name": "使用教程",
+            "path": "guide",
+            "order": 4,
+            "icon": "material-symbols:menu-book-outline-rounded",
+            "component": "/issue/guide",
+        },
     ]
     for child in ticket_children:
         menu = await Menu.filter(parent_id=ticket_parent.id, path=child["path"]).first()
@@ -1517,13 +1524,13 @@ async def init_roles():
                         *_issue_create_api_paths(),
                         *_issue_update_api_paths(),
                     ],
-                    component_paths=["/ticket", "/issue/dashboard", "/issue/list"],
+                    component_paths=["/ticket", "/issue/dashboard", "/issue/list", "/issue/guide"],
                 )
             for role_name in ["用户", "渠道商", "客服", "技术"]:
                 await _backfill_existing_role_permissions(
                     role_name=role_name,
                     api_paths=[*_issue_read_api_paths(), *_issue_create_api_paths()],
-                    component_paths=["/ticket", "/issue/dashboard", "/issue/list"],
+                    component_paths=["/ticket", "/issue/dashboard", "/issue/list", "/issue/guide"],
                 )
             for role_name in ["用户", "渠道商"]:
                 await _backfill_existing_role_permissions(
@@ -1626,7 +1633,7 @@ async def init_roles():
     )
     basic_apis = await Api.filter(_default_basic_api_filter())
 
-    issue_menus = await Menu.filter(Q(path="/ticket") | Q(component__in=["/issue/dashboard", "/issue/list"]))
+    issue_menus = await Menu.filter(Q(path="/ticket") | Q(component__in=["/issue/dashboard", "/issue/list", "/issue/guide"]))
     issue_config_menus = await Menu.filter(Q(component="/issue/config"))
     partner_review_menus = await Menu.filter(Q(path="/partner") | Q(component="/partner/review"))
     settings_menus = await Menu.filter(Q(component="/system/settings"))

@@ -10,6 +10,7 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
+  NModal,
   NPopconfirm,
   NSelect,
   NSpace,
@@ -29,6 +30,7 @@ import { formatDateTime, isImageName } from '@/utils'
 defineOptions({ name: '工单列表' })
 
 const OPEN_STATUS_FILTER = '__open__'
+const CREATE_GUIDE_DISMISSED_KEY = 'issue:create-guide-dismissed'
 
 const $table = ref(null)
 const formRef = ref(null)
@@ -40,11 +42,13 @@ const metadata = ref({ trackers: [], statuses: [], priorities: [], custom_fields
 const queries = ref([])
 const selectedQueryId = ref(null)
 const showCreateModal = ref(false)
+const showCreateGuide = ref(false)
 const showQueryModal = ref(false)
 const creating = ref(false)
 const savingQuery = ref(false)
 const queryName = ref('')
 const queryEditId = ref(null)
+const guideDontShowAgain = ref(false)
 const createForm = ref(defaultCreateForm())
 const assigneeOptions = ref([])
 const uploadLoading = ref(false)
@@ -351,6 +355,23 @@ function openCreateModal() {
   resetCreateForm()
   fetchPrefill()
   showCreateModal.value = true
+  if (window.localStorage.getItem(CREATE_GUIDE_DISMISSED_KEY) !== '1') {
+    guideDontShowAgain.value = false
+    showCreateGuide.value = true
+  }
+}
+
+function closeCreateGuide() {
+  if (guideDontShowAgain.value) window.localStorage.setItem(CREATE_GUIDE_DISMISSED_KEY, '1')
+  showCreateGuide.value = false
+}
+
+function handleCreateGuideShow(value) {
+  if (value) {
+    showCreateGuide.value = true
+    return
+  }
+  closeCreateGuide()
 }
 
 function resetCreateForm() {
@@ -1144,6 +1165,48 @@ const columns = computed(() => [
         </NDrawerContent>
       </NDrawer>
 
+      <NModal
+        :show="showCreateGuide"
+        preset="card"
+        class="create-guide-modal"
+        style="width: min(420px, calc(100vw - 32px))"
+        closable
+        @update:show="handleCreateGuideShow"
+      >
+        <div class="create-guide-card">
+          <div class="create-guide-head">
+            <TheIcon icon="mdi-book-open-page-variant-outline" :size="28" />
+            <div>
+              <h3>新建工单前请先确认</h3>
+              <p>按顺序填写内容，提交后再进入后续审核和处理流程。</p>
+            </div>
+          </div>
+          <div class="create-guide-steps">
+            <div>
+              <strong>1. 填写基础内容</strong>
+              <span>项目名称、标题、描述、附件。</span>
+            </div>
+            <div class="create-guide-important">
+              <strong>2. 重点规则</strong>
+              <span>默认为新建状态，提交后将状态转为商务审核才会进入下一步。</span>
+            </div>
+            <div>
+              <strong>3. 等待流转</strong>
+              <span>后续由当前指派人继续处理，邮件只通知被指派的人。</span>
+            </div>
+          </div>
+          <div class="create-guide-actions">
+            <NCheckbox v-model:checked="guideDontShowAgain">下一次不弹出</NCheckbox>
+            <NButton type="primary" @click="closeCreateGuide">
+              <template #icon>
+                <TheIcon icon="mdi-check-circle-outline" :size="17" />
+              </template>
+              开始填写
+            </NButton>
+          </div>
+        </div>
+      </NModal>
+
       <NDrawer
         v-model:show="detailVisible"
         placement="right"
@@ -1482,6 +1545,76 @@ const columns = computed(() => [
   justify-content: flex-end;
 }
 
+:deep(.create-guide-modal) {
+  border-radius: 8px;
+}
+
+.create-guide-card {
+  display: grid;
+  gap: 14px;
+}
+
+.create-guide-head {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1f3b57 0%, #0f766e 100%);
+  color: #fff;
+}
+
+.create-guide-head h3 {
+  margin: 0 0 5px;
+  font-size: 18px;
+}
+
+.create-guide-head p {
+  margin: 0;
+  color: #dbeafe;
+  line-height: 1.6;
+}
+
+.create-guide-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.create-guide-steps > div {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #d8e0ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.create-guide-steps strong {
+  color: #172033;
+}
+
+.create-guide-steps span {
+  color: #55657a;
+  line-height: 1.6;
+}
+
+.create-guide-steps .create-guide-important {
+  border-color: #f6c453;
+  border-left: 4px solid #d97706;
+  background: #fff7da;
+}
+
+.create-guide-important span {
+  color: #7a3b00;
+  font-weight: 700;
+}
+
+.create-guide-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 @media (max-width: 720px) {
   .issue-toolbar,
   .query-tools {
@@ -1498,6 +1631,11 @@ const columns = computed(() => [
   }
 
   .create-section-head {
+    flex-direction: column;
+  }
+
+  .create-guide-actions {
+    align-items: stretch;
     flex-direction: column;
   }
 }
