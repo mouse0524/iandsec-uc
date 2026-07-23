@@ -11,6 +11,7 @@ const loading = ref(false)
 const dashboard = ref({
   total: 0,
   status_counts: [],
+  role_counts: [],
   top_projects: [],
   created_trend: { daily: [], weekly: [] },
   closed_trend: { daily: [], weekly: [] },
@@ -27,6 +28,9 @@ const maxStatusCount = computed(() =>
 )
 const maxProjectCount = computed(() =>
   Math.max(1, ...(dashboard.value.top_projects || []).map((item) => Number(item.count || 0))),
+)
+const maxRoleCount = computed(() =>
+  Math.max(1, ...(dashboard.value.role_counts || []).map((item) => Number(item.count || 0))),
 )
 const maxDailyCreated = computed(() => maxTrendCount(dailyCreated.value))
 const maxWeeklyCreated = computed(() => maxTrendCount(weeklyCreated.value))
@@ -125,6 +129,21 @@ onMounted(loadDashboard)
               </div>
             </div>
             <div v-else class="dashboard-empty">暂无项目数据</div>
+          </div>
+          <div class="dashboard-panel">
+            <div class="panel-title">打开问题按角色</div>
+            <div v-if="dashboard.role_counts?.length" class="metric-list">
+              <div v-for="item in dashboard.role_counts" :key="item.role_name" class="metric-row">
+                <div class="metric-line">
+                  <span>{{ item.role_name }}</span>
+                  <strong>{{ item.count }}</strong>
+                </div>
+                <div class="metric-bar role">
+                  <i :style="{ width: `${(Number(item.count || 0) / maxRoleCount) * 100}%` }" />
+                </div>
+              </div>
+            </div>
+            <div v-else class="dashboard-empty">暂无打开问题角色数据</div>
           </div>
           <div class="dashboard-panel">
             <div class="panel-title">新增趋势</div>
@@ -338,6 +357,10 @@ onMounted(loadDashboard)
 
 .metric-bar.project i {
   background: #2563eb;
+}
+
+.metric-bar.role i {
+  background: #d97706;
 }
 
 .dashboard-panel.wide {

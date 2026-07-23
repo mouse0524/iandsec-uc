@@ -778,7 +778,6 @@ onBeforeUnmount(() => {
                   <NSelect
                     v-model:value="form.assigned_to_id"
                     :options="assigneeOptions"
-                    clearable
                     filterable
                     placeholder="请选择当前指派人"
                     style="width: 100%"

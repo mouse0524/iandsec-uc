@@ -29,14 +29,19 @@ class ChinaWorkdayCalendar:
 
 
 class TicketDailyReminderService:
-    REMINDER_STATUSES = [TicketStatus.FIELD_VERIFICATION, TicketStatus.PENDING_CLOSE]
+    REMINDER_STATUS = TicketStatus.FIELD_VERIFICATION
+    REMINDER_AFTER_DAYS = 10
 
     def __init__(self, *, ticket_model: Any | None = None, user_model: Any | None = None) -> None:
         self.ticket_model = ticket_model or Ticket
         self.user_model = user_model or User
 
     async def send_daily_reminders(self) -> dict[str, int]:
-        tickets = await self.ticket_model.filter(status__in=self.REMINDER_STATUSES).order_by("status", "id")
+        stale_before = datetime.now().astimezone() - timedelta(days=self.REMINDER_AFTER_DAYS)
+        tickets = await self.ticket_model.filter(
+            status=self.REMINDER_STATUS,
+            updated_at__lte=stale_before,
+        ).order_by("id")
         users = await self.user_model.filter(is_active=True).prefetch_related("roles")
         users_by_id = await self._eligible_users_by_id(users)
 
@@ -82,10 +87,8 @@ class TicketDailyReminderService:
         return result
 
     def _recipient_for_ticket(self, ticket: Any, users_by_id: dict[int, Any]) -> Any | None:
-        if ticket.status in self.REMINDER_STATUSES:
-            submitter_id = getattr(ticket, "submitter_id", None)
-            return users_by_id.get(int(submitter_id)) if submitter_id else None
-        return None
+        assigned_to_id = getattr(ticket, "assigned_to_id", None)
+        return users_by_id.get(int(assigned_to_id)) if assigned_to_id else None
 
 
 class TicketDailyReminderScheduler:

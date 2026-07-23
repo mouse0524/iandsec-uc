@@ -1019,7 +1019,6 @@ const columns = computed(() => [
                   <NSelect
                     v-model:value="createForm.assigned_to_id"
                     :options="assigneeOptions"
-                    clearable
                     filterable
                     placeholder="默认当前提交人"
                   />

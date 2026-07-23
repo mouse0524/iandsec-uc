@@ -432,6 +432,8 @@ class IssueUpdateService:
         for field, new_value in changes.items():
             if field not in ISSUE_UPDATE_FIELDS or not hasattr(issue, field):
                 raise HTTPException(status_code=400, detail=f"不支持更新字段: {field}")
+            if field == "assigned_to_id" and not _int_value(new_value):
+                raise HTTPException(status_code=400, detail="当前指派人不能为空")
             self._validate_field(field, new_value)
 
         old_status_id = _int_value(getattr(issue, "issue_status_id", None))

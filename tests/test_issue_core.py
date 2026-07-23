@@ -489,6 +489,26 @@ async def test_update_issue_requires_assignee_when_workflow_requires_it():
 
 
 @pytest.mark.anyio
+async def test_update_issue_rejects_empty_assignee():
+    from app.controllers.issue import IssueUpdateService
+
+    issue = FakeIssue()
+    issue.assigned_to_id = 4
+    service = IssueUpdateService(issue_getter=lambda issue_id: issue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.update_issue(
+            issue_id=7,
+            user_id=3,
+            role_ids=[1],
+            changes={"assigned_to_id": None},
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "指派人不能为空" in exc_info.value.detail
+
+
+@pytest.mark.anyio
 async def test_update_issue_respects_workflow_without_assignee_requirement():
     from app.controllers.issue import IssueUpdateService
 

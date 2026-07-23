@@ -183,7 +183,7 @@ def _weekly_trend(rows: list[dict], field: str, today: date) -> list[dict[str, A
     ]
 
 
-def _issue_dashboard_data(rows: list[dict], statuses: list[dict]) -> dict[str, Any]:
+def _issue_dashboard_data(rows: list[dict], statuses: list[dict], role_counts: list[dict] | None = None) -> dict[str, Any]:
     today = datetime.now().date()
     stale_before = datetime.now() - timedelta(days=7)
     status_map = {int(row["id"]): row for row in statuses if row.get("id") is not None}
@@ -210,6 +210,7 @@ def _issue_dashboard_data(rows: list[dict], statuses: list[dict]) -> dict[str, A
         "top_projects": [
             {"project_name": name, "count": count} for name, count in project_counts.most_common(10)
         ],
+        "role_counts": role_counts or [],
         "created_trend": {
             "daily": _daily_trend(rows, "created_at", today),
             "weekly": _weekly_trend(rows, "created_at", today),
@@ -972,6 +973,8 @@ async def list_issues(
         "assigned_to_name": assigned_to_name if assigned_to_name is not None else saved_filters.get("assigned_to_name"),
         "submitter_name": submitter_name if submitter_name is not None else saved_submitter_name,
     }
+
+
     issue_filters["assigned_to_id"] = _allowed_assignee_filter(user, role_names, issue_filters.get("assigned_to_id"))
     filtered_q = _apply_query_filters(Q(), {key: issue_filters[key] for key in ISSUE_QUERY_FILTER_FIELDS})
     filtered_q &= await _issue_name_filter_q(issue_filters)
@@ -1022,6 +1025,37 @@ async def list_issues(
     )
 
 
+async def _open_issue_role_counts(rows: list[dict], statuses: list[dict]) -> list[dict]:
+    status_map = {int(row["id"]): row for row in statuses if row.get("id") is not None}
+    assignee_ids = {
+        int(row["assigned_to_id"])
+        for row in rows
+        if row.get("assigned_to_id")
+        and not status_map.get(_coerce_int(row.get("issue_status_id")) or 0, {}).get("is_closed")
+    }
+    counts = Counter()
+    if assignee_ids:
+        users = await User.filter(id__in=assignee_ids).prefetch_related("roles")
+        role_names_by_user = {
+            int(user.id): [role.name for role in getattr(user, "roles", [])] or ["未配置角色"]
+            for user in users
+        }
+        for row in rows:
+            if status_map.get(_coerce_int(row.get("issue_status_id")) or 0, {}).get("is_closed"):
+                continue
+            for role_name in role_names_by_user.get(int(row.get("assigned_to_id") or 0), ["未指派"]):
+                counts[role_name] += 1
+    unassigned_count = sum(
+        1
+        for row in rows
+        if not row.get("assigned_to_id")
+        and not status_map.get(_coerce_int(row.get("issue_status_id")) or 0, {}).get("is_closed")
+    )
+    if unassigned_count:
+        counts["未指派"] += unassigned_count
+    return [{"role_name": name, "count": count} for name, count in counts.most_common()]
+
+
 @router.get("/dashboard", summary="Issue数据展板", dependencies=[DependAuth])
 async def issue_dashboard():
     user = await _get_current_user()
@@ -1031,13 +1065,16 @@ async def issue_dashboard():
         "id",
         "title",
         "issue_status_id",
+        "assigned_to_id",
         "company_name",
         "created_at",
         "updated_at",
         "closed_at",
     )
     statuses = await IssueStatus.all().values("id", "name", "is_closed")
-    return Success(data=_issue_dashboard_data([_json_row(row) for row in rows], [_json_row(row) for row in statuses]))
+    json_rows = [_json_row(row) for row in rows]
+    json_statuses = [_json_row(row) for row in statuses]
+    return Success(data=_issue_dashboard_data(json_rows, json_statuses, await _open_issue_role_counts(json_rows, json_statuses)))
 
 
 @router.get("/metadata", summary="Issue元数据", dependencies=[DependAuth])
